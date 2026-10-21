@@ -1,0 +1,78 @@
+MIZANI: WHAT TO INSTALL
+=======================
+Kept up to date with every change to the project. If something here is
+missing or wrong, the project is broken. Please tell us.
+
+Versions marked (pin) get exact numbers once the code lands.
+
+
+1. JUST RUNNING IT (reviewers, judges)
+--------------------------------------
+You need two things:
+
+  Git             any recent version     https://git-scm.com/downloads
+  Docker Desktop  4.x, with Compose v2   https://www.docker.com/products/docker-desktop/
+
+Then:
+  git clone <repo-url>
+  cd Mizani
+  docker compose up
+
+Machine: 16 GB RAM recommended (8 GB minimum), about 15 GB free disk.
+The first run downloads the model and container images, so it takes a while.
+
+
+2. DEVELOPING IT (the team)
+---------------------------
+Everything in section 1, plus:
+
+  Python   3.12.x                runtime for the backend and MCP server
+  uv       (pin)                 installs the Python dependencies from uv.lock
+  Node.js  22 LTS                frontend build (React + Vite)
+  Ollama   (pin)                 runs the open-weights model on your own machine
+  gh       optional              GitHub CLI
+
+You never install Python or Node packages by hand:
+  uv sync            backend dependencies (from pyproject.toml / uv.lock)
+  npm ci             frontend dependencies (from package-lock.json), run inside web/
+
+Model (pulled once):
+  ollama pull qwen3:4b      laptops with 4 GB GPU memory or less   (exact tag: pin)
+  ollama pull qwen3:8b      Apple Silicon with 16 GB or more        (exact tag: pin)
+
+
+3. INSTALL COMMANDS
+-------------------
+Windows 10/11 (PowerShell). WSL 2 must be on, which Docker needs:
+  winget install Git.Git
+  winget install Python.Python.3.12
+  winget install astral-sh.uv
+  winget install OpenJS.NodeJS.LTS
+  winget install Ollama.Ollama
+  winget install Docker.DockerDesktop
+  winget install GitHub.cli
+
+macOS (Apple Silicon), with Homebrew:
+  brew install git python@3.12 uv node@22 gh
+  Docker Desktop:  https://www.docker.com/products/docker-desktop/
+  Ollama:          https://ollama.com/download
+
+
+4. LOW DISK SPACE ON C:? (Windows)
+---------------------------------
+Keep the big stuff on another drive (E: in our case):
+  - Docker Desktop > Settings > Resources > Advanced > Disk image location -> E:\Docker
+  - Ollama models: set a user environment variable, then restart Ollama
+        setx OLLAMA_MODELS "E:\Ollama\models"
+  - Keep the project folder itself on E: as well.
+
+
+5. CHECK YOUR SETUP
+-------------------
+  git --version
+  docker compose version
+  python --version          (3.12.x)
+  uv --version
+  node --version            (v22.x)
+  ollama --version
+  ollama list               (should show the qwen3 model)

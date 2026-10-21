@@ -1,0 +1,35 @@
+# Private team setup (Claude config, skills, internal notes), never pushed
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.gitnexus/
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Local data
+*.db
+*.sqlite
+*.sqlite3
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
