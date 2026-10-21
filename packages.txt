@@ -37,8 +37,8 @@ You never install Python or Node packages by hand:
   npm ci             frontend dependencies (from package-lock.json), run inside web/
 
 Model (pulled once):
-  ollama pull qwen3:4b      laptops with 4 GB GPU memory or less   (exact tag: pin)
-  ollama pull qwen3:8b      Apple Silicon with 16 GB or more        (exact tag: pin)
+  ollama pull qwen3.5:4b-q4_K_M   3.3 GB   default: laptops (4 GB GPU, or Apple Silicon 16 GB)
+  ollama pull qwen3.5:9b-q4_K_M   6.6 GB   optional: desktop GPU with 8 GB or more
 
 
 3. INSTALL COMMANDS

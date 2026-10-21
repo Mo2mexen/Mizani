@@ -10,12 +10,12 @@ Mizani is an offline triage co-pilot for the front desk of a busy public hospita
 
 In many public outpatient and emergency departments across Africa, one or two nurses sort every patient who walks in. They use a paper triage chart that turns vital signs and symptoms into a colour. When the queue is long, the chart is applied from memory and under pressure, and studies across the continent keep finding patients scored lower than their condition warrants. An urgent patient can end up waiting behind a routine follow-up, and the hospital keeps no record of why a patient was ranked where they were.
 
-The method itself works. Applying it by hand, at the busiest moments, is where it breaks. Sources for the figures behind this will be listed in `docs/RESEARCH.md`.
+The chart is sound. The errors come from applying it by hand when the desk is busiest. Sources for the figures behind this will be listed in `docs/RESEARCH.md`.
 
 ## What Mizani does at the desk
 
 1. The nurse enters vitals (respiratory rate, pulse, blood pressure, temperature, oxygen saturation, level of consciousness, mobility, trauma) and a free-text complaint.
-2. The agent extracts the facts, checks the vitals, and asks for a re-measurement when a value is missing or impossible instead of guessing.
+2. The agent extracts the facts, checks the vitals, and asks the nurse to re-measure any value that is missing or impossible.
 3. A rules engine computes the Triage Early Warning Score (TEWS) and matches the complaint against the SATS discriminator list. The suggested colour is the higher of the two, and every point carries a citation.
 4. The nurse confirms or overrides the suggestion with a reason. The MCP server refuses to save a triage without an approval from a named person.
 5. The confirmed triage goes to the queue, the audit log and a local FHIR record.
@@ -38,7 +38,7 @@ In shadow mode the nurse records their own colour before seeing Mizani's, and an
 Nurse UI (React): intake · queue board · approval dialog · agent trace · audit log
         │
 FastAPI + LangGraph agent (pauses for the nurse, resumes after approval)
-  ├─ Model: any OpenAI-compatible endpoint → Ollama + Qwen3 locally
+  ├─ Model: any OpenAI-compatible endpoint → Ollama + Qwen3.5 locally
   ├─ MCP ─► mizani-triage (our server): tools · resources · prompts
   └─ MCP ─► wso2 fhir-mcp-server ─► HAPI FHIR (local)
 Audit log (SQLite, hash-chained): every tool call with inputs, outputs, time, approver, model, tokens, latency, cost
@@ -61,15 +61,15 @@ Rule packs, target times, the live queue and each patient's timeline are exposed
 
 ### The borrowed MCP server
 
-[wso2/fhir-mcp-server](https://github.com/wso2/fhir-mcp-server) connects the agent to a local [HAPI FHIR](https://hapifhir.io/) server. FHIR is the format hospital record systems use to exchange data, and a maintained, tested FHIR MCP server gave us that interoperability without writing our own FHIR client.
+[wso2/fhir-mcp-server](https://github.com/wso2/fhir-mcp-server) connects the agent to a local [HAPI FHIR](https://hapifhir.io/) server. FHIR is the format hospital record systems use to exchange data, and using a maintained, tested FHIR MCP server saved us from writing our own FHIR client.
 
 ### Models
 
-Scoring is done by deterministic rules, so the language model only reads free text, plans tool calls and writes explanations. That keeps a small open-weights model practical: Qwen3 4B runs on a laptop with a 4 GB GPU, and Qwen3 8B on a 16 GB Apple Silicon machine. A larger model can be used by changing `LLM_BASE_URL` and `LLM_MODEL`; the safety checks do not depend on which model runs.
+Scoring is done by deterministic rules, so the language model only reads free text, plans tool calls and writes explanations. That keeps a small open-weights model practical. The default is Qwen3.5 4B, which runs on a laptop with a 4 GB GPU or on a 16 GB Apple Silicon laptop. We also test Qwen3.5 9B on a desktop GPU. The same family goes up to 397B parameters, so a machine with more memory can run a larger model by changing `LLM_BASE_URL` and `LLM_MODEL`. The safety checks do not depend on which model runs.
 
 ### Rule packs
 
-Triage scales are YAML files, and each rule records its source. Adding a scale (paediatric SATS, the WHO/ICRC/MSF Integrated Interagency Triage Tool, Manchester) means adding a file, not changing code.
+Triage scales are YAML files, and each rule records its source. To add a scale (paediatric SATS, the WHO/ICRC/MSF Integrated Interagency Triage Tool, Manchester), you add a YAML file. The engine code stays the same.
 
 ## Evaluation
 
@@ -105,7 +105,7 @@ Paediatric SATS and the WHO/ICRC/MSF triage tool as rule packs, voice input for 
 | FastAPI | MIT |
 | React, Vite | MIT |
 | Ollama | MIT |
-| Qwen3 open-weights models | Apache-2.0 |
+| Qwen3.5 open-weights models | Apache-2.0 |
 | wso2 fhir-mcp-server | Apache-2.0 |
 | HAPI FHIR | Apache-2.0 |
 | SQLite | Public domain |
