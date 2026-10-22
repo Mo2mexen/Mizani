@@ -11,7 +11,7 @@
 1. `ollama` starts the model server (image `ollama/ollama:0.40.8`, multi-arch). Its port is not published, so it never clashes with an Ollama already installed on the machine; other services reach it as `http://ollama:11434`.
 2. Once `ollama list` answers, `ollama-pull` downloads `LLM_MODEL` into the `ollama-models` volume and exits. The first run downloads 3.3 GB for the default model; later runs reuse the volume.
 3. `mizani-mcp` (our MCP server, built from this repo) listens at `http://mizani-mcp:8000/mcp`, and at `127.0.0.1:8000` from this machine.
-4. `app` (command `mizani-api`) starts after the model is pulled: the API and the agent at `http://127.0.0.1:8090/api` (api.md; 8090 because 8080 is often taken). It shares the `mizani-data` volume with `mizani-mcp` so it can read the audit log, and keeps agent checkpoints in `/data/checkpoints.db`.
+4. `app` (command `mizani-api`) starts after the model is pulled: the API and the agent at `http://127.0.0.1:8090/api` (api.md; 8090 because 8080 is often taken). It shares the `mizani-data` volume with `mizani-mcp` so it can read the audit log, and keeps agent checkpoints in `/data/checkpoints.db`. It also serves the nurse's web page at `http://127.0.0.1:8090`, built from `web/` in the image's first stage (web.md).
 5. `hapi-fhir` (HAPI FHIR v8.12.0-2, R4) is the local FHIR store, at `127.0.0.1:18080/fhir` from this machine (18080 because 8080 is often taken).
 6. `fhir-mcp` (wso2 fhir-mcp-server, built from the pinned 0.10.0 commit) is the borrowed MCP server in front of HAPI, at `http://fhir-mcp:8000/mcp/` and `127.0.0.1:8001`. Auth is off because HAPI is local only.
 

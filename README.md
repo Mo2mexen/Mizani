@@ -4,7 +4,7 @@ Mizani is an offline triage co-pilot for the front desk of a busy public hospita
 
 *Mizani* means "scale" or "balance" in Swahili (*mizani*) and Arabic (*mīzān*).
 
-> Status: in development for the [African Agentic AI Design Challenge](https://agentic-africa-challenge.lovable.app/), Healthcare track ("The Triage Desk"). The quickstart below arrives with the first working build. See [What works today](#what-works-today).
+> Status: in development for the [African Agentic AI Design Challenge](https://agentic-africa-challenge.lovable.app/), Healthcare track ("The Triage Desk"). **Quickstart:** `git clone https://github.com/Mo2mexen/Mizani.git`, `cd Mizani`, `docker compose up`, then open **http://127.0.0.1:8090**. See [What works today](#what-works-today).
 
 ## The problem
 
@@ -78,7 +78,7 @@ Triage scales are YAML files, and each rule records its source. To add a scale (
 
 ## Running it
 
-`git clone`, then `docker compose up`. This starts the model server (Ollama, pulling the model once), our MCP server at `http://127.0.0.1:8000/mcp` (try it by hand with `npx @modelcontextprotocol/inspector`), the API with the agent at `http://127.0.0.1:8090` (try it from `http://127.0.0.1:8090/docs`, or with curl as in [docs/systems/api.md](docs/systems/api.md)), wso2's FHIR MCP server at `http://127.0.0.1:8001/mcp/` and a local HAPI FHIR store at `http://127.0.0.1:18080/fhir`. The web UI joins the same command when it lands. On a Mac, Docker has no GPU access, so the model is faster in the Ollama app on the Mac itself: set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. Everything you need to install, for running and for development, is listed in [packages.txt](packages.txt). How the parts fit: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+`git clone`, then `docker compose up`. This starts the model server (Ollama, pulling the model once), our MCP server at `http://127.0.0.1:8000/mcp` (try it by hand with `npx @modelcontextprotocol/inspector`), the API with the agent at `http://127.0.0.1:8090` (try it from `http://127.0.0.1:8090/docs`, or with curl as in [docs/systems/api.md](docs/systems/api.md)), wso2's FHIR MCP server at `http://127.0.0.1:8001/mcp/` and a local HAPI FHIR store at `http://127.0.0.1:18080/fhir`. Then open **http://127.0.0.1:8090**: the nurse's page (intake, the agent's steps live, the proposal with the rule behind every number, approval, the waiting room and the audit log), served by the API ([docs/systems/web.md](docs/systems/web.md)). On a Mac, Docker has no GPU access, so the model is faster in the Ollama app on the Mac itself: set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. Everything you need to install, for running and for development, is listed in [packages.txt](packages.txt). How the parts fit: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Develop and test
 
@@ -94,6 +94,8 @@ docker compose up -d mizani-mcp fhir-mcp hapi-fhir
 MIZANI_E2E=1 uv run pytest tests/test_stack.py   # proposal -> approval -> commit -> FHIR, no model
 MIZANI_APPROVAL_SECRET=dev MIZANI_FHIR_MCP_URL=http://127.0.0.1:8001/mcp/ uv run mizani-api   # API + agent at http://127.0.0.1:8090
 uv run mizani-evals --help                      # the evaluation runner (EVALS.md)
+cd web && npm ci && npm run dev                  # the page at http://localhost:5173 against that API (Node 22)
+VITE_USE_MOCK=true npm run dev                   # the page on fake data, no backend
 ```
 
 On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` first. On a Mac, run Ollama natively rather than in Docker (Docker on macOS has no GPU, and the model runs 4 to 5 times slower there) and set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. How each part works is in [docs/systems/](docs/systems/).
@@ -107,7 +109,7 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 | MCP server `mizani-triage`: 9 tools, 5 resources, 2 prompts, approval gate, hash-chained audit | done, tested through an MCP client |
 | Agent (LangGraph): reads the entry, checks vitals, scores through the MCP tools, pauses for the nurse, commits with the nurse's token; retries and falls back when the model's tool calls are wrong; model, tokens and cost logged with every call | done, tested with a fake model and live with Qwen3.5 4B |
 | API (FastAPI): intake, live agent steps as server-sent events, nurse decision (approval token), re-measure, re-triage, handover draft and release, shadow-mode assessment and report, queue, colours, audit log with chain check | done, tested, run live |
-| Web UI | not started |
+| Web page (React + Vite): intake, the agent's steps live, the proposal with a source on every number, nurse decision with name, re-measure, shadow mode, waiting room with re-check and handover, audit log with the chain check | done; served by the API at http://127.0.0.1:8090 |
 | FHIR output: the agent's commit step writes Patient, Encounter and Observations through wso2 fhir-mcp-server to a local HAPI FHIR | done, verified end to end and in a live run |
 | Re-triage watch: target-time timers; the agent raises a re-check flag every 30 s for patients past their target time; re-triage with fresh vitals as a new pending proposal that replaces the old entry once a nurse commits it | done, tested, run live |
 | Handover (the model drafts three lines of findings, a named nurse releases that exact draft) and shadow mode (nurse's own colour, agreement report) | done, tested, run live |
