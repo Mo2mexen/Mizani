@@ -87,6 +87,8 @@ export type Decision = {
   action: "approve" | "override";
   colour?: string;
   reason?: string;
+  /** The proposal on screen; the API refuses the decision if the agent re-scored since. */
+  triage_id: string;
 };
 
 export type HandoverDraft = { triage_id: string; draft_id: number; status: string; text: string };

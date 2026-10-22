@@ -52,6 +52,13 @@ class Remeasure(Contract):
     vitals: Vitals
 
 
+class Decision(NurseDecision):
+    """The nurse's decision on the proposal she saw. `triage_id` is that proposal's id: if the
+    agent has re-scored since (re-measured vitals), the decision is refused, never moved over."""
+
+    triage_id: str = Field(min_length=1)
+
+
 class Release(Contract):
     nurse_name: str = Field(min_length=1)
 
@@ -89,9 +96,21 @@ async def _connect(server: Any) -> list:
     return []
 
 
+def _why(record: dict) -> str:
+    """Why the committed colour: Mizani's cited reason, or the nurse's override and her reason."""
+    decision, proposal = record["decision"], record["proposal"]
+    if decision["action"] == "override":
+        return (
+            f"Nurse override by {record['approver']}: {decision['reason']} (Mizani proposed "
+            f"{proposal['colour']}: {proposal['source']})"
+        )
+    return proposal["source"]
+
+
 def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
     """The API. Tests pass a fake model, the in-process MCP server and a memory checkpointer."""
     runs: dict[str, Run] = {}
+    retriage_runs: dict[str, str] = {}  # committed triage id -> its open re-triage run
     ctx: dict[str, Any] = {}
 
     @asynccontextmanager
@@ -105,6 +124,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             rules = await read_json("rules://sats/adult", mcp_server)
             ctx["colours"] = await read_json("rules://sats/targets", mcp_server)
             ctx["tools"] = {t.name: t for t in tools}
+            ctx["sign_ids"] = {d["name"]: d["id"] for d in rules["discriminators"]}
             ctx["llm"] = llm or chat_model()
             url = fhir_url()
             write_fhir = (lambda tid: write_committed(tid, url, mcp_server)) if url else None
@@ -150,6 +170,9 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             events.append(("proposal", state.interrupts[0].value))
         elif state.values.get("committed"):
             events.append(("committed", state.values["committed"]))
+        else:  # it stopped mid-way (API restart or an error): say so instead of waiting forever
+            message = "This run stopped before it reached the nurse. Start the intake again."
+            events.append(("error", {"message": message}))
         runs[run_id] = Run(events)
         return runs[run_id]
 
@@ -188,19 +211,19 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             raise HTTPException(
                 409, "only a committed patient still in the queue can be re-triaged"
             )
-        signs = next(  # the chart signs of the proposal that became this triage
-            (
-                r["inputs"]["discriminator_ids"]
-                for r in timeline["audit"]
-                if r["tool"] == "propose_priority"
-                and isinstance(r["outputs"], dict)
-                and r["outputs"].get("triage_id") == triage_id
-            ),
-            [],
-        )
+        open_run = retriage_runs.get(triage_id)
+        if open_run in runs and not {"committed", "error"} & {e for e, _ in runs[open_run].events}:
+            return {"triage_id": open_run}  # a second click returns the re-triage already running
+        # The chart signs the complaint gave this triage (the ones the vitals prove are re-proved
+        # from the fresh vitals, so a recovered patient loses them).
+        signs = [
+            ctx["sign_ids"][d["name"]]
+            for d in record["proposal"]["discriminators"]
+            if d["source"].endswith("matched from input: complaint")
+        ]
         fresh = body.vitals.model_dump(exclude_none=True)
         vitals = {**{k: v for k, v in record["vitals"].items() if v is not None}, **fresh}
-        return start_run(
+        started = start_run(
             {
                 "patient_label": record["patient_label"],
                 "complaint": record["complaint"],
@@ -210,6 +233,8 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
                 "retriage_of": triage_id,
             }
         )
+        retriage_runs[triage_id] = started["triage_id"]
+        return started
 
     @app.get("/api/triage/{run_id}/stream", response_class=EventSourceResponse)
     async def stream(
@@ -228,10 +253,14 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
                     return
 
     @app.post("/api/triage/{run_id}/decision")
-    async def decision(run_id: str, body: NurseDecision) -> dict:
+    async def decision(run_id: str, body: Decision) -> dict:
         run = await get_run(run_id)
         async with run.lock:
             proposal = await paused_proposal(run, run_id)
+            if body.triage_id != proposal["triage_id"]:
+                raise HTTPException(
+                    409, "the proposal changed (re-measured vitals); review the new one first"
+                )
             token = issue_approval(proposal["triage_id"], body)
             answer = {"action": body.action, "approval_token": token}
             await drive(run, Command(resume=answer), run_id)
@@ -282,7 +311,8 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             "complaint": record["complaint"],
             "vitals": record["vitals"],
             "colour": record["colour"],
-            "why_this_colour": record["proposal"]["source"],
+            "why_this_colour": _why(record),
+            "decided_by": record["approver"],
             "tews": record["proposal"]["tews"],
             "chart_signs": record["proposal"]["discriminators"],
             "arrived_at": record["arrived_at"],

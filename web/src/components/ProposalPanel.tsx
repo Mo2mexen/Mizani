@@ -10,18 +10,21 @@ type Props = {
   complaint: string | null;
   colours: Colour[];
   isShadow: boolean;
+  /** Shadow mode: the proposal (triage id) the nurse already gave her own colour for. */
+  assessedFor: string | null;
+  onAssessed: (triageId: string) => void;
   onCommitted: () => void;
 };
 
 /** The nurse's screen: the proposal with every source, then approve, override or re-measure. */
-export function ProposalPanel({ run, complaint, colours, isShadow, onCommitted }: Props) {
-  const [assessedRun, setAssessedRun] = useState<string | null>(null);
+export function ProposalPanel({ run, complaint, colours, isShadow, assessedFor, onAssessed, onCommitted }: Props) {
   const proposal = run.proposal;
 
   if (run.committed) return <CommittedView run={run} colours={colours} />;
   if (!proposal) return null;
-  if (isShadow && assessedRun !== run.runId) {
-    return <ShadowFirst runId={run.runId} colours={colours} onDone={() => setAssessedRun(run.runId)} />;
+  // One blind assessment per proposal: a re-measure makes a new proposal, so she is asked again.
+  if (isShadow && assessedFor !== proposal.triage_id) {
+    return <ShadowFirst runId={run.runId} colours={colours} onDone={() => onAssessed(proposal.triage_id)} />;
   }
   return (
     <section className="panel proposal" aria-labelledby="proposal-title">
@@ -139,12 +142,18 @@ function DecisionForm({ run, proposal, colours, onCommitted }: DecisionProps) {
 
   const approve = () =>
     act(async () => {
-      await api.decide(run.runId, { nurse_name: nurse.trim(), action: "approve" });
+      await api.decide(run.runId, { nurse_name: nurse.trim(), action: "approve", triage_id: proposal.triage_id });
       onCommitted();
     });
   const override = () =>
     act(async () => {
-      await api.decide(run.runId, { nurse_name: nurse.trim(), action: "override", colour: overrideColour, reason: reason.trim() });
+      await api.decide(run.runId, {
+        nurse_name: nurse.trim(),
+        action: "override",
+        colour: overrideColour,
+        reason: reason.trim(),
+        triage_id: proposal.triage_id,
+      });
       onCommitted();
     });
   const remeasure = () =>

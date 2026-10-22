@@ -31,9 +31,10 @@ export function colourLabel(colours: Colour[], colour: string): string {
 
 export function minutes(value: number): string {
   if (value < 1) return "<1 min";
-  if (value < 120) return `${Math.round(value)} min`;
-  const rest = Math.round(value % 60);
-  return rest ? `${Math.floor(value / 60)} h ${rest} min` : `${Math.floor(value / 60)} h`;
+  const total = Math.round(value); // round once, so 179.7 is "3 h", never "2 h 60 min"
+  if (total < 120) return `${total} min`;
+  const rest = total % 60;
+  return rest ? `${Math.floor(total / 60)} h ${rest} min` : `${total / 60} h`;
 }
 
 export function clock(iso: string): string {
