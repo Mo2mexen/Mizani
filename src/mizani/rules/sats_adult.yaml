@@ -1,0 +1,142 @@
+# SATS adult rule pack.
+# Encodes the South African Triage Scale adult chart as data. Every rule names its source;
+# the full references are under `sources`. This is an encoding of the published rules, not a
+# copy of the chart. Change a value only together with its source.
+
+id: sats_adult
+name: South African Triage Scale (SATS), adult
+applies_to: Patients older than 12 years or taller than 150 cm (manual p6)
+
+sources:
+  chart: >-
+    South African Triage Group. Adult SATS chart. Emergency Medicine Society of South Africa
+    (EMSSA); 2015. https://emssa.org.za/wp-content/uploads/2017/10/Adult-SATS-2015.pdf
+  manual: >-
+    South African Triage Group. SATS training manual. EMSSA; 2012.
+    https://emssa.org.za/wp-content/uploads/2017/10/SATS-Manual.pdf
+  validation: >-
+    Mould-Millman NK, Dixon JM, Burkholder T, et al. Validity and reliability of the South
+    African Triage Scale in prehospital providers. BMC Emerg Med. 2021;21:8.
+    doi:10.1186/s12873-021-00406-6
+
+# Most urgent first. Target time = time to be seen (manual p6, Table 3).
+colours:
+  - {colour: red, label: Emergency, target_minutes: 0, source: "manual p6 Table 3: red, immediate"}
+  - {colour: orange, label: Very urgent, target_minutes: 10, source: "manual p6 Table 3: orange, < 10 min"}
+  - {colour: yellow, label: Urgent, target_minutes: 60, source: "manual p6 Table 3: yellow, < 1 hour"}
+  - {colour: green, label: Routine, target_minutes: 240, source: "manual p6 Table 3: green, < 4 hours"}
+
+# TEWS total to colour, checked from the top.
+tews_colour:
+  - {min_total: 7, colour: red, source: "chart flowchart: Emergency, TEWS 7 or more"}
+  - {min_total: 5, colour: orange, source: "chart flowchart: Very urgent, TEWS 5 or 6"}
+  - {min_total: 3, colour: yellow, source: "chart flowchart: Urgent, TEWS 3 or 4"}
+  - {min_total: 0, colour: green, source: "chart flowchart: Routine, TEWS 0, 1 or 2"}
+
+# Adult TEWS. Numeric bands use lt / lte / gt / gte; every value falls in exactly one band.
+tews:
+  respiratory_rate:
+    source: "chart: Adult TEWS, RR row"
+    bands:
+      - {lt: 9, points: 2}
+      - {gte: 9, lte: 14, points: 0}
+      - {gte: 15, lte: 20, points: 1}
+      - {gte: 21, lte: 29, points: 2}
+      - {gt: 29, points: 3}
+  heart_rate:
+    source: "chart: Adult TEWS, HR row"
+    bands:
+      - {lt: 41, points: 2}
+      - {gte: 41, lte: 50, points: 1}
+      - {gte: 51, lte: 100, points: 0}
+      - {gte: 101, lte: 110, points: 1}
+      - {gte: 111, lte: 129, points: 2}
+      - {gt: 129, points: 3}
+  systolic_bp:
+    source: "chart: Adult TEWS, SBP row"
+    bands:
+      - {lt: 71, points: 3}
+      - {gte: 71, lte: 80, points: 2}
+      - {gte: 81, lte: 100, points: 1}
+      - {gte: 101, lte: 199, points: 0}
+      - {gt: 199, points: 2}
+  temperature:
+    source: "chart: Adult TEWS, Temp row (°C)"
+    bands:
+      - {lt: 35, points: 2}
+      - {gte: 35, lte: 38.4, points: 0}
+      - {gt: 38.4, points: 2}
+  avpu:
+    source: "chart: Adult TEWS, AVPU row"
+    values: {alert: 0, confused: 2, voice: 1, pain: 2, unresponsive: 3}
+  mobility:
+    source: "chart: Adult TEWS, Mobility row (manual p16: a wheelchair user with permanent paralysis counts as immobile)"
+    values: {walking: 0, with_help: 1, stretcher: 2}
+  trauma:
+    source: "chart: Adult TEWS, Trauma row (manual p16: any injury in the past 48 hours)"
+    values: {"false": 0, "true": 1}
+
+# Clinical discriminators from the adult chart. Only these may be matched.
+# glucose_below / glucose_above (mmol/L) let the engine match the diabetic signs from inputs.
+discriminators:
+  # Emergency (red)
+  - {id: not_breathing, name: Not breathing, colour: red, source: "chart: Emergency signs"}
+  - {id: obstructed_airway, name: Obstructed airway - not breathing, colour: red, source: "chart: Emergency signs"}
+  - {id: seizure_current, name: Seizure - current, colour: red, source: "chart: Emergency signs"}
+  - {id: burn_facial_inhalation, name: Burn - facial / inhalation, colour: red, source: "chart: Emergency signs; manual p9"}
+  - {id: hypoglycaemia, name: Hypoglycaemia - glucose less than 3, colour: red, glucose_below: 3, source: "chart: Emergency signs"}
+  - {id: cardiac_arrest, name: Cardiac arrest, colour: red, source: "chart: Emergency signs"}
+  # Very urgent (orange)
+  - {id: reduced_consciousness, name: Level of consciousness reduced / confused, colour: orange, source: "chart: Very urgent signs; manual p9: any patient not fully alert"}
+  - {id: high_energy_transfer, name: High energy transfer (severe mechanism of injury), colour: orange, source: "chart: Very urgent signs; manual p9: e.g. MVA 40 km/h or more"}
+  - {id: shortness_of_breath_acute, name: Shortness of breath - acute, colour: orange, source: "chart: Very urgent signs"}
+  - {id: coughing_blood, name: Coughing blood, colour: orange, source: "chart: Very urgent signs"}
+  - {id: chest_pain, name: Chest pain, colour: orange, source: "chart: Very urgent signs"}
+  - {id: stabbed_neck_or_chest, name: Stabbed neck or chest, colour: orange, source: "chart: Very urgent signs"}
+  - {id: haemorrhage_uncontrolled, name: Haemorrhage - uncontrolled (arterial bleed), colour: orange, source: "chart: Very urgent signs"}
+  - {id: seizure_post_ictal, name: Seizure - post ictal, colour: orange, source: "chart: Very urgent signs"}
+  - {id: focal_neurology_acute, name: Focal neurology - acute (stroke), colour: orange, source: "chart: Very urgent signs"}
+  - {id: aggression, name: Aggression, colour: orange, source: "chart: Very urgent signs"}
+  - {id: threatened_limb, name: Threatened limb, colour: orange, source: "chart: Very urgent signs; manual p9"}
+  - {id: dislocation_larger_joint, name: Dislocation of larger joint (not finger or toe), colour: orange, source: "chart: Very urgent signs"}
+  - {id: fracture_compound, name: Fracture - compound (with a break in skin), colour: orange, source: "chart: Very urgent signs"}
+  - {id: burn_over_20, name: Burn over 20%, colour: orange, source: "chart: Very urgent signs"}
+  - {id: burn_electrical, name: Burn - electrical, colour: orange, source: "chart: Very urgent signs"}
+  - {id: burn_circumferential, name: Burn - circumferential, colour: orange, source: "chart: Very urgent signs"}
+  - {id: burn_chemical, name: Burn - chemical, colour: orange, source: "chart: Very urgent signs"}
+  - {id: poisoning_overdose, name: Poisoning / overdose, colour: orange, source: "chart: Very urgent signs"}
+  - {id: diabetic_ketonuria, name: Diabetic - glucose over 11 and ketonuria, colour: orange, glucose_above: 11, source: "chart: Very urgent signs"}
+  - {id: vomiting_fresh_blood, name: Vomiting fresh blood, colour: orange, source: "chart: Very urgent signs"}
+  - {id: pregnancy_abdominal_trauma, name: Pregnancy and abdominal trauma, colour: orange, source: "chart: Very urgent signs"}
+  - {id: pregnancy_abdominal_pain, name: Pregnancy and abdominal pain, colour: orange, source: "chart: Very urgent signs"}
+  - {id: severe_pain, name: Severe pain, colour: orange, source: "chart: Very urgent signs; manual p3: unbearable, worst ever"}
+  # Urgent (yellow)
+  - {id: haemorrhage_controlled, name: Haemorrhage - controlled, colour: yellow, source: "chart: Urgent signs; manual p9"}
+  - {id: dislocation_finger_toe, name: Dislocation of finger or toe, colour: yellow, source: "chart: Urgent signs"}
+  - {id: fracture_closed, name: Fracture - closed (no break in skin), colour: yellow, source: "chart: Urgent signs"}
+  - {id: burn_other, name: Burn - other, colour: yellow, source: "chart: Urgent signs"}
+  - {id: abdominal_pain, name: Abdominal pain, colour: yellow, source: "chart: Urgent signs"}
+  - {id: diabetic_high_glucose, name: Diabetic - glucose over 17 (no ketonuria), colour: yellow, glucose_above: 17, source: "chart: Urgent signs"}
+  - {id: vomiting_persistently, name: Vomiting persistently, colour: yellow, source: "chart: Urgent signs"}
+  - {id: pregnancy_trauma, name: Pregnancy and trauma, colour: yellow, source: "chart: Urgent signs"}
+  - {id: pregnancy_pv_bleed, name: Pregnancy and PV bleed, colour: yellow, source: "chart: Urgent signs"}
+  - {id: moderate_pain, name: Moderate pain, colour: yellow, source: "chart: Urgent signs; manual p3: intense but bearable"}
+
+# Additional investigations from the chart. They raise flags for the nurse; they never score.
+investigations:
+  check_spo2: {message: Check SpO2 and hand over to a senior clinician for oxygen, source: "chart: Additional investigations, RR scores 1 point or more on TEWS"}
+  check_glucose: {message: Do a finger-prick glucose, source: "chart: Additional investigations, reduced level of consciousness"}
+  check_ketones: {message: Urine dipstick for ketones, glucose_from: 11, source: "chart: Additional investigations, glucose 11 mmol/L or more"}
+  ecg: {message: Immediate ECG and hand over to a senior clinician, source: "chart: Additional investigations, chest pain"}
+
+# Data-entry checks, NOT SATS rules: wide limits that catch typos and unit mix-ups.
+# A value outside them is not scored; the nurse is asked to re-measure.
+plausible:
+  source: "Mizani data-entry check (not a clinical rule)"
+  ranges:
+    respiratory_rate: [1, 80]
+    heart_rate: [20, 250]
+    systolic_bp: [40, 300]
+    temperature: [25, 45]
+    spo2: [50, 100]
+    glucose: [0.5, 60]

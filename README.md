@@ -103,6 +103,8 @@ Paediatric SATS and the WHO/ICRC/MSF triage tool as rule packs, voice input for 
 | MCP Python SDK | MIT |
 | LangGraph, langchain-mcp-adapters | MIT |
 | FastAPI | MIT |
+| Pydantic | MIT |
+| PyYAML | MIT |
 | React, Vite | MIT |
 | Ollama | MIT |
 | Qwen3.5 open-weights models | Apache-2.0 |
