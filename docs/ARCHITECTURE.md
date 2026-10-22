@@ -27,6 +27,8 @@ Diagram as an image: [architecture.png](architecture.png).
 ## Agent shape
 One agent, built as a LangGraph state graph. It extracts the inputs from the nurse's entry, validates the vitals (asking for a re-measure when one is missing or impossible), scores the patient, matches chart discriminators and proposes a colour. Then it stops and waits for the nurse. After her decision it commits and writes the FHIR record. LangGraph's SQLite checkpointer keeps each patient's run, so it resumes after the nurse decides. The agent is the MCP client for both servers, through `langchain-mcp-adapters` over streamable HTTP; it tags every call with a run id so the audit log can show a patient's whole run, including the checks made before the triage existed. The model reads free text and plans tool calls. The colour comes from the rules engine. When the model and the rules disagree, the rules win and the case is flagged.
 
+The agent is the MCP client for both servers. It connects with the MCP Python SDK client, turns each server tool into a LangChain tool with the server's own schema, and sends the model name, tokens and cost of the model call that asked for a tool with that call, so the audit log records them. Details: [docs/systems/agent.md](systems/agent.md).
+
 ## The MCP server we built: `mizani-triage`
 No existing MCP server encodes SATS, and we wanted the safety rules enforced by the server itself, so they hold whatever the agent or model does:
 - The rule pack (`src/mizani/rules/sats_adult.yaml`) encodes the EMSSA adult chart; every TEWS point, discriminator, flag and colour returns the rule it came from. Sources: [RESEARCH.md](RESEARCH.md).
@@ -49,7 +51,7 @@ Default `qwen3.5:4b-q4_K_M` (fits a 4 GB GPU or a 16 GB Apple Silicon laptop); `
 Synthetic patients only. One local SQLite file holds triages, used tokens and the audit log; LangGraph checkpoints and FHIR data stay on the same machine. Nothing is sent to an outside service.
 
 ## Running
-`docker compose up` starts the model server (Ollama, pulling the model once), `mizani-triage`, wso2's FHIR MCP server and HAPI FHIR. The agent, API and web UI join the same compose file. `MIZANI_E2E=1 uv run pytest tests/test_stack.py` checks the whole chain from proposal to FHIR record without a model.
+`docker compose up` starts the model server (Ollama, pulling the model once), `mizani-triage`, the API with the agent (`http://127.0.0.1:8090`), wso2's FHIR MCP server and HAPI FHIR. The web UI joins the same compose file. `MIZANI_E2E=1 uv run pytest tests/test_stack.py` checks the whole chain from proposal to FHIR record without a model.
 
 ## Status
 | Part | State |
@@ -57,7 +59,10 @@ Synthetic patients only. One local SQLite file holds triages, used tokens and th
 | SATS adult rule pack and engine | built, 85 tests |
 | `mizani-triage` MCP server: 9 tools, 5 resources, 2 prompts, approval gate, audit chain | built, tested through an MCP client |
 | Model server in compose | built, tested with GPU |
-| LangGraph agent, FastAPI, web UI | in progress |
-| wso2 fhir-mcp-server + HAPI FHIR: a committed triage becomes a Patient, an Encounter and Observations | built, verified end to end against the running stack |
-| Re-triage watch (timers, re-check flag, re-score) | built on the server; the agent's watch step is in progress |
-| Handover gate (draft, nurse release), shadow mode (nurse's own colour, agreement report) | built on the server; the agent and UI steps are in progress |
+| LangGraph agent: extract, validate, score, discriminators, propose, wait for the nurse, commit; with retries, fallback and the re-measure loop | built, tested with a fake model and live with Qwen3.5 4B against `mizani-triage` |
+| FastAPI: intake, live agent steps (server-sent events), nurse decision to approval token, re-measure, re-triage, handover draft and release, shadow-mode assessment and report, queue, colours, audit | built, tested, run live |
+| Web UI | not started |
+| wso2 fhir-mcp-server + HAPI FHIR: the agent's commit step turns a committed triage into a Patient, an Encounter and Observations | built, verified end to end, including a live run with a real model |
+| Re-triage watch (timers on the server; the agent's watch raises re-check flags every 30 s; re-triage endpoint re-scores fresh vitals for the nurse to approve) | built, tested, run live |
+| Handover (the model drafts, a nurse releases that exact draft), shadow mode (nurse's own colour, agreement report) | built, tested, run live |
+| Evaluations: 38 tasks × 5 runs, pass rate, run-to-run variation, latency, tokens, cost ([EVALS.md](../EVALS.md)) | run on Qwen3.5 4B |

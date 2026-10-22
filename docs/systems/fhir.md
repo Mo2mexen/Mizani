@@ -26,7 +26,7 @@ Addresses: `http://fhir-mcp:8000/mcp/` inside compose, `http://127.0.0.1:8001/mc
 
 ## Depends on / used by
 - Depends on: wso2 `fhir-mcp-server` built from the pinned release commit `78d750ba` (0.10.0, Apache-2.0), HAPI FHIR, our triage records.
-- Used by: the agent's commit step (John), right after `commit_triage` succeeds.
+- Used by: the agent's commit step through `write_committed(triage_id, url)`, right after `commit_triage` succeeds (set `MIZANI_FHIR_MCP_URL`). It reads the record from `patient://{id}/timeline`, writes it, and adds a `fhir_create` row to the audit chain, since the call goes to the borrowed server and our middleware never sees it. A failure is reported in the trace and the audit, not raised: the triage is already committed.
 
 ## Safety rules this system enforces
 - Only nurse-committed triages leave our server; pending proposals never reach FHIR.
