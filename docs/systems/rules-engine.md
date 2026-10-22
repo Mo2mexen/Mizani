@@ -12,7 +12,7 @@ Scores a patient on the South African Triage Scale (SATS) adult chart and propos
 The five SATS steps (training manual p6), minus the ones a person does:
 1. `validate_vitals`: asks for a re-measure when a TEWS vital is missing, or when a value is outside wide data-entry limits (a pulse of 900, a temperature typed in °F). A very low pulse, breathing rate or blood pressure adds "take them to resus now". Out-of-range values are never scored.
 2. `compute_tews`: scores each usable vital with the adult TEWS bands (total 0 to 17).
-3. `match_discriminators`: takes the chart signs the agent or nurse named, plus the ones the inputs prove (not alert means reduced consciousness; glucose under 3 means hypoglycaemia; the two diabetic signs). Names not on the chart are refused with a `not_on_chart` flag.
+3. `match_discriminators`: takes the chart signs the agent or nurse named, plus the ones the inputs prove (not alert means reduced consciousness; glucose under 3 means hypoglycaemia; the two diabetic signs). Names not on the chart are refused with a `not_on_chart` flag. A named "reduced consciousness" is refused with a `conflicts_with_vitals` flag when the nurse recorded AVPU alert: SATS defines the sign as any patient not fully alert, so the nurse's measurement wins.
 4. `investigations`: the chart's additional investigations as reminders (check SpO2 when RR scores, glucose when not alert, ketones when glucose ≥ 11, ECG for chest pain). They never add points.
 5. `propose`: colour = the higher of the TEWS colour (0 to 2 green, 3 to 4 yellow, 5 to 6 orange, 7 or more red) and any discriminator colour. Missing vitals add an `incomplete` flag, since the colour can only go up once they are measured. The proposal is always `pending`.
 

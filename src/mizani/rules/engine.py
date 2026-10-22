@@ -128,6 +128,17 @@ def match_discriminators(
     rules, shown, flags = [], [], []
     for rule in pack.discriminators:
         field = _from_vitals(rule, vitals, pack)
+        if rule.id == "reduced_consciousness" and vitals.avpu == "alert" and rule.id in requested:
+            # SATS: "any patient not fully alert" (manual p9). The nurse saw an alert patient,
+            # so her measurement wins over a reading of the complaint.
+            flags.append(
+                Flag(
+                    kind="conflicts_with_vitals",
+                    message=f"'{rule.name}' was not applied: the nurse recorded AVPU alert",
+                    source=f"input: avpu; {pack.cite(rule.source)}",
+                )
+            )
+            continue
         if rule.id in requested:
             field = field or "complaint"
         if field is None:
