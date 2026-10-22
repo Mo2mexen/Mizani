@@ -125,7 +125,8 @@ This table is updated as parts land.
 - One failure is known and unfixed: a complaint that contains a hidden instruction naming a real chart sign can make the model name that sign, which raises the colour (a rash went red in testing). The sign is a real chart entry, so the server accepts it; the nurse sees it and can override.
 - There is no login. The nurse types a name, and the API trusts anyone who can reach it, so it listens on 127.0.0.1 only. A hospital deployment would need accounts behind the approval step.
 - One desk, one SQLite file. The page is in English; complaints can be typed in Arabic or English.
-- On a laptop without a strong GPU the model step takes about half a minute per patient.
+- On a laptop without a strong GPU the model step takes about half a minute per patient. The first request after start also loads the model, which took about two minutes from a hard disk; the agent gives up after 120 s, so warm the model first (`ollama run <model> ok`). The first FHIR write after start can also time out while HAPI warms up; the triage is still saved and the `fhir_create` step shows the error.
+- The handover text is written by the model, so a nurse must read it before releasing it. In one live run the model took "20 minutes" from the complaint ("fell 20 minutes ago") as the waiting time.
 
 ## Later
 
