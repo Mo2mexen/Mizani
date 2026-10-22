@@ -188,3 +188,13 @@ def test_band_labels_cover_every_bound_combination():
     assert Band(gt=100, lte=110, points=1).label() == ">100 and <=110"
     with pytest.raises(ValueError):
         Band(points=1)
+
+
+def test_the_nurses_alert_avpu_wins_over_a_reduced_consciousness_reading():
+    p = propose("t1", Vitals(**NORMAL), ["reduced_consciousness"], PACK)  # NORMAL is alert
+    assert p.colour == "green" and p.discriminators == []
+    assert [f.kind for f in p.flags] == ["conflicts_with_vitals"]
+    confused = propose(
+        "t1", Vitals(**{**NORMAL, "avpu": "confused"}), ["reduced_consciousness"], PACK
+    )
+    assert confused.colour == "orange"
