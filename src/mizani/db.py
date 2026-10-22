@@ -65,13 +65,15 @@ def db_path() -> Path:
 
 
 _schema_lock = threading.Lock()
-_local = threading.local()
+_registry_lock = threading.Lock()
+_connections: dict[tuple[int, str], sqlite3.Connection] = {}  # (thread id, path) -> connection
 
 
 def _connect(path: str) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     # timeout: wait for another connection's write lock instead of failing at once
-    con = sqlite3.connect(path, isolation_level=None, timeout=10)
+    # check_same_thread=False only so close_all() can close it; each thread still uses its own
+    con = sqlite3.connect(path, isolation_level=None, timeout=10, check_same_thread=False)
     con.row_factory = sqlite3.Row
     with _schema_lock:  # one thread at a time creates or migrates the schema
         con.execute("PRAGMA journal_mode=WAL")
@@ -87,8 +89,20 @@ def db() -> sqlite3.Connection:
     """This thread's connection to the configured file (`MIZANI_DB`, default `data/mizani.db`).
     The server runs tools in worker threads; one connection per thread keeps each
     transaction to itself, and SQLite's locking orders the writers."""
-    path = str(db_path())
-    connections = _local.__dict__.setdefault("connections", {})
-    if path not in connections:
-        connections[path] = _connect(path)
-    return connections[path]
+    key = (threading.get_ident(), str(db_path()))
+    con = _connections.get(key)
+    if con is None:
+        con = _connect(key[1])
+        with _registry_lock:
+            _connections[key] = con
+    return con
+
+
+def close_all() -> None:
+    """Close every open connection, from any thread. Windows can't delete an open database
+    file, so the eval runner calls this before removing its temporary databases."""
+    with _registry_lock:
+        open_now = list(_connections.values())
+        _connections.clear()
+    for con in open_now:
+        con.close()

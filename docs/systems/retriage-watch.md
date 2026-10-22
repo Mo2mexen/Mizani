@@ -22,7 +22,7 @@ Watches the waiting queue against the SATS target times and tells the nurse when
 
 ## Depends on / used by
 - Depends on: the rule pack's target times, the store, the rules engine, the approval gate.
-- Used by: John's agent (a watch step in the LangGraph flow) and the UI queue board (`recheck_due` badge).
+- Used by: the agent's watch (`src/mizani/agent/watch.py`, run by the API every 30 s), the API's `POST /api/queue/{triage_id}/retriage` (a re-check run of the LangGraph flow, agent.md and api.md), and the UI queue board (`recheck_due` badge).
 
 ## Safety rules this system enforces
 - The agent may raise a deterioration flag but can't act on it: it changes no colour and moves no patient.

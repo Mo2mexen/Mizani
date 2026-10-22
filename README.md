@@ -4,7 +4,7 @@ Mizani is an offline triage co-pilot for the front desk of a busy public hospita
 
 *Mizani* means "scale" or "balance" in Swahili (*mizani*) and Arabic (*mīzān*).
 
-> **Status:** in development for the [African Agentic AI Design Challenge](https://agentic-africa-challenge.lovable.app/), Healthcare track ("The Triage Desk"). The quickstart below arrives with the first working build. See [What works today](#what-works-today).
+> Status: in development for the [African Agentic AI Design Challenge](https://agentic-africa-challenge.lovable.app/), Healthcare track ("The Triage Desk"). The quickstart below arrives with the first working build. See [What works today](#what-works-today).
 
 ## The problem
 
@@ -74,11 +74,11 @@ Triage scales are YAML files, and each rule records its source. To add a scale (
 
 ## Evaluation
 
-`EVALS.md` will report each test task run five times, with pass rate, run-to-run variation, latency, tokens and cost per run. The tasks cover correct colour and discriminator, recovery from missing or impossible vitals, re-triage timing, refusal to diagnose, instructions hidden in complaint text, attempts to commit without approval, and Arabic input. At least one failure we have not fixed will stay documented, along with what we would try next.
+[EVALS.md](EVALS.md) reports 38 synthetic tasks (22 written by hand, 16 messy variants), each run five times through the full agent. On Qwen3.5 4B on a MacBook Air M4, 145 of 190 runs passed (76%). The safety gates held in every run (no commit without a nurse's approval, impossible vitals never scored, missing vitals never made up), and every failure was the model naming the wrong chart sign, including three tasks where an instruction hidden in the complaint named a real sign. EVALS.md lists each failure and what we would try next. The tasks cover correct colour and discriminator, recovery from missing or impossible vitals, re-triage timing, refusal to diagnose, instructions hidden in complaint text, attempts to commit without approval, and Arabic input. Run them with `uv run mizani-evals --runs 5`.
 
 ## Running it
 
-`git clone`, then `docker compose up`. Today this starts the model server (Ollama, pulling the model once), our MCP server at `http://127.0.0.1:8000/mcp` (try it by hand with `npx @modelcontextprotocol/inspector`), wso2's FHIR MCP server at `http://127.0.0.1:8001/mcp/` and a local HAPI FHIR store at `http://127.0.0.1:18080/fhir`. The agent and web UI join the same command as they land. Everything you need to install, for running and for development, is listed in [packages.txt](packages.txt). How the parts fit: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+`git clone`, then `docker compose up`. This starts the model server (Ollama, pulling the model once), our MCP server at `http://127.0.0.1:8000/mcp` (try it by hand with `npx @modelcontextprotocol/inspector`), the API with the agent at `http://127.0.0.1:8090` (try it from `http://127.0.0.1:8090/docs`, or with curl as in [docs/systems/api.md](docs/systems/api.md)), wso2's FHIR MCP server at `http://127.0.0.1:8001/mcp/` and a local HAPI FHIR store at `http://127.0.0.1:18080/fhir`. The web UI joins the same command when it lands. On a Mac, Docker has no GPU access, so the model is faster in the Ollama app on the Mac itself: set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. Everything you need to install, for running and for development, is listed in [packages.txt](packages.txt). How the parts fit: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Develop and test
 
@@ -92,9 +92,11 @@ MIZANI_APPROVAL_SECRET=dev uv run mizani-mcp      # MCP server at http://127.0.0
 npx @modelcontextprotocol/inspector              # call its tools by hand in the browser
 docker compose up -d mizani-mcp fhir-mcp hapi-fhir
 MIZANI_E2E=1 uv run pytest tests/test_stack.py   # proposal -> approval -> commit -> FHIR, no model
+MIZANI_APPROVAL_SECRET=dev MIZANI_FHIR_MCP_URL=http://127.0.0.1:8001/mcp/ uv run mizani-api   # API + agent at http://127.0.0.1:8090
+uv run mizani-evals --help                      # the evaluation runner (EVALS.md)
 ```
 
-On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` first. On a Mac, run Ollama natively rather than in Docker (Docker on macOS has no GPU, and the model runs 4–5 times slower there) and set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. How each part works is in [docs/systems/](docs/systems/).
+On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` first. On a Mac, run Ollama natively rather than in Docker (Docker on macOS has no GPU, and the model runs 4 to 5 times slower there) and set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. How each part works is in [docs/systems/](docs/systems/).
 
 ## What works today
 
@@ -102,12 +104,14 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 |---|---|
 | Design, rule-pack format, tool list | done |
 | Rules engine (SATS adult), every rule cited | done, 85 tests |
-| MCP server `mizani-triage`: 5 tools, 4 resources, 2 prompts, approval gate, hash-chained audit | done, tested through an MCP client |
-| Agent, API, web UI | in progress |
-| FHIR output through wso2 fhir-mcp-server to a local HAPI FHIR | done, verified end to end |
-| Re-triage watch: target-time timers, `raise_recheck_flag`, re-score as a new pending proposal | done (server side) |
-| Handover gate (draft, nurse release) and shadow mode (nurse's own colour, agreement report) | done (server side) |
-| Evaluation suite | not started |
+| MCP server `mizani-triage`: 9 tools, 5 resources, 2 prompts, approval gate, hash-chained audit | done, tested through an MCP client |
+| Agent (LangGraph): reads the entry, checks vitals, scores through the MCP tools, pauses for the nurse, commits with the nurse's token; retries and falls back when the model's tool calls are wrong; model, tokens and cost logged with every call | done, tested with a fake model and live with Qwen3.5 4B |
+| API (FastAPI): intake, live agent steps as server-sent events, nurse decision (approval token), re-measure, re-triage, handover draft and release, shadow-mode assessment and report, queue, colours, audit log with chain check | done, tested, run live |
+| Web UI | not started |
+| FHIR output: the agent's commit step writes Patient, Encounter and Observations through wso2 fhir-mcp-server to a local HAPI FHIR | done, verified end to end and in a live run |
+| Re-triage watch: target-time timers; the agent raises a re-check flag every 30 s for patients past their target time; re-triage with fresh vitals as a new pending proposal that replaces the old entry once a nurse commits it | done, tested, run live |
+| Handover (the model drafts three lines of findings, a named nurse releases that exact draft) and shadow mode (nurse's own colour, agreement report) | done, tested, run live |
+| Evaluation suite: 38 tasks × 5 runs with pass rate, run-to-run variation, latency, tokens, cost | done on Qwen3.5 4B (76% of runs pass, failures documented); Qwen3.5 9B not run yet |
 
 This table is updated as parts land.
 
@@ -120,7 +124,7 @@ Paediatric SATS and the WHO/ICRC/MSF triage tool as rule packs, voice input for 
 | Component | Licence |
 |---|---|
 | MCP Python SDK | MIT |
-| LangGraph, langchain-mcp-adapters | MIT |
+| LangGraph, LangChain (langchain-core, langchain-openai) | MIT |
 | FastAPI | MIT |
 | Pydantic | MIT |
 | PyYAML | MIT |

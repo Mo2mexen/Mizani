@@ -2,7 +2,7 @@
 #   docker compose up
 # NVIDIA GPU (Windows/Linux):
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
-# The agent and API (app) are added here when they are built.
+# API + agent: http://127.0.0.1:8090/api (the web UI joins when it is built).
 
 services:
   ollama:
@@ -68,6 +68,30 @@ services:
       - hapi-fhir
     ports:
       - "127.0.0.1:8001:8000"
+
+  # The API and the agent. Shares mizani-data with the MCP server to read the audit log;
+  # agent checkpoints go to /data/checkpoints.db. Reachable from this machine only.
+  app:
+    build: .
+    command: ["mizani-api"]
+    environment:
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434/v1}
+      LLM_MODEL: ${LLM_MODEL:-qwen3.5:4b-q4_K_M}
+      MIZANI_MCP_URL: http://mizani-mcp:8000/mcp
+      MIZANI_FHIR_MCP_URL: http://fhir-mcp:8000/mcp/
+      MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-local-demo-secret-change-me}
+      MIZANI_API_HOST: 0.0.0.0
+    volumes:
+      - mizani-data:/data
+    ports:
+      - "127.0.0.1:8090:8090"  # 8090, not 8080: 8080 is often taken
+    depends_on:
+      mizani-mcp:
+        condition: service_started
+      fhir-mcp:
+        condition: service_started
+      ollama-pull:
+        condition: service_completed_successfully
 
 volumes:
   ollama-models:

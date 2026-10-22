@@ -7,7 +7,16 @@ SATS inputs under a local code system, since they have no standard code.
 """
 
 import json
+import os
+import time
+from datetime import UTC, datetime
 from typing import Any
+
+from mcp.client import Client
+
+from mizani import audit
+from mizani.db import db
+from mizani.schemas import AuditEntry
 
 LOINC = "http://loinc.org"
 UCUM = "http://unitsofmeasure.org"
@@ -146,3 +155,38 @@ async def write_triage(client, record: dict) -> dict:
         for obs in observations(record, f"Patient/{pid}", f"Encounter/{eid}")
     ]
     return created
+
+
+def fhir_url() -> str | None:
+    """wso2 fhir-mcp-server for the agent's commit step; unset means no FHIR output."""
+    return os.environ.get("MIZANI_FHIR_MCP_URL") or None
+
+
+async def write_committed(triage_id: str, url: str, mizani_server: Any = None) -> dict:
+    """The agent's commit step (H2): write a committed triage to FHIR and log the call.
+
+    The write goes to the borrowed MCP server, so our server's middleware never sees it; this
+    function adds its audit row itself. A failure is reported, not raised: the triage is already
+    committed, and the nurse sees that the FHIR copy is missing."""
+    from mizani.agent.mcp_tools import read_json  # the agent's reader of our MCP resources
+
+    started, ids, error = time.perf_counter(), None, None
+    try:
+        timeline = await read_json(f"patient://{triage_id}/timeline", mizani_server)
+        async with Client(url, mode="legacy") as client:  # wso2 runs MCP SDK 1.x
+            ids = await write_triage(client, timeline["triage"])
+    except Exception as exc:
+        error = f"FHIR write failed: {exc}"
+    audit.record(
+        db(),
+        AuditEntry(
+            time=datetime.now(UTC),
+            tool="fhir_create",
+            inputs={"triage_id": triage_id, "server": url},
+            outputs={"error": error} if error else ids,
+            error=error is not None,
+            latency_ms=round((time.perf_counter() - started) * 1000, 2),
+        ),
+        triage_id=triage_id,
+    )
+    return {"error": error} if error else ids
