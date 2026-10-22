@@ -6,6 +6,16 @@ Mizani is an offline triage co-pilot for the front desk of a busy public hospita
 
 > Status: in development for the [African Agentic AI Design Challenge](https://agentic-africa-challenge.lovable.app/), Healthcare track ("The Triage Desk"). **Quickstart:** `git clone https://github.com/Mo2mexen/Mizani.git`, `cd Mizani`, `docker compose up`, then open **http://127.0.0.1:8090**. See [What works today](#what-works-today).
 
+## Submission summary
+
+**Track:** Healthcare, "The Triage Desk". **Sub-theme:** symptom-based priority scoring, with deterioration watch for patients who wait past their target time. **Facility and workflow:** the adult triage desk of a busy public hospital's outpatient or emergency department, where one or two nurses give every arriving patient a South African Triage Scale (SATS) colour.
+
+Mizani helps that nurse without taking the decision away. The nurse types the vital signs and the complaint, in English or Arabic. An agent running on a local open-weights model (Qwen3.5 4B through Ollama) checks the readings, asks for a re-measure when one is missing or impossible, and then calls our MCP server to score the patient on SATS. A deterministic rules engine does the scoring from a rule pack that cites the adult chart for every value, so each point, matched sign and proposed colour shows the rule behind it.
+
+The colour is only a proposal. A named nurse approves it or overrides it with a reason, and the MCP server refuses to save anything without that nurse's signed, single-use approval token, whatever the model does. Saved triages go onto a waiting-room board grouped by colour and into a local FHIR server through wso2's fhir-mcp-server, so other hospital systems can read them. While patients wait, the agent compares each wait with the SATS target time for the colour and raises a re-check flag for the nurse; it never moves a patient. Every tool call goes into a hash-chained audit log with inputs, outputs, time, approver, model, tokens, latency and cost.
+
+Mizani never diagnoses or prescribes, treats patient text as data, and uses synthetic patients only. It runs offline on one machine with `docker compose up`. [EVALS.md](EVALS.md) runs each synthetic task five times and reports the pass rate, the run-to-run variation, the cost per run and the failures we have not fixed. Speed and chart-sign accuracy depend on the model; a larger model is a configuration change, and the scoring, approval gate and audit log stay the same.
+
 ## The problem
 
 In many public outpatient and emergency departments across Africa, one or two nurses sort every patient who walks in. They use a paper triage chart that turns vital signs and symptoms into a colour. When the queue is long, the chart is applied from memory and under pressure, and studies across the continent keep finding patients scored lower than their condition warrants: 24.4% of audited adult triages in three South African private emergency centres were under-triaged, and nurses in Beira, Mozambique assigned the correct SATS colour 34.2% of the time. An urgent patient can end up waiting behind a routine follow-up, and the hospital keeps no record of why a patient was ranked where they were.
