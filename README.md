@@ -100,7 +100,8 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 | Design, rule-pack format, tool list | done |
 | Rules engine (SATS adult), every rule cited | done, 85 tests |
 | MCP server `mizani-triage`: 5 tools, 4 resources, 2 prompts, approval gate, hash-chained audit | done, tested through an MCP client |
-| Agent, API, web UI | in progress |
+| Agent (LangGraph): reads the entry, checks vitals, scores through the MCP tools, pauses for the nurse, commits with the nurse's token; retries and falls back when the model's tool calls are wrong; model, tokens and cost logged with every call | done, tested with a fake model and live with Qwen3.5 4B |
+| API, web UI | in progress |
 | FHIR integration | not started |
 | Re-triage watch: target-time timers, `raise_recheck_flag`, re-score as a new pending proposal | done (server side) |
 | Handover, shadow mode | not started |
@@ -117,7 +118,7 @@ Paediatric SATS and the WHO/ICRC/MSF triage tool as rule packs, voice input for 
 | Component | Licence |
 |---|---|
 | MCP Python SDK | MIT |
-| LangGraph, langchain-mcp-adapters | MIT |
+| LangGraph, LangChain (langchain-core, langchain-openai) | MIT |
 | FastAPI | MIT |
 | Pydantic | MIT |
 | PyYAML | MIT |

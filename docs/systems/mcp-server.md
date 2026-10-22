@@ -32,7 +32,7 @@ Optional `_meta` on a tool call is copied into the audit row: `run_id` (one per 
 
 ## Depends on / used by
 - Depends on: the rules engine, `schemas.py`, `approval.py`, `audit.py`, SQLite, `mcp`.
-- Used by: John's LangGraph agent (MCP client via `langchain-mcp-adapters`), and MCP Inspector for manual testing.
+- Used by: John's LangGraph agent (MCP Python SDK client, see agent.md), and MCP Inspector for manual testing.
 
 ## Safety rules this system enforces
 - No commit without a named nurse: `commit_triage` refuses a missing, forged, expired, other-triage or reused token, and a token without an approver name. Tests prove each refusal.

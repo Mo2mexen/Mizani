@@ -23,6 +23,8 @@ Mizani is a triage co-pilot for a hospital front desk. A nurse enters vitals and
 ## Agent shape
 One agent, built as a LangGraph state graph: extract the inputs from the nurse's entry → validate vitals (ask for a re-measure when one is missing or impossible) → score → match chart discriminators → propose → **interrupt and wait for the nurse** → commit → write the FHIR record. LangGraph's SQLite checkpointer keeps each patient's run, so it resumes after the nurse decides. The agent is the MCP client for both servers, through `langchain-mcp-adapters` over streamable HTTP; it tags every call with a run id so the audit log can show a patient's whole run, including the checks made before the triage existed. The model reads free text and plans tool calls; it never sets a colour. When the model and the rules disagree, the rules win and the case is flagged.
 
+The agent is the MCP client for both servers. It connects with the MCP Python SDK client, turns each server tool into a LangChain tool with the server's own schema, and sends the model name, tokens and cost of the model call that asked for a tool with that call, so the audit log records them. Details: [docs/systems/agent.md](systems/agent.md).
+
 ## The MCP server we built: `mizani-triage`
 No existing MCP server encodes SATS, and we wanted the safety rules enforced by the server itself, so they hold whatever the agent or model does:
 - **Grounded scoring.** The rule pack (`src/mizani/rules/sats_adult.yaml`) encodes the EMSSA adult chart; every TEWS point, discriminator, flag and colour returns the rule it came from.
@@ -52,7 +54,8 @@ Synthetic patients only. One local SQLite file holds triages, used tokens and th
 | SATS adult rule pack and engine | built, 85 tests |
 | `mizani-triage` MCP server: 6 tools, 4 resources, 2 prompts, approval gate, audit chain | built, tested through an MCP client |
 | Model server in compose | built, tested with GPU |
-| LangGraph agent, FastAPI, web UI | in progress |
+| LangGraph agent: extract → validate → score → discriminators → propose → nurse → commit, with retries, fallback and the re-measure loop | built, tested with a fake model and live with Qwen3.5 4B against `mizani-triage` |
+| FastAPI, web UI | in progress |
 | wso2 fhir-mcp-server + HAPI FHIR | planned |
 | Re-triage watch (timers, re-check flag, re-score) | built on the server; the agent's watch step is in progress |
 | Handover draft, shadow mode | planned |
