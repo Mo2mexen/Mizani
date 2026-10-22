@@ -130,13 +130,38 @@ def match_discriminators(discriminator_ids: list[str], vitals: Vitals) -> Matche
 
 @mcp.tool(annotations=ACTION)
 def propose_priority(
-    patient_label: str, complaint: str, vitals: Vitals, discriminator_ids: list[str]
+    patient_label: str,
+    complaint: str,
+    vitals: Vitals,
+    discriminator_ids: list[str],
+    retriage_of: str | None = None,
 ) -> Proposal:
     """Score the patient and create a PENDING triage for the nurse to approve or override.
-    The colour is the higher of the TEWS colour and any chart discriminator colour."""
+    The colour is the higher of the TEWS colour and any chart discriminator colour.
+    To re-score a waiting patient with fresh vitals, pass their current triage id as
+    `retriage_of`: the new proposal is pending too, and replaces the old entry only once a nurse
+    commits it."""
+    previous = None
+    if retriage_of is not None:
+        previous = store.get(db(), retriage_of)
+        if previous is None or previous["status"] != "committed" or previous["superseded_by"]:
+            raise ToolError("retriage_of must be a committed triage still in the queue")
     triage_id = uuid.uuid4().hex[:12]
     proposal = engine.propose(triage_id, vitals, discriminator_ids, PACK)
-    store.create(db(), patient_label, complaint, vitals, proposal)
+    if previous is not None:
+        change = (
+            f"colour changed from {previous['colour']} to {proposal.colour}"
+            if proposal.colour != previous["colour"]
+            else f"colour unchanged ({proposal.colour})"
+        )
+        proposal.flags.append(
+            Flag(
+                kind="retriage",
+                message=f"Re-triage with fresh vitals: {change}. A nurse must confirm it.",
+                source=f"input: retriage_of {retriage_of}",
+            )
+        )
+    store.create(db(), patient_label, complaint, vitals, proposal, retriage_of)
     return proposal
 
 
@@ -153,6 +178,26 @@ def commit_triage(triage_id: str, approval_token: str) -> Committed:
         return Committed(**store.commit(db(), triage_id, approval))
     except ApprovalError as exc:
         raise ToolError(f"commit refused: {exc}") from None
+
+
+@mcp.tool(annotations=ACTION)
+def raise_recheck_flag(triage_id: str) -> Flag:
+    """Flag a waiting patient for re-check when their SATS target time has passed. Refused if
+    the timer has not run out. It only alerts the nurse: no colour or queue change."""
+    try:
+        entry = store.raise_recheck(db(), triage_id, PACK)
+    except ValueError as exc:
+        raise ToolError(f"re-check not raised: {exc}") from None
+    target = next(c for c in PACK.colours if c.colour == entry["colour"])
+    return Flag(
+        kind="recheck_due",
+        message=(
+            f"{entry['patient_label']}: triaged {entry['colour']} "
+            f"{entry['minutes_since_triage']:.0f} min ago, target {entry['target_minutes']} min. "
+            "Re-check vitals and re-triage."
+        ),
+        source=f"{PACK.cite(target.source)}; input: committed_at",
+    )
 
 
 @mcp.resource("rules://sats/adult", mime_type="application/json")
