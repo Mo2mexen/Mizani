@@ -29,7 +29,7 @@ One agent, built as a LangGraph state graph: extract the inputs from the nurse's
 
 ## The MCP server we built: `mizani-triage`
 No existing MCP server encodes SATS, and we wanted the safety rules enforced by the server itself, so they hold whatever the agent or model does:
-- **Grounded scoring.** The rule pack (`src/mizani/rules/sats_adult.yaml`) encodes the EMSSA adult chart; every TEWS point, discriminator, flag and colour returns the rule it came from.
+- **Grounded scoring.** The rule pack (`src/mizani/rules/sats_adult.yaml`) encodes the EMSSA adult chart; every TEWS point, discriminator, flag and colour returns the rule it came from. Sources: [RESEARCH.md](RESEARCH.md).
 - **Human approval in the server.** `commit_triage` refuses unless it gets a token signed for that triage by the API after a named nurse decides. Tokens expire and work once. The model never holds the signing secret.
 - **Audit.** Middleware writes every tool call (inputs, outputs, time, approver, model, tokens, latency, cost) to a SHA-256 hash chain; editing any past row breaks the chain.
 - **Patient text is data.** Complaints are stored as-is; the intake prompt fences them and tells the model to ignore instructions inside them.
