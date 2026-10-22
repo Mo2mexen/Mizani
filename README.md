@@ -77,15 +77,16 @@ Triage scales are YAML files, and each rule records its source. To add a scale (
 
 ## Running it
 
-Coming with the first working build: `git clone`, then `docker compose up`. Everything you need to install, for running and for development, is listed in [packages.txt](packages.txt).
+`git clone`, then `docker compose up`. Today this starts the model server (Ollama, pulling the model once) and our MCP server at `http://127.0.0.1:8000/mcp`, which you can try by hand with `npx @modelcontextprotocol/inspector`. The agent and web UI join the same command as they land. Everything you need to install, for running and for development, is listed in [packages.txt](packages.txt). How the parts fit: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## What works today
 
 | Part | State |
 |---|---|
 | Design, rule-pack format, tool list | done |
-| Rules engine (SATS adult) | not started |
-| MCP server, agent, UI | not started |
+| Rules engine (SATS adult), every rule cited | done, 85 tests |
+| MCP server `mizani-triage`: 5 tools, 4 resources, 2 prompts, approval gate, hash-chained audit | done, tested through an MCP client |
+| Agent, API, web UI | in progress |
 | FHIR integration | not started |
 | Re-triage watch, handover, shadow mode | not started |
 | Evaluation suite | not started |
