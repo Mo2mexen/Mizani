@@ -102,7 +102,7 @@ All seven failing tasks fail in the model's choice of chart signs. The rules eng
 
 ## Not measured yet
 - Larger models, and spread at temperature above 0.
-- Whether a triage nurse agrees with our expected outcomes. The tasks follow the chart as written; a nurse review of the cases is planned with the user interview.
+- Whether a triage nurse agrees with our expected outcomes. The tasks follow the chart as written; no nurse has reviewed the cases yet.
 - The diagnosis check is a word screen in English; a diagnosis phrased differently, or in Arabic, would pass it.
 
 ## References

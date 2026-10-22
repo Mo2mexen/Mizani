@@ -56,7 +56,7 @@ Synthetic patients only. One local SQLite file holds triages, used tokens and th
 ## Status
 | Part | State |
 |---|---|
-| SATS adult rule pack and engine | built, 85 tests |
+| SATS adult rule pack and engine | built, tested |
 | `mizani-triage` MCP server: 9 tools, 5 resources, 2 prompts, approval gate, audit chain | built, tested through an MCP client |
 | Model server in compose | built, tested with GPU |
 | LangGraph agent: extract, validate, score, discriminators, propose, wait for the nurse, commit; with retries, fallback and the re-measure loop | built, tested with a fake model and live with Qwen3.5 4B against `mizani-triage` |
