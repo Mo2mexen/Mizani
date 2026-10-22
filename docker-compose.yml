@@ -2,7 +2,7 @@
 #   docker compose up
 # NVIDIA GPU (Windows/Linux):
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
-# The app (U1) is added here when it is built.
+# The agent and API (app) are added here when they are built.
 
 services:
   ollama:
@@ -44,6 +44,30 @@ services:
       - mizani-data:/data
     ports:
       - "127.0.0.1:8000:8000"
+
+  # Local FHIR store (HAPI FHIR, R4, its built-in database). Browse it at
+  # http://127.0.0.1:18080/fhir from this machine only (18080: 8080 is often taken).
+  hapi-fhir:
+    image: hapiproject/hapi:v8.12.0-2
+    environment:
+      hapi.fhir.fhir_version: R4
+    ports:
+      - "127.0.0.1:18080:8080"
+
+  # Borrowed MCP server: wso2 fhir-mcp-server, built from the pinned 0.10.0 release commit.
+  # Auth is off because HAPI is local and unreachable from outside this machine.
+  # Agent URL: http://fhir-mcp:8000/mcp (from this machine: http://127.0.0.1:8001/mcp).
+  fhir-mcp:
+    build: https://github.com/wso2/fhir-mcp-server.git#78d750ba3f91de3b5df10c0963d725dd8c78da0a
+    environment:
+      FHIR_SERVER_BASE_URL: http://hapi-fhir:8080/fhir
+      FHIR_SERVER_DISABLE_AUTHORIZATION: "True"
+      FHIR_MCP_HOST: 0.0.0.0
+      FHIR_MCP_PORT: "8000"
+    depends_on:
+      - hapi-fhir
+    ports:
+      - "127.0.0.1:8001:8000"
 
 volumes:
   ollama-models:

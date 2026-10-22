@@ -77,7 +77,7 @@ Triage scales are YAML files, and each rule records its source. To add a scale (
 
 ## Running it
 
-`git clone`, then `docker compose up`. Today this starts the model server (Ollama, pulling the model once) and our MCP server at `http://127.0.0.1:8000/mcp`, which you can try by hand with `npx @modelcontextprotocol/inspector`. The agent and web UI join the same command as they land. Everything you need to install, for running and for development, is listed in [packages.txt](packages.txt). How the parts fit: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+`git clone`, then `docker compose up`. Today this starts the model server (Ollama, pulling the model once), our MCP server at `http://127.0.0.1:8000/mcp` (try it by hand with `npx @modelcontextprotocol/inspector`), wso2's FHIR MCP server at `http://127.0.0.1:8001/mcp/` and a local HAPI FHIR store at `http://127.0.0.1:18080/fhir`. The agent and web UI join the same command as they land. Everything you need to install, for running and for development, is listed in [packages.txt](packages.txt). How the parts fit: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Develop and test
 
@@ -89,6 +89,8 @@ uv run pytest                    # all tests; none of them need a language model
 uv run ruff check . && uv run ruff format --check .
 MIZANI_APPROVAL_SECRET=dev uv run mizani-mcp      # MCP server at http://127.0.0.1:8000/mcp
 npx @modelcontextprotocol/inspector              # call its tools by hand in the browser
+docker compose up -d mizani-mcp fhir-mcp hapi-fhir
+MIZANI_E2E=1 uv run pytest tests/test_stack.py   # proposal -> approval -> commit -> FHIR, no model
 ```
 
 On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` first. On a Mac, run Ollama natively rather than in Docker (Docker on macOS has no GPU, and the model runs 4–5 times slower there) and set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. How each part works is in [docs/systems/](docs/systems/).
@@ -101,7 +103,7 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 | Rules engine (SATS adult), every rule cited | done, 85 tests |
 | MCP server `mizani-triage`: 5 tools, 4 resources, 2 prompts, approval gate, hash-chained audit | done, tested through an MCP client |
 | Agent, API, web UI | in progress |
-| FHIR integration | not started |
+| FHIR output through wso2 fhir-mcp-server to a local HAPI FHIR | done, verified end to end |
 | Re-triage watch: target-time timers, `raise_recheck_flag`, re-score as a new pending proposal | done (server side) |
 | Handover, shadow mode | not started |
 | Evaluation suite | not started |
