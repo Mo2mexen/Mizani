@@ -1,6 +1,6 @@
 # Mizani evaluation
 
-On Qwen3.5 4B (`qwen3.5:4b-q4_K_M`) running locally on a MacBook Air M4, 155 of 190 runs passed (82%): 38 tasks, five runs each, with the current agent prompt (every chart sign listed with its SATS definition). The earlier prompt, with bare sign ids, passed 145 of 190 (76%) on the same tasks. 31 tasks passed all five runs and 7 failed all five; no task changed its answer from one run to the next. Every failure is the model naming the wrong SATS chart sign (discriminator): a hidden instruction in the complaint that names a real sign, signs the complaint does not support, and one sign missed in Arabic. The safety gates held in every run: no commit went through without a valid nurse approval, impossible vitals were never scored, missing vitals were never made up, and the re-check timer fired only after the target time. The 9B model on a desktop GPU has not been run yet.
+On Qwen3.5 4B (`qwen3.5:4b-q4_K_M`) running locally on a MacBook Air M4, 155 of 190 runs passed (82%): 38 tasks, five runs each, with the current agent prompt (every chart sign listed with its SATS definition). The earlier prompt, with bare sign ids, passed 145 of 190 (76%) on the same tasks. 31 tasks passed all five runs and 7 failed all five; no task changed its answer from one run to the next. Every failure is the model naming the wrong SATS chart sign (discriminator): a hidden instruction in the complaint that names a real sign, signs the complaint does not support, and one sign missed in Arabic. The safety gates held in every run: no commit went through without a valid nurse approval, impossible vitals were never scored, missing vitals were never made up, and the re-check timer fired only after the target time. We evaluated only the 4B model, the one the project ships with.
 
 ## How we tested
 - **Tasks.** 22 synthetic patients written by hand (`evals/cases/core.yaml`) in ten categories, plus 16 messy variants made from them by a seeded generator: typos, vitals given only in the complaint as nurse shorthand, a temperature typed in °F, a blank vital, the complaint in Arabic. All patients, labels and numbers are made up.
@@ -98,10 +98,10 @@ All seven failing tasks fail in the model's choice of chart signs. The rules eng
 3. **Let measured inputs overrule more signs.** The engine already ignores "reduced consciousness" when AVPU is alert; the diabetic signs could be ignored when the measured glucose contradicts them.
 4. **Give mechanism of injury its examples, not a single rule.** The manual's examples (a vehicle crash at 40 km/h or more, a pedestrian hit by a vehicle, a fall from a roof) [2] in place of one sentence, so a bicycle fall is not read as high energy transfer; then re-run this suite.
 5. **Arabic.** Add the chart-sign definitions in Arabic, or have the model restate the complaint in English before naming signs, and add more Arabic tasks.
-6. **Run the 9B model.** `qwen3.5:9b-q4_K_M` on the RTX 3060 desktop is the planned comparison; it has not been run yet.
+6. **Try a larger model.** A bigger Qwen3.5 model on a machine with more memory may name signs more accurately; we have not measured it.
 
 ## Not measured yet
-- The 9B model on the desktop GPU, and spread at temperature above 0.
+- Larger models, and spread at temperature above 0.
 - Whether a triage nurse agrees with our expected outcomes. The tasks follow the chart as written; a nurse review of the cases is planned with the user interview.
 - The diagnosis check is a word screen in English; a diagnosis phrased differently, or in Arabic, would pass it.
 

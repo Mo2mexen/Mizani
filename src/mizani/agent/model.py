@@ -27,7 +27,7 @@ def chat_model() -> ChatOpenAI:
         api_key="local",  # Ollama ignores it; the client refuses to start without one
         temperature=0,
         reasoning_effort="none",  # thinking off (checked on Ollama's /v1, NOTES §6b)
-        timeout=120,
+        timeout=300,  # a cold model load on a slow disk or a CPU-only machine took ~2 min
         max_retries=1,
     )
 

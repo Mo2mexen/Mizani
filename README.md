@@ -66,7 +66,7 @@ Rule packs, target times, the live queue and each patient's timeline are exposed
 
 ### Models
 
-Scoring is done by deterministic rules, so the language model only reads free text, plans tool calls and writes explanations. That keeps a small open-weights model practical. The default is Qwen3.5 4B, which runs on a laptop with a 4 GB GPU or on a 16 GB Apple Silicon laptop. We also test Qwen3.5 9B on a desktop GPU. The same family goes up to 397B parameters, so a machine with more memory can run a larger model by changing `LLM_BASE_URL` and `LLM_MODEL`. The safety checks do not depend on which model runs.
+Scoring is done by deterministic rules, so the language model only reads free text, plans tool calls and writes explanations. That keeps a small open-weights model practical. The default is Qwen3.5 4B, which runs on a laptop with a 4 GB GPU or on a 16 GB Apple Silicon laptop. The same family goes up to 397B parameters, so a machine with more memory can run a larger model by changing `LLM_BASE_URL` and `LLM_MODEL`. The safety checks do not depend on which model runs.
 
 ### Rule packs
 
@@ -74,7 +74,7 @@ Triage scales are YAML files, and each rule records its source. To add a scale (
 
 ## Evaluation
 
-[EVALS.md](EVALS.md) reports 38 synthetic tasks (22 written by hand, 16 messy variants), each run five times through the full agent. On Qwen3.5 4B on a MacBook Air M4, 155 of 190 runs passed (82%; 76% with the earlier prompt). The safety gates held in every run (no commit without a nurse's approval, impossible vitals never scored, missing vitals never made up), and every failure was the model naming the wrong chart sign, including an instruction hidden in a complaint that named a real sign and turned a rash red. The 9B model has not been run yet. EVALS.md lists each failure and what we would try next. The tasks cover correct colour and discriminator, recovery from missing or impossible vitals, re-triage timing, refusal to diagnose, instructions hidden in complaint text, attempts to commit without approval, and Arabic input. Run them with `uv run mizani-evals --runs 5`.
+[EVALS.md](EVALS.md) reports 38 synthetic tasks (22 written by hand, 16 messy variants), each run five times through the full agent. On Qwen3.5 4B on a MacBook Air M4, 155 of 190 runs passed (82%; 76% with the earlier prompt). The safety gates held in every run (no commit without a nurse's approval, impossible vitals never scored, missing vitals never made up), and every failure was the model naming the wrong chart sign, including an instruction hidden in a complaint that named a real sign and turned a rash red. EVALS.md lists each failure and what we would try next. The tasks cover correct colour and discriminator, recovery from missing or impossible vitals, re-triage timing, refusal to diagnose, instructions hidden in complaint text, attempts to commit without approval, and Arabic input. Run them with `uv run mizani-evals --runs 5`.
 
 ## Running it
 
@@ -113,7 +113,7 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 | FHIR output: the agent's commit step writes Patient, Encounter and Observations through wso2 fhir-mcp-server to a local HAPI FHIR | done, verified end to end and in a live run |
 | Re-triage watch: target-time timers; the agent raises a re-check flag every 30 s for patients past their target time; re-triage with fresh vitals as a new pending proposal that replaces the old entry once a nurse commits it | done, tested, run live |
 | Handover (the model drafts three lines of findings, a named nurse releases that exact draft) and shadow mode (nurse's own colour, agreement report) | done, tested, run live |
-| Evaluation suite: 38 tasks × 5 runs with pass rate, run-to-run variation, latency, tokens, cost | done on Qwen3.5 4B (82% of runs pass, failures documented); Qwen3.5 9B not run yet |
+| Evaluation suite: 38 tasks × 5 runs with pass rate, run-to-run variation, latency, tokens, cost | done on Qwen3.5 4B (82% of runs pass, failures documented) |
 
 This table is updated as parts land.
 
@@ -125,7 +125,7 @@ This table is updated as parts land.
 - One failure is known and unfixed: a complaint that contains a hidden instruction naming a real chart sign can make the model name that sign, which raises the colour (a rash went red in testing). The sign is a real chart entry, so the server accepts it; the nurse sees it and can override.
 - There is no login. The nurse types a name, and the API trusts anyone who can reach it, so it listens on 127.0.0.1 only. A hospital deployment would need accounts behind the approval step.
 - One desk, one SQLite file. The page is in English; complaints can be typed in Arabic or English.
-- On a laptop without a strong GPU the model step takes about half a minute per patient. The first request after start also loads the model, which took about two minutes from a hard disk; the agent gives up after 120 s, so warm the model first (`ollama run <model> ok`). The first FHIR write after start can also time out while HAPI warms up; the triage is still saved and the `fhir_create` step shows the error.
+- On a laptop without a strong GPU the model step takes about half a minute per patient. The first request after start also loads the model, which took about two minutes from a hard disk; the agent waits up to 5 minutes for a model reply, so the first patient can be slow. The first FHIR write after start can also time out while HAPI warms up; the triage is still saved and the `fhir_create` step shows the error.
 - The handover text is written by the model, so a nurse must read it before releasing it. In one live run the model took "20 minutes" from the complaint ("fell 20 minutes ago") as the waiting time.
 
 ## Later
