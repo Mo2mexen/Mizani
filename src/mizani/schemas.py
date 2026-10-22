@@ -108,6 +108,7 @@ class AuditEntry(Contract):
     tool: str = Field(min_length=1)
     inputs: dict[str, Any]
     outputs: Any
+    error: bool = False  # the call failed or was refused; outputs holds the reason
     approver: str | None = None
     model: str | None = None
     tokens: int | None = Field(default=None, ge=0)

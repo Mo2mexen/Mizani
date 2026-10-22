@@ -24,10 +24,10 @@ The agent reads the rules (`rules://sats/adult`), checks vitals, names chart dis
 | `rules://sats/targets` | resource | | colours and target minutes | none |
 | `queue://current` | resource | | committed patients by colour, then arrival, with time waited | none |
 | `patient://{triage_id}/timeline` | resource | | the triage and its audit rows | none |
-| `triage_intake` | prompt | `complaint` | intake instructions with the allowed discriminator ids | none |
+| `triage_intake` | prompt | `complaint` | intake instructions: every chart sign with its id, colour and, where the EMSSA manual defines it, its meaning; never infer a diagnosis | none |
 | `handover_summary` | prompt | `triage_id` | findings-only handover instructions | none |
 
-Optional `_meta` on a tool call (`model`, `tokens`, `cost`) is copied into the audit row, so the log shows which model asked for the call and what it cost.
+Optional `_meta` on a tool call is copied into the audit row: `run_id` (one per patient run; links the checks made before the triage existed to that triage's timeline), and `model`, `tokens`, `cost` (which model asked for the call and what it cost). Refused or failed calls get `error: true`.
 
 ## Depends on / used by
 - Depends on: the rules engine, `schemas.py`, `approval.py`, `audit.py`, SQLite, `mcp`.

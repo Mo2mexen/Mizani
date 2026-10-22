@@ -36,7 +36,7 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up   # NVIDIA GPU
 To use an Ollama installed on the machine instead, set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`.
 
 ## Known limitations
-- Docker on macOS has no GPU access, so on a Mac the model runs on CPU inside Docker. It is faster to run Ollama natively on the Mac and point `LLM_BASE_URL` at it.
+- Docker on macOS has no GPU access, so on a Mac the model runs on CPU inside Docker, measured at 4–5 times slower than native Ollama on an M4. On a Mac, run Ollama natively and set `LLM_BASE_URL=http://host.docker.internal:11434/v1`.
 - The GPU override needs the NVIDIA driver with WSL 2 (Windows) or the NVIDIA container toolkit (Linux).
 
 ## Extending it

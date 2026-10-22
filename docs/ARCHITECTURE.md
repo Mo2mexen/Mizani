@@ -20,7 +20,7 @@ Mizani is a triage co-pilot for a hospital front desk. A nurse enters vitals and
 ```
 
 ## Agent shape
-One agent, built as a LangGraph state graph: extract the inputs from the nurse's entry → validate vitals (ask for a re-measure when one is missing or impossible) → score → match chart discriminators → propose → **interrupt and wait for the nurse** → commit → write the FHIR record. LangGraph's SQLite checkpointer keeps each patient's run, so it resumes after the nurse decides. The model reads free text and plans tool calls; it never sets a colour. When the model and the rules disagree, the rules win and the case is flagged.
+One agent, built as a LangGraph state graph: extract the inputs from the nurse's entry → validate vitals (ask for a re-measure when one is missing or impossible) → score → match chart discriminators → propose → **interrupt and wait for the nurse** → commit → write the FHIR record. LangGraph's SQLite checkpointer keeps each patient's run, so it resumes after the nurse decides. The agent is the MCP client for both servers, through `langchain-mcp-adapters` over streamable HTTP; it tags every call with a run id so the audit log can show a patient's whole run, including the checks made before the triage existed. The model reads free text and plans tool calls; it never sets a colour. When the model and the rules disagree, the rules win and the case is flagged.
 
 ## The MCP server we built: `mizani-triage`
 No existing MCP server encodes SATS, and we wanted the safety rules enforced by the server itself, so they hold whatever the agent or model does:
@@ -28,6 +28,7 @@ No existing MCP server encodes SATS, and we wanted the safety rules enforced by 
 - **Human approval in the server.** `commit_triage` refuses unless it gets a token signed for that triage by the API after a named nurse decides. Tokens expire and work once. The model never holds the signing secret.
 - **Audit.** Middleware writes every tool call (inputs, outputs, time, approver, model, tokens, latency, cost) to a SHA-256 hash chain; editing any past row breaks the chain.
 - **Patient text is data.** Complaints are stored as-is; the intake prompt fences them and tells the model to ignore instructions inside them.
+- **Signs by meaning, not guesswork.** The intake prompt lists every chart sign with the EMSSA manual's definition where it has one, and forbids inferring a diagnosis (a twisted ankle is not a fracture).
 
 Details: [docs/systems/mcp-server.md](systems/mcp-server.md), [rules-engine.md](systems/rules-engine.md), [approval.md](systems/approval.md), [audit.md](systems/audit.md).
 
