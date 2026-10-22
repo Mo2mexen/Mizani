@@ -2,7 +2,7 @@
 #   docker compose up
 # NVIDIA GPU (Windows/Linux):
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
-# API + agent: http://127.0.0.1:8090/api (the web UI joins when it is built).
+# Then open http://127.0.0.1:8090 for the nurse's page (API and docs: /api, /docs).
 
 services:
   ollama:
@@ -69,8 +69,8 @@ services:
     ports:
       - "127.0.0.1:8001:8000"
 
-  # The API and the agent. Shares mizani-data with the MCP server to read the audit log;
-  # agent checkpoints go to /data/checkpoints.db. Reachable from this machine only.
+  # The nurse's page, the API and the agent. Shares mizani-data with the MCP server to read
+  # the audit log; agent checkpoints go to /data/checkpoints.db. Reachable from this machine only.
   app:
     build: .
     command: ["mizani-api"]

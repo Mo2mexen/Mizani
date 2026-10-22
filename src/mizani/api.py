@@ -14,11 +14,13 @@ import os
 import uuid
 from collections.abc import AsyncIterable
 from contextlib import AsyncExitStack, asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Any
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
@@ -346,6 +348,11 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         broken = audit.verify_chain(db())
         return {"intact": broken is None, "first_broken_row": broken}
 
+    # The nurse's page (web/), served from the same origin as the API: built into the image by
+    # the Dockerfile, or locally with `npm run build` in web/. Mounted last, so /api and /docs win.
+    page = Path(os.environ.get("MIZANI_WEB_DIR", "web/dist"))
+    if page.is_dir():
+        app.mount("/", StaticFiles(directory=page, html=True), name="web")
     return app
 
 

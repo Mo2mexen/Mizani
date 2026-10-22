@@ -51,7 +51,7 @@ Default `qwen3.5:4b-q4_K_M` (fits a 4 GB GPU or a 16 GB Apple Silicon laptop); `
 Synthetic patients only. One local SQLite file holds triages, used tokens and the audit log; LangGraph checkpoints and FHIR data stay on the same machine. Nothing is sent to an outside service.
 
 ## Running
-`docker compose up` starts the model server (Ollama, pulling the model once), `mizani-triage`, the API with the agent (`http://127.0.0.1:8090`), wso2's FHIR MCP server and HAPI FHIR. The web UI joins the same compose file. `MIZANI_E2E=1 uv run pytest tests/test_stack.py` checks the whole chain from proposal to FHIR record without a model.
+`docker compose up` starts the model server (Ollama, pulling the model once), `mizani-triage`, the API with the agent (`http://127.0.0.1:8090`), wso2's FHIR MCP server and HAPI FHIR. The API also serves the nurse's web page at `http://127.0.0.1:8090` (built from `web/` in the image). `MIZANI_E2E=1 uv run pytest tests/test_stack.py` checks the whole chain from proposal to FHIR record without a model.
 
 ## Status
 | Part | State |
@@ -61,7 +61,7 @@ Synthetic patients only. One local SQLite file holds triages, used tokens and th
 | Model server in compose | built, tested with GPU |
 | LangGraph agent: extract, validate, score, discriminators, propose, wait for the nurse, commit; with retries, fallback and the re-measure loop | built, tested with a fake model and live with Qwen3.5 4B against `mizani-triage` |
 | FastAPI: intake, live agent steps (server-sent events), nurse decision to approval token, re-measure, re-triage, handover draft and release, shadow-mode assessment and report, queue, colours, audit | built, tested, run live |
-| Web UI | not started |
+| Web page (React + Vite, served by the API): intake, live agent trace, proposal with sources, nurse decision, waiting room, handover, audit | built, tested |
 | wso2 fhir-mcp-server + HAPI FHIR: the agent's commit step turns a committed triage into a Patient, an Encounter and Observations | built, verified end to end, including a live run with a real model |
 | Re-triage watch (timers on the server; the agent's watch raises re-check flags every 30 s; re-triage endpoint re-scores fresh vitals for the nurse to approve) | built, tested, run live |
 | Handover (the model drafts, a nurse releases that exact draft), shadow mode (nurse's own colour, agreement report) | built, tested, run live |

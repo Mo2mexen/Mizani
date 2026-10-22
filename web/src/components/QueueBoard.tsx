@@ -1,0 +1,158 @@
+import { useState } from "react";
+import { api } from "../api";
+import { minutes } from "../format";
+import type { Colour, HandoverDraft, QueueEntry } from "../types";
+import { EMPTY_VITALS, toVitals } from "../vitals";
+import { VitalsFields } from "./VitalsFields";
+
+type Props = {
+  colours: Colour[];
+  queue: QueueEntry[];
+  onRetriage: (runId: string) => void;
+};
+
+/** One column per colour, cards in the order the API sends. The UI never reorders anything. */
+export function QueueBoard({ colours, queue, onRetriage }: Props) {
+  return (
+    <section className="panel queue" aria-labelledby="queue-title">
+      <h2 id="queue-title" className="panel-title">
+        <span className="step-no">4</span> Waiting room <span className="count">{queue.length} committed</span>
+      </h2>
+      <div className="queue-columns">
+        {colours.map((c) => {
+          const entries = queue.filter((e) => e.colour === c.colour);
+          return (
+            <div key={c.colour} className={`queue-col c-${c.colour}`}>
+              <h3 className="queue-head">
+                <span className="swatch" aria-hidden="true" />
+                {c.colour.toUpperCase()} · {c.label}
+                <span className="target" title={c.source}>
+                  {c.target_minutes === 0 ? "seen immediately" : `seen within ${minutes(c.target_minutes)}`}
+                </span>
+              </h3>
+              {entries.length === 0 && <p className="empty">—</p>}
+              {entries.map((e) => (
+                <Card key={e.triage_id} entry={e} onRetriage={onRetriage} />
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function Card({ entry, onRetriage }: { entry: QueueEntry; onRetriage: (runId: string) => void }) {
+  const [panel, setPanel] = useState<"none" | "recheck" | "handover">("none");
+  const isOver = entry.minutes_since_triage > entry.target_minutes;
+  return (
+    <article className={`card${entry.recheck_due ? " card-due" : ""}`}>
+      <header className="card-head">
+        <strong>{entry.patient_label}</strong>
+        {entry.recheck_due && (
+          <span className="badge-due">RE-CHECK DUE{entry.recheck_raised ? " · flagged" : ""}</span>
+        )}
+      </header>
+      <p className={`card-time${isOver ? " over" : ""}`}>
+        waited {minutes(entry.waited_minutes)} · last triage {minutes(entry.minutes_since_triage)} ago · target{" "}
+        {minutes(entry.target_minutes)}
+      </p>
+      <div className="card-actions">
+        <button type="button" className="btn btn-small" onClick={() => setPanel(panel === "recheck" ? "none" : "recheck")}>
+          Re-check
+        </button>
+        <button type="button" className="btn btn-small" onClick={() => setPanel(panel === "handover" ? "none" : "handover")}>
+          Handover
+        </button>
+      </div>
+      {panel === "recheck" && <Recheck entry={entry} onRetriage={onRetriage} />}
+      {panel === "handover" && <Handover entry={entry} />}
+    </article>
+  );
+}
+
+function Recheck({ entry, onRetriage }: { entry: QueueEntry; onRetriage: (runId: string) => void }) {
+  const [vitals, setVitals] = useState(EMPTY_VITALS);
+  const [error, setError] = useState<string | null>(null);
+  async function send() {
+    try {
+      const { triage_id: runId } = await api.retriage(entry.triage_id, toVitals(vitals));
+      onRetriage(runId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Not sent");
+    }
+  }
+  return (
+    <div className="card-panel">
+      <p className="hint">Fresh vitals only. The chart signs stay; the nurse confirms any new colour.</p>
+      <VitalsFields value={vitals} onChange={setVitals} idPrefix={`recheck-${entry.triage_id}`} />
+      {error && <p className="error" role="alert">{error}</p>}
+      <button type="button" className="btn btn-primary btn-small" onClick={send}>
+        Re-score
+      </button>
+    </div>
+  );
+}
+
+function Handover({ entry }: { entry: QueueEntry }) {
+  const [draft, setDraft] = useState<HandoverDraft | null>(null);
+  const [nurse, setNurse] = useState("");
+  const [released, setReleased] = useState<string | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run(work: () => Promise<void>) {
+    setIsBusy(true);
+    setError(null);
+    try {
+      await work();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Not sent");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  return (
+    <div className="card-panel">
+      {!draft && (
+        <button
+          type="button"
+          className="btn btn-small"
+          disabled={isBusy}
+          onClick={() => run(async () => setDraft(await api.draftHandover(entry.triage_id)))}
+        >
+          {isBusy ? "Drafting…" : "Draft handover (model)"}
+        </button>
+      )}
+      {draft && (
+        <>
+          <p className="handover-text" dir="auto">
+            {draft.text}
+          </p>
+          {released ? (
+            <p className="ok">Released by {released}</p>
+          ) : (
+            <div className="decision-row">
+              <input aria-label="Your name" placeholder="your name" value={nurse} onChange={(e) => setNurse(e.target.value)} />
+              <button
+                type="button"
+                className="btn btn-primary btn-small"
+                disabled={!nurse.trim() || isBusy}
+                onClick={() =>
+                  run(async () => {
+                    const r = await api.releaseHandover(entry.triage_id, draft.draft_id, nurse.trim());
+                    setReleased(r.approver);
+                  })
+                }
+              >
+                Release to doctor
+              </button>
+            </div>
+          )}
+        </>
+      )}
+      {error && <p className="error" role="alert">{error}</p>}
+    </div>
+  );
+}
