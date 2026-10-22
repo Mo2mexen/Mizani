@@ -33,11 +33,12 @@ The agent is the MCP client for both servers. It connects with the MCP Python SD
 No existing MCP server encodes SATS, and we wanted the safety rules enforced by the server itself, so they hold whatever the agent or model does:
 - The rule pack (`src/mizani/rules/sats_adult.yaml`) encodes the EMSSA adult chart; every TEWS point, discriminator, flag and colour returns the rule it came from. Sources: [RESEARCH.md](RESEARCH.md).
 - `commit_triage` refuses unless it gets a token signed for that triage by the API after a named nurse decides. Tokens expire and work once. The model never holds the signing secret.
+- A chart sign the model names counts only with the complaint's own words behind it (`{id, quote}`): a sign whose words are missing, not in the complaint, or in text addressed to the software is refused with a flag, and so is a sign the nurse's measurements rule out. When a red colour rests on the complaint's words alone, the proposal asks the nurse to confirm the sign with the patient, and `commit_triage` will not approve it without that confirmation (an override needs none): a false report reads exactly like a true one.
 - Middleware writes every tool call (inputs, outputs, time, approver, model, tokens, latency, cost) to a SHA-256 hash chain; editing any past row breaks the chain.
-- Complaints are stored as patient data. The intake prompt escapes them inside their own tags and tells the model to ignore any instructions they contain.
-- The agent only drafts the doctor handover. The draft reaches the doctor when a nurse releases it with a token issued for that draft; a commit token can't release it, and a handover token can't commit.
+- Complaints are stored as patient data. The intake prompt escapes them inside their own tags and tells the model to ignore any instructions they contain; text addressed to the software is shown to the nurse and never counts.
+- The agent only drafts the doctor handover, and `draft_handover` refuses a number that is not in the patient's record; the waiting time is written from the record, not by the model. The draft reaches the doctor when a nurse releases it with a token issued for that draft; a commit token can't release it, and a handover token can't commit.
 - The queue reports when a patient's SATS target time has passed. `raise_recheck_flag` alerts the nurse and is refused before the timer runs out. A re-score with fresh vitals is another pending proposal for the nurse to approve.
-- The intake prompt lists every chart sign with the EMSSA manual's definition where it has one, and forbids inferring a diagnosis (a twisted ankle is not a fracture).
+- The intake prompt lists every chart sign with the EMSSA manual's definition where it has one, asks for the complaint's words behind each sign, and forbids inferring a diagnosis (a twisted ankle is not a fracture).
 
 Details: [docs/systems/mcp-server.md](systems/mcp-server.md), [retriage-watch.md](systems/retriage-watch.md), [handover-and-shadow.md](systems/handover-and-shadow.md), [rules-engine.md](systems/rules-engine.md), [approval.md](systems/approval.md), [audit.md](systems/audit.md).
 
@@ -51,18 +52,18 @@ Default `qwen3.5:4b-q4_K_M` (fits a 4 GB GPU or a 16 GB Apple Silicon laptop). A
 Synthetic patients only. One local SQLite file holds triages, used tokens and the audit log; LangGraph checkpoints and FHIR data stay on the same machine. Nothing is sent to an outside service.
 
 ## Running
-`docker compose up` starts the model server (Ollama, pulling the model once), `mizani-triage`, the API with the agent (`http://127.0.0.1:8090`), wso2's FHIR MCP server and HAPI FHIR. The API also serves the nurse's web page at `http://127.0.0.1:8090` (built from `web/` in the image). `MIZANI_E2E=1 uv run pytest tests/test_stack.py` checks the whole chain from proposal to FHIR record without a model.
+`docker compose up` starts the model server (Ollama, pulling the model once), `mizani-triage`, the API with the agent (`http://127.0.0.1:8090`), wso2's FHIR MCP server and HAPI FHIR; the API waits until HAPI answers, so the first FHIR write after a cold start succeeds. The API also serves the nurse's web page at `http://127.0.0.1:8090` (built from `web/` in the image). `MIZANI_E2E=1 uv run pytest tests/test_stack.py` checks the whole chain from proposal to FHIR record without a model.
 
 ## Status
 | Part | State |
 |---|---|
 | SATS adult rule pack and engine | built, tested |
-| `mizani-triage` MCP server: 9 tools, 5 resources, 2 prompts, approval gate, audit chain | built, tested through an MCP client |
+| `mizani-triage` MCP server: 9 tools, 5 resources, 2 prompts, approval gate, audit chain; quoted chart signs, nurse-to-confirm for red from words alone, handover numbers checked against the record | built, tested through an MCP client |
 | Model server in compose | built, tested with GPU |
 | LangGraph agent: extract, validate, score, discriminators, propose, wait for the nurse, commit; with retries, fallback and the re-measure loop | built, tested with a fake model and live with Qwen3.5 4B against `mizani-triage` |
 | FastAPI: intake, live agent steps (server-sent events), nurse decision to approval token, re-measure, re-triage, handover draft and release, shadow-mode assessment and report, queue, colours, audit | built, tested, run live |
-| Web page (React + Vite, served by the API): intake, live agent trace, proposal with sources, nurse decision, waiting room, handover, audit | built, tested |
+| Web page (React + Vite, served by the API): intake, live agent trace, proposal with sources and quotes, nurse decision, waiting room, handover, audit; desk, tablet and phone layouts, keyboard and screen-reader use | built, tested in a browser on the full stack |
 | wso2 fhir-mcp-server + HAPI FHIR: the agent's commit step turns a committed triage into a Patient, an Encounter and Observations | built, verified end to end, including a live run with a real model |
 | Re-triage watch (timers on the server; the agent's watch raises re-check flags every 30 s; re-triage endpoint re-scores fresh vitals for the nurse to approve) | built, tested, run live |
 | Handover (the model drafts, a nurse releases that exact draft), shadow mode (nurse's own colour, agreement report) | built, tested, run live |
-| Evaluations: 38 tasks × 5 runs, pass rate, run-to-run variation, latency, tokens, cost ([EVALS.md](../EVALS.md)) | run on Qwen3.5 4B: 155/190 runs pass (82%) |
+| Evaluations: 39 tasks × 5 runs, pass rate, run-to-run variation, latency, tokens, cost, and the failure kept on purpose (a patient's false claim of a sign) ([EVALS.md](../EVALS.md)) | run on Qwen3.5 4B: 170/195 runs pass (87%) |
