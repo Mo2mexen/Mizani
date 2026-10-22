@@ -1,6 +1,6 @@
 # Compose (running Mizani with one command)
 
-`docker compose up` starts everything Mizani needs on Windows, Linux or an Apple Silicon Mac, with nothing else installed but Docker. Today that is the model server; the MCP server and the app join it as they are built.
+`docker compose up` starts everything Mizani needs on Windows, Linux or an Apple Silicon Mac, with nothing else installed but Docker. Today that is the model server, the MCP server and the API with the agent; the web UI joins it when it is built.
 
 ## Where it lives
 - `docker-compose.yml`: the services.
@@ -10,6 +10,8 @@
 ## How it works
 1. `ollama` starts the model server (image `ollama/ollama:0.40.8`, multi-arch). Its port is not published, so it never clashes with an Ollama already installed on the machine; other services reach it as `http://ollama:11434`.
 2. Once `ollama list` answers, `ollama-pull` downloads `LLM_MODEL` into the `ollama-models` volume and exits. The first run downloads 3.3 GB for the default model; later runs reuse the volume.
+3. `mizani-mcp` serves our MCP server at `http://mizani-mcp:8000/mcp` (and `127.0.0.1:8000` on this machine).
+4. `app` (command `mizani-api`) starts after the model is pulled: the API and the agent at `http://127.0.0.1:8080/api` (api.md). It shares the `mizani-data` volume with `mizani-mcp` so it can read the audit log, and keeps agent checkpoints in `/data/checkpoints.db`.
 
 The server runs with an 8k context window, flash attention and a q8_0 KV cache. The context size is set here because the OpenAI-compatible `/v1` API cannot set it per request, and at Ollama's 4k default a prompt with all tool definitions gets cut off without an error.
 
@@ -22,7 +24,7 @@ The server runs with an 8k context window, flash attention and a q8_0 KV cache. 
 
 ## Depends on / used by
 - Depends on: Docker with Compose v2.
-- Used by: the agent (via `LLM_BASE_URL`), and later the MCP server and app services.
+- Used by: the agent in the `app` service (via `LLM_BASE_URL`).
 
 ## Safety rules this system enforces
 - Everything runs locally; the model server is not exposed outside the compose network.

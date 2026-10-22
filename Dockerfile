@@ -1,5 +1,5 @@
 # Mizani Python image (multi-arch: the base images exist for amd64 and arm64).
-# Used by the mizani-mcp service now and by the app service later.
+# Used by the mizani-mcp service and, with `command: ["mizani-api"]`, by the app service.
 FROM python:3.12-slim
 
 COPY --from=ghcr.io/astral-sh/uv:0.13 /uv /usr/local/bin/uv
