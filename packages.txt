@@ -29,7 +29,7 @@ Everything in section 1, plus:
   Python   3.12.x                runtime for the backend and MCP server
   uv       0.13 or newer         installs the Python dependencies from uv.lock
   Node.js  22 LTS                frontend build (React + Vite)
-  Ollama   (pin)                 runs the open-weights model on your own machine
+  Ollama   0.40 or newer         runs the open-weights model on your own machine
   gh       optional              GitHub CLI
 
 You never install Python or Node packages by hand:

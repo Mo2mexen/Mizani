@@ -1,0 +1,12 @@
+# Optional NVIDIA GPU for the model server (Windows with WSL 2, or Linux with the NVIDIA
+# container toolkit). Not for Macs: Docker on macOS has no GPU access.
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
