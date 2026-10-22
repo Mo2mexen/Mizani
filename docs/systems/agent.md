@@ -6,7 +6,8 @@ The part of Mizani that talks to the language model and to our MCP server, and r
 - Triage flow (LangGraph): `src/mizani/agent/graph.py`
 - Model client: `src/mizani/agent/model.py`
 - MCP tools: `src/mizani/agent/mcp_tools.py`
-- Tests: `tests/test_agent_graph.py`, `tests/test_agent_model.py`, `tests/test_agent_tools.py`
+- Re-check watch (W1): `src/mizani/agent/watch.py`
+- Tests: `tests/test_agent_graph.py`, `tests/test_agent_model.py`, `tests/test_agent_tools.py`, `tests/test_agent_watch.py`
 - Settings: `LLM_BASE_URL`, `LLM_MODEL` (model), `MIZANI_MCP_URL` (our MCP server)
 
 ## The triage flow
@@ -28,6 +29,8 @@ extract (model) ─► validate ─► score ─► discriminators ─► propos
 
 Every step adds a trace row (`time`, `kind`, `name`, `input`, `output`, `latency_ms`; the UI's `TraceStep`). The approval token is shown as `(hidden)` in the trace and never enters the model's messages.
 
+**Re-check runs (W1).** `watch()` asks the server every 30 s to flag patients past their SATS target time (`raise_recheck_flag`; the server checks the timer). It never changes a colour. When the nurse re-measures a flagged patient, the API starts a run with `retriage_of`, the fresh vitals and the patient's current chart signs. That run starts at validate and never calls the model, so only the vitals can change the colour; `propose_priority(retriage_of=...)` adds a `retriage` flag saying whether it changed, and the nurse approves it like any proposal.
+
 ## Model client and MCP tools
 1. `chat_model()` builds one OpenAI-compatible chat model from `LLM_BASE_URL` and `LLM_MODEL`. Every request has thinking off (`reasoning_effort: "none"`) and temperature 0. Without settings it uses Ollama on the same machine with `qwen3.5:4b-q4_K_M`.
 2. `call_model(llm, messages)` runs one model call and returns the reply with the model name, total tokens, latency in ms and cost (0 for a local model).
@@ -48,6 +51,8 @@ We use the MCP SDK client directly because `langchain-mcp-adapters` only support
 | `ModelCall.meta()` | | `{model, tokens, cost}` for `_meta` | none |
 | `load_tools(server)` | URL (default `MIZANI_MCP_URL`) or in-process server | one LangChain tool per MCP tool | lists tools on the server |
 | `with_meta(meta)` | `_meta` dict | run config for `tool.ainvoke` | none |
+| `raise_due_rechecks(tools, server)` | MCP tools | flags raised this round | `raise_recheck_flag` calls, audit rows |
+| `watch(tools, server)` | MCP tools | runs forever, every 30 s | as above |
 | tool `.ainvoke(call, config)` | tool call | tool message: text, structured result as `artifact`, `status` | MCP tool call, audit row on the server |
 
 ## Depends on / used by

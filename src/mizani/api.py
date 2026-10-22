@@ -26,6 +26,7 @@ from mizani import audit
 from mizani.agent.graph import build_graph
 from mizani.agent.mcp_tools import load_tools, read_json, server_url
 from mizani.agent.model import chat_model
+from mizani.agent.watch import watch
 from mizani.approval import issue_approval
 from mizani.db import db, db_path
 from mizani.schemas import Contract, NurseDecision, Vitals
@@ -89,7 +90,11 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             ctx["graph"] = build_graph(
                 llm or chat_model(), tools, [d["id"] for d in rules["discriminators"]], saver
             )
-            yield
+            watcher = asyncio.create_task(watch({t.name: t for t in tools}, mcp_server))
+            try:
+                yield
+            finally:
+                watcher.cancel()
 
     app = FastAPI(title="Mizani API", lifespan=lifespan)
 
@@ -133,17 +138,57 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             raise HTTPException(409, "the agent is not waiting for a nurse on this run")
         return state.interrupts[0].value["proposal"]
 
-    @app.post("/api/intake", status_code=202)
-    async def intake(body: Intake) -> dict:
+    def start_run(entry: dict) -> dict:
         run_id = uuid.uuid4().hex[:12]
         run = runs[run_id] = Run()
-        entry = {
-            "patient_label": body.patient_label,
-            "complaint": body.complaint,
-            "nurse_vitals": body.vitals.model_dump(exclude_none=True),
-        }
         run.task = asyncio.create_task(drive(run, entry, run_id))
         return {"triage_id": run_id}
+
+    @app.post("/api/intake", status_code=202)
+    async def intake(body: Intake) -> dict:
+        return start_run(
+            {
+                "patient_label": body.patient_label,
+                "complaint": body.complaint,
+                "nurse_vitals": body.vitals.model_dump(exclude_none=True),
+            }
+        )
+
+    @app.post("/api/queue/{triage_id}/retriage", status_code=202)
+    async def retriage(triage_id: str, body: Remeasure) -> dict:
+        """Re-score a waiting patient with fresh vitals. Starts a run like intake, without the
+        model: the chart signs of the current triage are kept, so only the vitals can change the
+        colour. The new proposal waits for a nurse, and replaces the old entry once committed."""
+        timeline = await read_json(f"patient://{triage_id}/timeline", mcp_server)
+        record = timeline["triage"]
+        if record is None:
+            raise HTTPException(404, f"no triage {triage_id}")
+        if record["status"] != "committed" or record["superseded_by"]:
+            raise HTTPException(
+                409, "only a committed patient still in the queue can be re-triaged"
+            )
+        signs = next(  # the chart signs of the proposal that became this triage
+            (
+                r["inputs"]["discriminator_ids"]
+                for r in timeline["audit"]
+                if r["tool"] == "propose_priority"
+                and isinstance(r["outputs"], dict)
+                and r["outputs"].get("triage_id") == triage_id
+            ),
+            [],
+        )
+        fresh = body.vitals.model_dump(exclude_none=True)
+        vitals = {**{k: v for k, v in record["vitals"].items() if v is not None}, **fresh}
+        return start_run(
+            {
+                "patient_label": record["patient_label"],
+                "complaint": record["complaint"],
+                "nurse_vitals": vitals,
+                "vitals": vitals,
+                "discriminator_ids": signs,
+                "retriage_of": triage_id,
+            }
+        )
 
     @app.get("/api/triage/{run_id}/stream", response_class=EventSourceResponse)
     async def stream(

@@ -104,7 +104,7 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 | API (FastAPI): intake, live agent steps as server-sent events, nurse decision (approval token), re-measure, queue, colours, audit log with chain check | done, tested, run live with Qwen3.5 4B |
 | Web UI | not started |
 | FHIR integration | not started |
-| Re-triage watch: target-time timers, `raise_recheck_flag`, re-score as a new pending proposal | done (server side) |
+| Re-triage watch: target-time timers; the agent raises a re-check flag every 30 s for patients past their target time; re-triage with fresh vitals as a new pending proposal that replaces the old entry once a nurse commits it | done, tested, run live |
 | Handover, shadow mode | not started |
 | Evaluation suite | not started |
 

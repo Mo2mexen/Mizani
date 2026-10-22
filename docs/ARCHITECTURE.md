@@ -58,5 +58,5 @@ Synthetic patients only. One local SQLite file holds triages, used tokens and th
 | FastAPI: intake, live agent steps (server-sent events), nurse decision → approval token, re-measure, queue, colours, audit | built, tested, run live with Qwen3.5 4B |
 | Web UI | not started |
 | wso2 fhir-mcp-server + HAPI FHIR | planned |
-| Re-triage watch (timers, re-check flag, re-score) | built on the server; the agent's watch step is in progress |
+| Re-triage watch (timers on the server; the agent's watch raises re-check flags every 30 s; re-triage endpoint re-scores fresh vitals for the nurse to approve) | built, tested, run live |
 | Handover draft, shadow mode | planned |

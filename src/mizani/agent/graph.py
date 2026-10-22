@@ -8,6 +8,9 @@ commits it. Recovery: a missing or rejected tool call goes back to the model wit
 to MAX_ATTEMPTS model calls; after that the run goes on with the nurse's own vitals and no
 discriminators, and says so in the trace. The nurse answers the proposal with re-measured vitals
 (back to validate, no model call) or an approval token (commit; a refusal comes back to them).
+
+A re-check run (W1) starts at validate with the patient's fresh vitals, the chart signs of their
+current triage and `retriage_of`; it never calls the model, so only the vitals can move the colour.
 """
 
 import json
@@ -36,6 +39,7 @@ class TriageState(TypedDict, total=False):
     nurse_vitals: dict  # what the nurse typed; always wins over the model
     attempts: int
     retry_reason: str | None  # why the last model answer was rejected
+    retriage_of: str | None  # re-check run: the committed triage this one re-scores (W1)
     model: str  # the model behind this run, sent with every tool call
     unlogged: dict  # tokens and cost of model calls not yet on an audit row
     vitals: dict
@@ -204,7 +208,11 @@ def build_graph(llm, tools: list[BaseTool], chart_ids: list[str], checkpointer=N
             "vitals": state["vitals"],
             "discriminator_ids": state["discriminator_ids"],
         }
-        proposal, _, update = await run_tool("propose_priority", args, state, config)
+        if state.get("retriage_of"):
+            args["retriage_of"] = state["retriage_of"]
+        proposal, error, update = await run_tool("propose_priority", args, state, config)
+        if error:  # e.g. the patient was re-triaged meanwhile; the run stops with the reason
+            raise RuntimeError(f"propose_priority refused: {error}")
         waiting = _step("waiting_for_nurse", "nurse", {"triage_id": proposal["triage_id"]}, None)
         return {
             **update,
@@ -241,13 +249,13 @@ def build_graph(llm, tools: list[BaseTool], chart_ids: list[str], checkpointer=N
     def after_extract(state: TriageState) -> str:
         if not state.get("retry_reason"):
             return "validate"
-        return "extract" if state["attempts"] < MAX_ATTEMPTS else "fallback"
+        return "extract" if state.get("attempts", 0) < MAX_ATTEMPTS else "fallback"
 
     def after_tool(next_node: str):
         def route(state: TriageState) -> str:
             if not state.get("retry_reason"):
                 return next_node
-            return "extract" if state["attempts"] < MAX_ATTEMPTS else "fallback"
+            return "extract" if state.get("attempts", 0) < MAX_ATTEMPTS else "fallback"
 
         return route
 
@@ -263,7 +271,10 @@ def build_graph(llm, tools: list[BaseTool], chart_ids: list[str], checkpointer=N
         ("commit", commit),
     ]:
         graph.add_node(name, node)
-    graph.add_edge(START, "extract")
+    # A re-check run already has its vitals and chart signs: no model call, only re-scoring.
+    graph.add_conditional_edges(
+        START, lambda s: "validate" if s.get("retriage_of") else "extract", ["extract", "validate"]
+    )
     graph.add_conditional_edges("extract", after_extract, ["validate", "extract", "fallback"])
     graph.add_edge("fallback", "validate")
     graph.add_conditional_edges("validate", after_tool("score"), ["score", "extract", "fallback"])

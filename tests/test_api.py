@@ -127,3 +127,29 @@ def test_unknown_runs_and_colours():
     expected = [(c.colour, c.target_minutes) for c in load_pack().colours]
     assert [(c["colour"], c["target_minutes"]) for c in colours] == expected
     assert all(c["source"] for c in colours)
+
+
+def test_a_waiting_patient_is_retriaged_and_replaced_only_once_a_nurse_commits():
+    worse = {"respiratory_rate": 30, "heart_rate": 135, "systolic_bp": 75}
+    with client(reply(ids=["chest_pain"])) as api:
+        run = intake(api)
+        first = events(api, run, until="proposal")[-1][1]["proposal"]["triage_id"]
+        assert api.post(f"/api/queue/{first}/retriage", json={"vitals": worse}).status_code == 409
+        approve = {"nurse_name": "Nurse A", "action": "approve"}
+        api.post(f"/api/triage/{run}/decision", json=approve)
+
+        response = api.post(f"/api/queue/{first}/retriage", json={"vitals": worse})
+        assert response.status_code == 202
+        rerun = response.json()["triage_id"]
+        proposal = events(api, rerun, until="proposal")[-1][1]["proposal"]
+        assert proposal["colour"] == "red"
+        assert any(f["kind"] == "retriage" for f in proposal["flags"])
+        assert [r["triage_id"] for r in api.get("/api/queue").json()] == [first]  # not yet
+
+        done = api.post(f"/api/triage/{rerun}/decision", json=approve)
+        assert (done.status_code, done.json()["colour"]) == (200, "red")
+        queue = api.get("/api/queue").json()
+        assert [(r["triage_id"], r["colour"]) for r in queue] == [(proposal["triage_id"], "red")]
+        stale = api.post(f"/api/queue/{first}/retriage", json={"vitals": worse})
+        assert stale.status_code == 409
+        assert api.post("/api/queue/nope/retriage", json={"vitals": worse}).status_code == 404

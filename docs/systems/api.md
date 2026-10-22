@@ -3,7 +3,7 @@
 The HTTP API the nurse's web page talks to. It starts one agent run per patient, streams the agent's steps live, turns the nurse's decision into an approval token, and serves the queue, the colour list and the audit log.
 
 ## Where it lives
-- Code: `src/mizani/api.py` (command `mizani-api`)
+- Code: `src/mizani/api.py` (command `mizani-api`); re-check watch `src/mizani/agent/watch.py`
 - Tests: `tests/test_api.py` (the real flow and MCP server in memory, a fake model)
 - Container: service `app` in `docker-compose.yml`, `http://127.0.0.1:8080`
 - Settings: `LLM_BASE_URL`, `LLM_MODEL`, `MIZANI_MCP_URL`, `MIZANI_APPROVAL_SECRET` (same value as the MCP server), `MIZANI_DB`, `MIZANI_API_HOST` (default `127.0.0.1`), `MIZANI_API_PORT` (default `8080`)
@@ -14,6 +14,7 @@ The HTTP API the nurse's web page talks to. It starts one agent run per patient,
 3. `GET /api/triage/{id}/stream` sends server-sent events: `step` for every trace row, `proposal` when the agent pauses for the nurse, then `committed` or `error`, which end the stream. Event ids count from 0, so a browser that reconnects with `Last-Event-ID` gets only what it missed. A run started before an API restart is rebuilt from its checkpoint.
 4. `POST /api/triage/{id}/decision` validates a `NurseDecision` (a name; an override needs a colour and a reason), calls `issue_approval` for the proposal on screen and resumes the agent, which calls `commit_triage` with the token. A refusal (for example an override to a colour that is not on the chart) returns 409 with the server's reason, and the run keeps waiting for the nurse.
 5. `POST /api/triage/{id}/vitals` sends re-measured vitals; the agent re-scores without another model call and a new `proposal` event follows on the stream.
+6. **Re-triage watch.** A background task (`agent/watch.py`) reads `queue://current` every 30 s and calls `raise_recheck_flag` for each patient past their target time and not flagged yet; the queue then shows `recheck_raised`. `POST /api/queue/{triage_id}/retriage` takes the nurse's fresh vitals and starts a re-check run (no model call; the patient's chart signs are kept), streamed and decided like any run. The committed re-triage replaces the old queue entry.
 
 ## Interfaces
 | Name | Input | Output | Side effects |
@@ -22,6 +23,7 @@ The HTTP API the nurse's web page talks to. It starts one agent run per patient,
 | `GET /api/triage/{id}/stream` | optional `Last-Event-ID` | events `step`, `proposal` (`{proposal, error}`), `committed`, `error` | none |
 | `POST /api/triage/{id}/decision` | `NurseDecision` | 200 committed triage, 409 with the reason, 422 invalid | approval token, commit, audit rows |
 | `POST /api/triage/{id}/vitals` | `{vitals}` | 202 | re-scores, new pending triage |
+| `POST /api/queue/{triage_id}/retriage` | `{vitals}` (fresh) | 202 `{triage_id}` (new run id); 404 unknown; 409 not a committed patient still in the queue | re-check run, new pending triage with a `retriage` flag |
 | `GET /api/colours` | | `[{colour, label, target_minutes, source}]` from the rule pack | none |
 | `GET /api/queue` | | waiting patients by colour then arrival (`queue://current`), with `waited_minutes`, `minutes_since_triage`, `target_minutes`, `recheck_due`, `recheck_raised` | none |
 | `GET /api/audit` | optional `triage_id` | every logged tool call, oldest first | none |
@@ -51,7 +53,7 @@ Or open `http://127.0.0.1:8080/docs`. Both processes must use the same `MIZANI_D
 
 ## Known limitations
 - No login: the nurse's name is typed (approval.md).
-- No endpoint yet for the re-triage watch's agent side: raising `raise_recheck_flag` for due patients and re-scoring with `retriage_of` (the server side is on main, retriage-watch.md).
+- The watch polls every 30 s, so a re-check flag can appear up to 30 s after the target time passes.
 - The stream events of a run live in memory; after a restart they are rebuilt from the checkpoint, so a run that failed with an error shows its steps but not the error.
 - One process: runs started on one API instance are not shared with another.
 
