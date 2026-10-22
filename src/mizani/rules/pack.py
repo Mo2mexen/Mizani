@@ -68,6 +68,7 @@ class DiscriminatorRule(Rule):
     source: Source
     glucose_below: float | None = None
     glucose_above: float | None = None
+    hint: str | None = None
 
 
 class Investigation(Rule):

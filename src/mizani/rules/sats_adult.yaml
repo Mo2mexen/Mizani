@@ -78,17 +78,18 @@ tews:
 
 # Clinical discriminators from the adult chart. Only these may be matched.
 # glucose_below / glucose_above (mmol/L) let the engine match the diabetic signs from inputs.
+# hint: the manual's definition (cited in the same entry's source), shown to the model at intake.
 discriminators:
   # Emergency (red)
   - {id: not_breathing, name: Not breathing, colour: red, source: "chart: Emergency signs"}
   - {id: obstructed_airway, name: Obstructed airway - not breathing, colour: red, source: "chart: Emergency signs"}
   - {id: seizure_current, name: Seizure - current, colour: red, source: "chart: Emergency signs"}
-  - {id: burn_facial_inhalation, name: Burn - facial / inhalation, colour: red, source: "chart: Emergency signs; manual p9"}
+  - {id: burn_facial_inhalation, name: Burn - facial / inhalation, colour: red, source: "chart: Emergency signs; manual p9", hint: "airway exposed to heat, smoke, steam or chemicals; singed facial hair or soot around nose and mouth"}
   - {id: hypoglycaemia, name: Hypoglycaemia - glucose less than 3, colour: red, glucose_below: 3, source: "chart: Emergency signs"}
   - {id: cardiac_arrest, name: Cardiac arrest, colour: red, source: "chart: Emergency signs"}
   # Very urgent (orange)
-  - {id: reduced_consciousness, name: Level of consciousness reduced / confused, colour: orange, source: "chart: Very urgent signs; manual p9: any patient not fully alert"}
-  - {id: high_energy_transfer, name: High energy transfer (severe mechanism of injury), colour: orange, source: "chart: Very urgent signs; manual p9: e.g. MVA 40 km/h or more"}
+  - {id: reduced_consciousness, name: Level of consciousness reduced / confused, colour: orange, source: "chart: Very urgent signs; manual p9: any patient not fully alert", hint: "any patient not fully alert: confused, or responds only to voice or pain, or unresponsive"}
+  - {id: high_energy_transfer, name: High energy transfer (severe mechanism of injury), colour: orange, source: "chart: Very urgent signs; manual p9: e.g. MVA 40 km/h or more", hint: "high-speed injury: vehicle crash at 40 km/h or more, pedestrian hit by a vehicle, fall from a roof, high-velocity gunshot"}
   - {id: shortness_of_breath_acute, name: Shortness of breath - acute, colour: orange, source: "chart: Very urgent signs"}
   - {id: coughing_blood, name: Coughing blood, colour: orange, source: "chart: Very urgent signs"}
   - {id: chest_pain, name: Chest pain, colour: orange, source: "chart: Very urgent signs"}
@@ -97,7 +98,7 @@ discriminators:
   - {id: seizure_post_ictal, name: Seizure - post ictal, colour: orange, source: "chart: Very urgent signs"}
   - {id: focal_neurology_acute, name: Focal neurology - acute (stroke), colour: orange, source: "chart: Very urgent signs"}
   - {id: aggression, name: Aggression, colour: orange, source: "chart: Very urgent signs"}
-  - {id: threatened_limb, name: Threatened limb, colour: orange, source: "chart: Very urgent signs; manual p9"}
+  - {id: threatened_limb, name: Threatened limb, colour: orange, source: "chart: Very urgent signs; manual p9", hint: "a painful, pale, pulseless, weak or numb limb"}
   - {id: dislocation_larger_joint, name: Dislocation of larger joint (not finger or toe), colour: orange, source: "chart: Very urgent signs"}
   - {id: fracture_compound, name: Fracture - compound (with a break in skin), colour: orange, source: "chart: Very urgent signs"}
   - {id: burn_over_20, name: Burn over 20%, colour: orange, source: "chart: Very urgent signs"}
@@ -109,9 +110,9 @@ discriminators:
   - {id: vomiting_fresh_blood, name: Vomiting fresh blood, colour: orange, source: "chart: Very urgent signs"}
   - {id: pregnancy_abdominal_trauma, name: Pregnancy and abdominal trauma, colour: orange, source: "chart: Very urgent signs"}
   - {id: pregnancy_abdominal_pain, name: Pregnancy and abdominal pain, colour: orange, source: "chart: Very urgent signs"}
-  - {id: severe_pain, name: Severe pain, colour: orange, source: "chart: Very urgent signs; manual p3: unbearable, worst ever"}
+  - {id: severe_pain, name: Severe pain, colour: orange, source: "chart: Very urgent signs; manual p3: unbearable, worst ever", hint: "unbearable, the worst pain the patient has ever felt"}
   # Urgent (yellow)
-  - {id: haemorrhage_controlled, name: Haemorrhage - controlled, colour: yellow, source: "chart: Urgent signs; manual p9"}
+  - {id: haemorrhage_controlled, name: Haemorrhage - controlled, colour: yellow, source: "chart: Urgent signs; manual p9", hint: "an active bleed that the triage provider stops with direct pressure; not dried blood"}
   - {id: dislocation_finger_toe, name: Dislocation of finger or toe, colour: yellow, source: "chart: Urgent signs"}
   - {id: fracture_closed, name: Fracture - closed (no break in skin), colour: yellow, source: "chart: Urgent signs"}
   - {id: burn_other, name: Burn - other, colour: yellow, source: "chart: Urgent signs"}
@@ -120,7 +121,7 @@ discriminators:
   - {id: vomiting_persistently, name: Vomiting persistently, colour: yellow, source: "chart: Urgent signs"}
   - {id: pregnancy_trauma, name: Pregnancy and trauma, colour: yellow, source: "chart: Urgent signs"}
   - {id: pregnancy_pv_bleed, name: Pregnancy and PV bleed, colour: yellow, source: "chart: Urgent signs"}
-  - {id: moderate_pain, name: Moderate pain, colour: yellow, source: "chart: Urgent signs; manual p3: intense but bearable"}
+  - {id: moderate_pain, name: Moderate pain, colour: yellow, source: "chart: Urgent signs; manual p3: intense but bearable", hint: "intense but bearable pain"}
 
 # Additional investigations from the chart. They raise flags for the nurse; they never score.
 investigations:

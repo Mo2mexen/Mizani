@@ -49,4 +49,4 @@ uv run python -c "from mizani.rules.engine import propose; from mizani.rules.pac
 - The 2012 manual also lists "eye injury"; we follow the newer 2015 chart, which doesn't.
 
 ## Extending it
-Another scale is another YAML pack with the same shape plus its tests (band edges, colours, target times). A new discriminator is one line in the pack with its source; give it a test if the inputs can prove it.
+Another scale is another YAML pack with the same shape plus its tests (band edges, colours, target times). A new discriminator is one line in the pack with its source; give it a test if the inputs can prove it. An optional `hint` holds the manual's definition (cited in the same entry's source); the intake prompt shows it to the model so it picks signs by their meaning, not by a guess.

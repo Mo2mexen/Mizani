@@ -8,16 +8,16 @@ Every tool call, in order, in a log that shows if anyone edited it afterwards. I
 - Tests: `tests/test_mcp_server.py`
 
 ## How it works
-Each row stores an `AuditEntry` (time, tool, inputs, outputs, approver, model, tokens, latency in ms, cost) plus the triage id, as canonical JSON. Its hash is SHA-256 of the previous row's hash plus this JSON, so the rows form a chain. Writes take an exclusive lock so the chain never forks. `verify_chain` recomputes every hash and returns the first row that doesn't match.
+Each row stores an `AuditEntry` (time, tool, inputs, outputs, an `error` flag for failed or refused calls, approver, model, tokens, latency in ms, cost) plus the triage id and the agent's run id, as canonical JSON. Its hash is SHA-256 of the previous row's hash plus this JSON, so the rows form a chain. Writes take an exclusive lock so the chain never forks. `verify_chain` recomputes every hash and returns the first row that doesn't match.
 
-Model, tokens and cost come from the `_meta` the agent sends with a tool call. Local models cost 0; the agent can also log its own model calls with `audit.record`.
+Model, tokens, cost and `run_id` come from the `_meta` the agent sends with a tool call. The run id (one per patient run) is what lets a patient's timeline include the checks the agent made before `propose_priority` created the triage id. Local models cost 0; the agent can also log its own model calls with `audit.record`.
 
 ## Interfaces
 | Name | Input | Output | Side effects |
 |---|---|---|---|
-| `record(con, entry, triage_id)` | `AuditEntry` | the row's hash | appends a row |
+| `record(con, entry, triage_id, run_id)` | `AuditEntry` | the row's hash | appends a row |
 | `verify_chain(con)` | | first broken row id, or `None` | none |
-| `entries(con, triage_id)` | optional triage id | rows, oldest first | none |
+| `entries(con, triage_id)` | optional triage id | rows, oldest first; for a triage, also every call from the run that proposed it | none |
 
 ## Depends on / used by
 - Depends on: `schemas.AuditEntry`, SQLite.

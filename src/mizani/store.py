@@ -30,6 +30,11 @@ def create(
     )
 
 
+def link_run(con: sqlite3.Connection, triage_id: str, run_id: str) -> None:
+    """Remember which agent run proposed this triage, so its timeline shows the whole run."""
+    con.execute("UPDATE triage SET run_id = ? WHERE id = ?", (run_id, triage_id))
+
+
 def get(con: sqlite3.Connection, triage_id: str) -> dict | None:
     row = con.execute("SELECT * FROM triage WHERE id = ?", (triage_id,)).fetchone()
     if row is None:
