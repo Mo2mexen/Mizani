@@ -77,7 +77,7 @@ Triage scales are YAML files, and each rule records its source. To add a scale (
 
 ## Running it
 
-`git clone`, then `docker compose up`. Today this starts the model server (Ollama, pulling the model once) and our MCP server at `http://127.0.0.1:8000/mcp`, which you can try by hand with `npx @modelcontextprotocol/inspector`. The agent and web UI join the same command as they land. Everything you need to install, for running and for development, is listed in [packages.txt](packages.txt). How the parts fit: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+`git clone`, then `docker compose up`. Today this starts the model server (Ollama, pulling the model once), our MCP server at `http://127.0.0.1:8000/mcp`, which you can try by hand with `npx @modelcontextprotocol/inspector`, and the API with the agent at `http://127.0.0.1:8080` (try it from `http://127.0.0.1:8080/docs`, or with curl as in [docs/systems/api.md](docs/systems/api.md)). The web UI joins the same command when it lands. On a Mac, Docker has no GPU access, so the model is faster in the Ollama app on the Mac itself: set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. Everything you need to install, for running and for development, is listed in [packages.txt](packages.txt). How the parts fit: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Develop and test
 
@@ -101,7 +101,8 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 | Rules engine (SATS adult), every rule cited | done, 85 tests |
 | MCP server `mizani-triage`: 5 tools, 4 resources, 2 prompts, approval gate, hash-chained audit | done, tested through an MCP client |
 | Agent (LangGraph): reads the entry, checks vitals, scores through the MCP tools, pauses for the nurse, commits with the nurse's token; retries and falls back when the model's tool calls are wrong; model, tokens and cost logged with every call | done, tested with a fake model and live with Qwen3.5 4B |
-| API, web UI | in progress |
+| API (FastAPI): intake, live agent steps as server-sent events, nurse decision (approval token), re-measure, queue, colours, audit log with chain check | done, tested, run live with Qwen3.5 4B |
+| Web UI | not started |
 | FHIR integration | not started |
 | Re-triage watch: target-time timers, `raise_recheck_flag`, re-score as a new pending proposal | done (server side) |
 | Handover, shadow mode | not started |

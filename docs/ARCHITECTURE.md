@@ -46,7 +46,7 @@ Default `qwen3.5:4b-q4_K_M` (fits a 4 GB GPU or a 16 GB Apple Silicon laptop); `
 Synthetic patients only. One local SQLite file holds triages, used tokens and the audit log; LangGraph checkpoints and FHIR data stay on the same machine. Nothing is sent to an outside service.
 
 ## Running
-`docker compose up` starts the model server (Ollama), pulls the model once, and starts `mizani-triage`. The API, web UI and FHIR services join the same compose file as they are built.
+`docker compose up` starts the model server (Ollama), pulls the model once, and starts `mizani-triage` and the API with the agent (`http://127.0.0.1:8080`). The web UI and FHIR services join the same compose file as they are built.
 
 ## Status
 | Part | State |
@@ -55,7 +55,8 @@ Synthetic patients only. One local SQLite file holds triages, used tokens and th
 | `mizani-triage` MCP server: 6 tools, 4 resources, 2 prompts, approval gate, audit chain | built, tested through an MCP client |
 | Model server in compose | built, tested with GPU |
 | LangGraph agent: extract → validate → score → discriminators → propose → nurse → commit, with retries, fallback and the re-measure loop | built, tested with a fake model and live with Qwen3.5 4B against `mizani-triage` |
-| FastAPI, web UI | in progress |
+| FastAPI: intake, live agent steps (server-sent events), nurse decision → approval token, re-measure, queue, colours, audit | built, tested, run live with Qwen3.5 4B |
+| Web UI | not started |
 | wso2 fhir-mcp-server + HAPI FHIR | planned |
 | Re-triage watch (timers, re-check flag, re-score) | built on the server; the agent's watch step is in progress |
 | Handover draft, shadow mode | planned |
