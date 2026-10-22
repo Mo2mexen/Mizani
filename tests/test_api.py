@@ -210,3 +210,13 @@ def test_commit_writes_fhir_when_configured(monkeypatch):
         steps = [d for kind, d, _ in events(api, run, until="committed") if kind == "step"]
     assert written == [(triage_id, "http://fhir-mcp:8000/mcp/")]
     assert steps[-1]["name"] == "fhir_create" and steps[-1]["output"]["Encounter"] == "e1"
+
+
+def test_the_built_nurse_page_is_served_beside_the_api(tmp_path, monkeypatch):
+    (tmp_path / "index.html").write_text("<title>Mizani</title>")
+    monkeypatch.setenv("MIZANI_WEB_DIR", str(tmp_path))
+    with client() as api:
+        page = api.get("/")
+        colours = api.get("/api/colours")
+    assert page.status_code == 200 and "<title>Mizani</title>" in page.text
+    assert colours.status_code == 200 and colours.json()  # the API still wins under /api
