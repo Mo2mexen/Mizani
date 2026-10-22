@@ -2,7 +2,7 @@
 #   docker compose up
 # NVIDIA GPU (Windows/Linux):
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
-# The MCP server (M1) and the app (U1) are added here as they are built.
+# The app (U1) is added here when it is built.
 
 services:
   ollama:
@@ -33,5 +33,18 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # Our MCP server: SATS tools, approval-gated commit, hash-chained audit log.
+  # Reachable from other services at http://mizani-mcp:8000/mcp, and from this machine only
+  # at http://127.0.0.1:8000/mcp (for MCP Inspector).
+  mizani-mcp:
+    build: .
+    environment:
+      MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-local-demo-secret-change-me}
+    volumes:
+      - mizani-data:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+
 volumes:
   ollama-models:
+  mizani-data:
