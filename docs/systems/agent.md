@@ -58,7 +58,7 @@ We use the MCP SDK client directly because `langchain-mcp-adapters` only support
 - The model never sets a colour: it only names vitals and chart ids, the rules engine scores, and signs not on the chart are flagged and ignored (the rules win).
 - Nothing is committed without a named nurse: the flow always pauses before `commit_triage`, and only a token from the nurse's decision gets past the server.
 - Patient text is data: the complaint is fenced in tags with a closing tag in the text neutralised, and the prompt says to ignore instructions inside it.
-- Every tool call is logged with the run's model, and each model call's tokens and cost are on exactly one audit row: the first tool call after it. That includes model answers the flow rejected and retried, so adding up a run's rows gives what the model really used (fixed 22 Oct; before, two rows carried the same model call). Each call also sends `_meta.run_id`, the API's run id.
+- Every tool call is logged with the run's model, and each model call's tokens and cost are on exactly one audit row: the first tool call after it. That includes model answers the flow rejected and retried, so adding up a run's rows gives what the model really used (fixed 22 Oct; before, two rows carried the same model call). Each call also sends `_meta.run_id` (the run's `thread_id`), which the MCP server stores, so a patient's timeline (`patient://{id}/timeline`, `/api/audit?triage_id=`) includes the checks made before the triage existed.
 - The model can only call what the server offers, with the server's schemas. The server, not the agent, refuses unsafe calls such as a commit without a nurse's approval, and the agent sees the refusal.
 - Nothing leaves the machine by default: the model endpoint is local Ollama, and LangSmith tracing stays off unless someone sets its environment variables.
 
@@ -70,7 +70,6 @@ uv run python -c "import asyncio; from mizani.agent.mcp_tools import load_tools;
 ```
 
 ## Known limitations
-- The audit rows of `validate_vitals`, `compute_tews` and `match_discriminators` have no triage id, because they run before `propose_priority` creates the triage. A patient's timeline (`patient://{id}/timeline`, `/api/audit?triage_id=`) therefore shows only `propose_priority` and `commit_triage`; the full log has every row. The agent already sends `_meta.run_id`; once the MCP server stores it in the row, a run's rows can be read together.
 - On a MacBook Air M4 with `qwen3.5:4b`, a patient reaches the nurse in about 9 to 12 seconds (one model call of about 1,650 tokens). Three live cases on 22 Oct gave the expected colours and the model ignored an instruction hidden in a complaint, but for a fall from a roof it named the compound fracture and missed "high energy transfer". The evals (E2 to E4) measure how often this happens.
 - Each re-measure creates a new pending triage with a new id; the earlier pending one stays in the database, uncommitted and out of the queue.
 - The approval token passes through the run's checkpoint (it is single-use and expires after 15 minutes).

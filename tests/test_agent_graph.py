@@ -98,6 +98,15 @@ async def test_stops_for_the_nurse_then_commits_with_the_nurse_token():
     assert (done["committed"]["colour"], done["committed"]["approver"]) == ("orange", "Nurse A")
 
     rows = {r["tool"]: r for r in audit.entries(db(), tid)}
+    # The run id in `_meta` links the checks made before the triage existed to this patient.
+    assert set(rows) == {
+        "validate_vitals",
+        "compute_tews",
+        "match_discriminators",
+        "propose_priority",
+        "commit_triage",
+    }
+    assert {r["run_id"] for r in rows.values()} == {"patient-1"}
     assert rows["propose_priority"]["model"] == "fake-model"
     assert rows["commit_triage"]["approver"] == "Nurse A"
     model_asked = [r for r in audit.entries(db()) if r["tool"] in ("validate_vitals",)]

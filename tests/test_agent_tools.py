@@ -2,6 +2,7 @@ import json
 
 import pytest
 from langchain_core.messages import ToolMessage
+from mcp.client import Client
 
 from mizani import audit
 from mizani.agent.mcp_tools import load_tools, with_meta
@@ -35,13 +36,10 @@ def tool_call(name, args):
 
 async def test_loads_every_server_tool_with_its_schema():
     loaded = await tools()
-    assert set(loaded) == {
-        "validate_vitals",
-        "compute_tews",
-        "match_discriminators",
-        "propose_priority",
-        "commit_triage",
-    }
+    async with Client(mcp) as client:
+        listed = {t.name for t in (await client.list_tools()).tools}
+    assert set(loaded) == listed
+    assert {"validate_vitals", "propose_priority", "commit_triage"} <= listed
     assert "vitals" in loaded["compute_tews"].args
     assert loaded["compute_tews"].metadata["read_only"] is True
     assert loaded["commit_triage"].metadata["read_only"] is False
