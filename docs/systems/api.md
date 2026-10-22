@@ -6,7 +6,7 @@ The HTTP API the nurse's web page talks to. It starts one agent run per patient,
 - Code: `src/mizani/api.py` (command `mizani-api`); re-check watch `src/mizani/agent/watch.py`
 - Tests: `tests/test_api.py` (the real flow and MCP server in memory, a fake model)
 - Container: service `app` in `docker-compose.yml`, `http://127.0.0.1:8090` (`MIZANI_API_PORT`, default 8090: 8080 is often taken)
-- Settings: `LLM_BASE_URL`, `LLM_MODEL`, `MIZANI_MCP_URL`, `MIZANI_APPROVAL_SECRET` (same value as the MCP server), `MIZANI_DB`, `MIZANI_API_HOST` (default `127.0.0.1`), `MIZANI_API_PORT` (default `8090`), `MIZANI_FHIR_MCP_URL` (wso2's server; unset means no FHIR output)
+- Settings: `LLM_BASE_URL`, `LLM_MODEL`, `MIZANI_MCP_URL`, `MIZANI_APPROVAL_SECRET` (same value as the MCP server), `MIZANI_DB`, `MIZANI_API_HOST` (default `127.0.0.1`), `MIZANI_API_PORT` (default `8090`), `MIZANI_FHIR_MCP_URL` (wso2's server; unset means no FHIR output), `MIZANI_WEB_DIR` (the built web page served at `/`, default `web/dist`; skipped if the folder doesn't exist)
 
 ## How it works
 1. At start-up the API connects to `mizani-triage` (retrying while it starts), loads its tools, the rule pack and the colours, and builds the agent (agent.md) with LangGraph's SQLite checkpointer in `checkpoints.db` next to the database.
@@ -36,10 +36,11 @@ The HTTP API the nurse's web page talks to. It starts one agent run per patient,
 | `GET /api/queue` | | waiting patients by colour then arrival (`queue://current`), with `waited_minutes`, `minutes_since_triage`, `target_minutes`, `recheck_due`, `recheck_raised` | none |
 | `GET /api/audit` | optional `triage_id` | every logged tool call, oldest first | none |
 | `GET /api/audit/verify` | | `{intact, first_broken_row}` | none |
+| `GET /` | | the nurse's web page (web.md), when `web/dist` is built; the Docker image always has it | none |
 
 ## Depends on / used by
 - Depends on: the agent (agent.md), `approval.py`, `audit.py`, the `mizani-triage` MCP server (tools and the `rules://sats/adult`, `rules://sats/targets` and `queue://current` resources), FastAPI, uvicorn.
-- Used by: the web UI (`web/`, not built yet); curl and the FastAPI `/docs` page until then. The contract the UI codes against is in the team's UI plan.
+- Used by: the nurse's web page (`web/`, web.md), which it also serves at `/`; curl and the FastAPI `/docs` page for testing.
 
 ## Safety rules this system enforces
 - Only this API makes approval tokens, and only from a validated decision with a nurse's name; the token goes from here to the agent's commit step and never to the model or the browser.
