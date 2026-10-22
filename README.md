@@ -86,7 +86,8 @@ Triage scales are YAML files, and each rule records its source. To add a scale (
 | Design, rule-pack format, tool list | done |
 | Rules engine (SATS adult), every rule cited | done, 85 tests |
 | MCP server `mizani-triage`: 5 tools, 4 resources, 2 prompts, approval gate, hash-chained audit | done, tested through an MCP client |
-| Agent, API, web UI | in progress |
+| Agent: model client (any OpenAI-compatible endpoint, thinking off) and MCP tools that log model, tokens and cost with every call | done, tested with Qwen3.5 4B against the MCP server |
+| Agent flow (LangGraph), API, web UI | in progress |
 | FHIR integration | not started |
 | Re-triage watch, handover, shadow mode | not started |
 | Evaluation suite | not started |
@@ -102,7 +103,7 @@ Paediatric SATS and the WHO/ICRC/MSF triage tool as rule packs, voice input for 
 | Component | Licence |
 |---|---|
 | MCP Python SDK | MIT |
-| LangGraph, langchain-mcp-adapters | MIT |
+| LangGraph, LangChain (langchain-core, langchain-openai) | MIT |
 | FastAPI | MIT |
 | Pydantic | MIT |
 | PyYAML | MIT |
