@@ -28,6 +28,11 @@ def test_vitals_reject_unknown_avpu():
         Vitals(avpu="drowsy")
 
 
+def test_vitals_accept_sats_confused_and_glucose_inputs():
+    v = Vitals(avpu="confused", glucose=2.8, ketonuria=False)
+    assert (v.avpu, v.glucose, v.ketonuria) == ("confused", 2.8, False)
+
+
 @pytest.mark.parametrize("source", ["", "   "])
 def test_every_sourced_item_needs_a_source(source):
     with pytest.raises(ValidationError):
@@ -42,9 +47,9 @@ def test_tews_total_must_match_components():
 
 def test_proposal_is_always_pending():
     tews = Tews(total=0, components=[])
-    assert Proposal(triage_id="t1", colour="green", tews=tews).status == "pending"
+    assert Proposal(triage_id="t1", colour="green", tews=tews, source="TEWS 0").status == "pending"
     with pytest.raises(ValidationError):
-        Proposal(triage_id="t1", colour="green", tews=tews, status="committed")
+        Proposal(triage_id="t1", colour="green", tews=tews, source="TEWS 0", status="committed")
 
 
 def test_decision_needs_a_named_nurse():
