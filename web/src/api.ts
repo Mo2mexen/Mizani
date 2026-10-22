@@ -70,22 +70,28 @@ export const api = USE_MOCK
       verify: () => call<{ intact: boolean; first_broken_row: number | null }>("GET", "/api/audit/verify"),
     };
 
+type StreamEvent = "step" | "proposal" | "committed" | "error";
+export type StreamHandlers = { [event in StreamEvent]: (data: never) => void } & {
+  /** true while the connection is down and the browser retries; false once it is back */
+  connection: (isReconnecting: boolean) => void;
+};
+
 /** The run's server-sent events: "step", "proposal", "committed", "error". Returns a close function. */
-export function openStream(
-  runId: string,
-  on: { [event in "step" | "proposal" | "committed" | "error"]: (data: never) => void },
-): () => void {
+export function openStream(runId: string, on: StreamHandlers): () => void {
   if (USE_MOCK) return mock.openStream(runId, on);
   const source = new EventSource(`/api/triage/${runId}/stream`);
+  source.onopen = () => on.connection(false);
+  source.onerror = () => {
+    if (source.readyState === EventSource.CLOSED) {
+      on.error({ message: "Lost the connection to the API. Reload the page to continue." } as never);
+    } else {
+      on.connection(true); // the browser retries by itself and resumes with Last-Event-ID
+    }
+  };
   for (const event of ["step", "proposal", "committed", "error"] as const) {
     source.addEventListener(event, (e) => {
-      // The browser also fires a plain "error" Event (no data) when the connection drops.
-      if (!(e instanceof MessageEvent) || typeof e.data !== "string") {
-        if (source.readyState === EventSource.CLOSED) {
-          on.error({ message: "Lost the connection to the API. Reload the page to continue." } as never);
-        }
-        return; // still CONNECTING: the browser retries with Last-Event-ID by itself
-      }
+      // A plain "error" Event (no data) is the connection dropping, handled by onerror above.
+      if (!(e instanceof MessageEvent) || typeof e.data !== "string") return;
       on[event](JSON.parse(e.data) as never);
       if (event === "committed" || event === "error") source.close(); // the stream ends here
     });

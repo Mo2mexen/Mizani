@@ -3,7 +3,7 @@ import { openStream } from "./api";
 import type { Committed, Proposal, RunState, TraceStep } from "./types";
 
 function fresh(runId: string): RunState {
-  return { runId, steps: [], proposal: null, commitError: null, committed: null, error: null };
+  return { runId, steps: [], proposal: null, commitError: null, committed: null, error: null, isReconnecting: false };
 }
 
 /** Follows one agent run's event stream: the steps as they happen, the proposal, the end. */
@@ -16,6 +16,7 @@ export function useRun(runId: string | null): RunState | null {
     const update = (change: (s: RunState) => RunState) =>
       setState((s) => change(s && s.runId === runId ? s : fresh(runId)));
     return openStream(runId, {
+      connection: (isReconnecting: boolean) => update((s) => ({ ...s, isReconnecting })),
       step: (step: TraceStep) => update((s) => ({ ...s, steps: [...s.steps, step] })),
       proposal: (data: { proposal: Proposal; error: string | null }) =>
         update((s) => ({ ...s, proposal: data.proposal, commitError: data.error })),
