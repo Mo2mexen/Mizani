@@ -11,9 +11,11 @@ Mizani is a triage co-pilot for a hospital front desk. A nurse enters vitals and
    ├─ MCP ──► mizani-triage (built by us)
    │            tools: validate_vitals · compute_tews · match_discriminators
    │                   propose_priority · commit_triage (needs approval token)
-   │                   raise_recheck_flag
+   │                   raise_recheck_flag · draft_handover · release_handover (needs token)
+   │                   record_nurse_assessment
    │            resources: rules://sats/adult · rules://sats/targets · queue://current
-   │                       patient://{id}/timeline        prompts: triage_intake · handover_summary
+   │                       patient://{id}/timeline · report://shadow-agreement
+   │            prompts: triage_intake · handover_summary
    │            ├─ SATS rules engine (YAML rule pack, every rule cited)
    │            └─ SQLite: triages · used tokens · hash-chained audit log
    │
@@ -31,10 +33,11 @@ No existing MCP server encodes SATS, and we wanted the safety rules enforced by 
 - **Human approval in the server.** `commit_triage` refuses unless it gets a token signed for that triage by the API after a named nurse decides. Tokens expire and work once. The model never holds the signing secret.
 - **Audit.** Middleware writes every tool call (inputs, outputs, time, approver, model, tokens, latency, cost) to a SHA-256 hash chain; editing any past row breaks the chain.
 - **Patient text is data.** Complaints are stored as-is; the intake prompt fences them and tells the model to ignore instructions inside them.
+- **Handover needs a nurse too.** The agent only drafts the doctor handover; it reaches the doctor when a nurse releases it with a handover-purpose token (a commit token won't do, and vice versa).
 - **Watch, never act.** The queue reports when a patient's SATS target time has passed; `raise_recheck_flag` only alerts the nurse (and is refused before the timer runs out), and a re-score with fresh vitals is just another pending proposal for the nurse to approve.
 - **Signs by meaning, not guesswork.** The intake prompt lists every chart sign with the EMSSA manual's definition where it has one, and forbids inferring a diagnosis (a twisted ankle is not a fracture).
 
-Details: [docs/systems/mcp-server.md](systems/mcp-server.md), [retriage-watch.md](systems/retriage-watch.md), [rules-engine.md](systems/rules-engine.md), [approval.md](systems/approval.md), [audit.md](systems/audit.md).
+Details: [docs/systems/mcp-server.md](systems/mcp-server.md), [retriage-watch.md](systems/retriage-watch.md), [handover-and-shadow.md](systems/handover-and-shadow.md), [rules-engine.md](systems/rules-engine.md), [approval.md](systems/approval.md), [audit.md](systems/audit.md).
 
 ## The MCP server we borrowed: wso2 `fhir-mcp-server`
 After a triage is committed, the agent writes Patient, Encounter and Observation resources to a local HAPI FHIR server through wso2's MCP server (pinned release 0.10.0): the Encounter has status `triaged` and the SATS colour as its priority, and the vital signs use the FHIR R4 LOINC codes. FHIR is how hospital record systems exchange data, and a maintained, tested FHIR MCP server (Apache-2.0) saves us writing and securing our own FHIR client. Only nurse-committed triages are written. Details: [docs/systems/fhir.md](systems/fhir.md).
@@ -52,9 +55,9 @@ Synthetic patients only. One local SQLite file holds triages, used tokens and th
 | Part | State |
 |---|---|
 | SATS adult rule pack and engine | built, 85 tests |
-| `mizani-triage` MCP server: 6 tools, 4 resources, 2 prompts, approval gate, audit chain | built, tested through an MCP client |
+| `mizani-triage` MCP server: 9 tools, 5 resources, 2 prompts, approval gate, audit chain | built, tested through an MCP client |
 | Model server in compose | built, tested with GPU |
 | LangGraph agent, FastAPI, web UI | in progress |
 | wso2 fhir-mcp-server + HAPI FHIR: committed triage → Patient, Encounter, Observations | built, verified end to end against the running stack |
 | Re-triage watch (timers, re-check flag, re-score) | built on the server; the agent's watch step is in progress |
-| Handover draft, shadow mode | planned |
+| Handover gate (draft, nurse release), shadow mode (nurse's own colour, agreement report) | built on the server; the agent and UI steps are in progress |

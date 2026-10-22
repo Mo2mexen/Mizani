@@ -70,6 +70,9 @@ async def test_tools_listed_with_read_and_action_hints():
         "propose_priority",
         "commit_triage",
         "raise_recheck_flag",
+        "draft_handover",
+        "release_handover",
+        "record_nurse_assessment",
     }
     assert tools["compute_tews"].annotations.read_only_hint is True
     assert tools["commit_triage"].annotations.read_only_hint is False
@@ -348,3 +351,88 @@ async def test_retriage_is_a_pending_proposal_until_a_nurse_commits_it():
     new = json.loads(await _read(f"patient://{second['triage_id']}/timeline"))["triage"]
     assert new["arrived_at"] == old["arrived_at"] and old["superseded_by"] == second["triage_id"]
     assert "still in the queue" in error_text(again)
+
+
+HANDOVER = "\n".join(
+    [
+        "RR 24, HR 118, SBP 95, temp 38.9; chest pain",
+        "Red: TEWS 8 (chart flowchart)",
+        "Waited 5 min",
+    ]
+)
+
+
+def handover_token(triage_id):
+    return approval.issue_approval(
+        triage_id, NurseDecision(nurse_name="Nurse B", action="approve"), purpose="handover"
+    )
+
+
+async def test_handover_is_drafted_then_released_only_by_a_nurse():
+    async with Client(mcp) as client:
+        p = await propose(client, ["chest_pain"])
+        r = await client.call_tool(
+            "draft_handover", {"triage_id": p["triage_id"], "text": HANDOVER}
+        )
+        assert "only for committed" in error_text(r)
+        await commit(client, p["triage_id"])
+        long = "\n".join(["line"] * 4)
+        r = await client.call_tool("draft_handover", {"triage_id": p["triage_id"], "text": long})
+        assert "1 to 3 lines" in error_text(r)
+        d = data(
+            await client.call_tool(
+                "draft_handover", {"triage_id": p["triage_id"], "text": HANDOVER}
+            )
+        )
+        assert d["status"] == "awaiting_release"
+
+        release = {"triage_id": p["triage_id"], "approval_token": ""}
+        assert "no approval token" in error_text(
+            await client.call_tool("release_handover", release)
+        )
+        release["approval_token"] = token(p["triage_id"])  # a commit token
+        assert "not handover" in error_text(await client.call_tool("release_handover", release))
+        release["approval_token"] = handover_token(p["triage_id"])
+        done = data(await client.call_tool("release_handover", release))
+        again = await client.call_tool("release_handover", release)
+    assert done["approver"] == "Nurse B" and done["text"].startswith("RR 24")
+    assert "no unreleased handover" in error_text(again)
+    timeline = json.loads(await _read(f"patient://{p['triage_id']}/timeline"))
+    assert timeline["handovers"][0]["released_by"] == "Nurse B"
+    released = [e for e in timeline["audit"] if e["tool"] == "release_handover" and not e["error"]]
+    assert released[0]["approver"] == "Nurse B"
+
+
+async def test_a_handover_token_cannot_commit_a_triage():
+    async with Client(mcp) as client:
+        p = await propose(client)
+        r = await client.call_tool(
+            "commit_triage",
+            {"triage_id": p["triage_id"], "approval_token": handover_token(p["triage_id"])},
+        )
+    assert "not commit" in error_text(r)
+
+
+async def test_shadow_mode_records_the_nurses_colour_and_reports_agreement():
+    async with Client(mcp) as client:
+        a = await propose(client, ["chest_pain"])  # orange
+        b = await propose(client)  # green
+        args = {"triage_id": a["triage_id"], "nurse_name": "Nurse C", "colour": "orange"}
+        data(await client.call_tool("record_nurse_assessment", args))
+        assert "already has" in error_text(await client.call_tool("record_nurse_assessment", args))
+        bad = {**args, "triage_id": b["triage_id"], "colour": "purple"}
+        assert "not a SATS colour" in error_text(
+            await client.call_tool("record_nurse_assessment", bad)
+        )
+        disagree = {
+            "triage_id": b["triage_id"],
+            "nurse_name": "Nurse C",
+            "colour": "yellow",
+            "reason": "looks pale",
+        }
+        data(await client.call_tool("record_nurse_assessment", disagree))
+    report = json.loads(await _read("report://shadow-agreement"))
+    assert (report["assessed"], report["agreed"], report["agreement_rate"]) == (2, 1, 0.5)
+    only = report["disagreements"][0]
+    assert (only["nurse_colour"], only["mizani_colour"]) == ("yellow", "green")
+    assert only["mizani_source"].startswith("TEWS 0")
