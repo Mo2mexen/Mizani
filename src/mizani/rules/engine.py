@@ -151,11 +151,13 @@ def _found(quote: str, text: str) -> bool:
     if f" {q} " in f" {t} ":
         return True
     words, n = t.split(), len(q.split())
-    return any(
-        SequenceMatcher(None, " ".join(words[i : i + size]), q).ratio() >= QUOTE_MATCH
-        for size in {max(1, n - 1), n, n + 1}
-        for i in range(len(words) - size + 1)
-    )
+    for size in {max(1, n - 1), n, n + 1}:
+        for i in range(len(words) - size + 1):
+            match = SequenceMatcher(None, " ".join(words[i : i + size]), q)
+            # quick_ratio is a cheap upper bound, so most windows are skipped without ratio()
+            if match.quick_ratio() >= QUOTE_MATCH and match.ratio() >= QUOTE_MATCH:
+                return True
+    return False
 
 
 def instructions(complaint: str) -> list[str]:

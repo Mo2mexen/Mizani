@@ -159,7 +159,7 @@ def raise_recheck(con: sqlite3.Connection, triage_id: str, pack: RulePack) -> di
 
 
 HANDOVER_MAX_LINES, HANDOVER_MAX_CHARS = 3, 600
-NUMBER = re.compile(r"\d+(?:\.\d+)?")
+NUMBER = re.compile(r"(?<![A-Za-z])\d+(?:\.\d+)?")  # not the 2 of "SpO2" or the 9 of "p9"
 # "waited 20 minutes", "waiting for 2 h": a stated waiting time, checked against the record
 WAITED = re.compile(r"\bwait\w*\D{0,25}?(\d+(?:\.\d+)?)\s*(min|h\b|hour)", re.IGNORECASE)
 

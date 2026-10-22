@@ -73,8 +73,8 @@ class SignClaim(Contract):
     The engine applies it only if those words are in the complaint and not in text addressed
     to the system."""
 
-    id: str = Field(min_length=1)
-    quote: str = ""
+    id: str = Field(min_length=1, max_length=80)
+    quote: str = Field(default="", max_length=300)  # a phrase, not the whole complaint
 
 
 class Flag(Sourced):

@@ -341,7 +341,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             lines = [line for line in str(call.message.content).splitlines() if line.strip()]
             text = "\n".join([*lines, waited])
             try:
-                if len(lines) > 2:
+                if not 1 <= len(lines) <= 2:
                     raise HTTPException(409, "write two lines; the waiting time is added for you")
                 args = {"triage_id": triage_id, "text": text}
                 return {**await call_tool("draft_handover", args, call.meta()), "text": text}

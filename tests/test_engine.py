@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import pytest
@@ -302,3 +303,13 @@ def test_a_diabetic_sign_from_the_complaint_stands_when_nothing_measured_rules_i
     complaint = "Known diabetic, ketones positive at the clinic."
     p = propose("t1", Vitals(**NORMAL, glucose=15.0), claims, PACK, complaint)
     assert p.colour == "orange"
+
+
+def test_a_quote_is_a_phrase_and_the_check_stays_fast():
+    with pytest.raises(ValueError):
+        SignClaim(id="chest_pain", quote="x" * 301)
+    complaint = " ".join(["word"] * 400)  # the longest complaint the server accepts is 2000 chars
+    started = time.perf_counter()
+    for _ in range(20):  # the most signs one call may name
+        said(complaint, chest_pain="y" * 300)
+    assert time.perf_counter() - started < 2

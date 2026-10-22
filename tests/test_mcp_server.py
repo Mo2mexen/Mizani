@@ -573,6 +573,7 @@ async def test_oversized_inputs_are_refused():
     [
         ("SpO2 97%, BP 120/80", "97 not in the patient's record"),  # neither was measured
         ("Fell 20 minutes ago; waited 20 minutes", "waited 0 min, not 20 min"),
+        ("SpO2 not measured; BP 120", None),  # the 2 of SpO2 is not a number
     ],
 )
 async def test_a_handover_states_only_numbers_from_the_record(line, refusal):
@@ -586,4 +587,5 @@ async def test_a_handover_states_only_numbers_from_the_record(line, refusal):
         p = data(await client.call_tool("propose_priority", args))
         await commit(client, p["triage_id"])
         draft = {"triage_id": p["triage_id"], "text": f"{line}\nOrange: chest pain"}
-        assert refusal in error_text(await client.call_tool("draft_handover", draft))
+        result = await client.call_tool("draft_handover", draft)
+        assert (refusal in error_text(result)) if refusal else not result.is_error
