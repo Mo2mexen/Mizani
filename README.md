@@ -102,7 +102,8 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 | MCP server `mizani-triage`: 5 tools, 4 resources, 2 prompts, approval gate, hash-chained audit | done, tested through an MCP client |
 | Agent, API, web UI | in progress |
 | FHIR integration | not started |
-| Re-triage watch, handover, shadow mode | not started |
+| Re-triage watch: target-time timers, `raise_recheck_flag`, re-score as a new pending proposal | done (server side) |
+| Handover, shadow mode | not started |
 | Evaluation suite | not started |
 
 This table is updated as parts land.

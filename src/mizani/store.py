@@ -14,18 +14,28 @@ def now() -> datetime:
 
 
 def create(
-    con: sqlite3.Connection, patient_label: str, complaint: str, vitals: Vitals, proposal: Proposal
+    con: sqlite3.Connection,
+    patient_label: str,
+    complaint: str,
+    vitals: Vitals,
+    proposal: Proposal,
+    retriage_of: str | None = None,
 ) -> None:
+    """A re-triage keeps the patient's original arrival time: the wait doesn't restart."""
+    arrived_at = now().isoformat()
+    if retriage_of is not None:
+        arrived_at = get(con, retriage_of)["arrived_at"]
     con.execute(
-        "INSERT INTO triage (id, patient_label, complaint, vitals, proposal, status, arrived_at)"
-        " VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+        "INSERT INTO triage (id, patient_label, complaint, vitals, proposal, status, arrived_at,"
+        " retriage_of) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
         (
             proposal.triage_id,
             patient_label,
             complaint,
             vitals.model_dump_json(),
             proposal.model_dump_json(),
-            now().isoformat(),
+            arrived_at,
+            retriage_of,
         ),
     )
 
@@ -68,6 +78,11 @@ def commit(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
             " committed_at = ? WHERE id = ?",
             (colour, approval["nurse_name"], json.dumps(decision), committed_at, triage_id),
         )
+        if record["retriage_of"] is not None:  # the approved re-triage replaces the old entry
+            con.execute(
+                "UPDATE triage SET superseded_by = ? WHERE id = ?",
+                (triage_id, record["retriage_of"]),
+            )
         con.execute("COMMIT")
     except BaseException:
         con.execute("ROLLBACK")
@@ -81,25 +96,52 @@ def commit(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
     }
 
 
+def _minutes_since(iso: str) -> float:
+    return (now() - datetime.fromisoformat(iso)).total_seconds() / 60
+
+
 def queue(con: sqlite3.Connection, pack: RulePack) -> list[dict]:
-    """Committed patients, most urgent colour first, then by arrival. Read only: the order comes
-    from the nurses' committed colours, never from the agent."""
+    """Committed patients still waiting, most urgent colour first, then by arrival. Read only:
+    the order comes from the nurses' committed colours, never from the agent.
+
+    A re-check is due once the time since the patient's last triage passes the target time to
+    be seen for their colour (manual p6, Table 3)."""
     targets = {c.colour: c.target_minutes for c in pack.colours}
     rows = con.execute(
-        "SELECT id, patient_label, colour, arrived_at FROM triage WHERE status = 'committed'"
+        "SELECT id, patient_label, colour, arrived_at, committed_at, recheck_raised_at"
+        " FROM triage WHERE status = 'committed' AND superseded_by IS NULL"
     ).fetchall()
     out = []
     for row in rows:
-        waited = (now() - datetime.fromisoformat(row["arrived_at"])).total_seconds() / 60
+        since_triage = _minutes_since(row["committed_at"])
         out.append(
             {
                 "triage_id": row["id"],
                 "patient_label": row["patient_label"],
                 "colour": row["colour"],
                 "arrived_at": row["arrived_at"],
-                "waited_minutes": round(waited, 1),
+                "waited_minutes": round(_minutes_since(row["arrived_at"]), 1),
+                "minutes_since_triage": round(since_triage, 1),
                 "target_minutes": targets[row["colour"]],
-                "over_target": waited > targets[row["colour"]],
+                "recheck_due": since_triage > targets[row["colour"]],
+                "recheck_raised": row["recheck_raised_at"] is not None
+                and row["recheck_raised_at"] >= row["committed_at"],
             }
         )
     return sorted(out, key=lambda r: (pack.rank(r["colour"]), r["arrived_at"]))
+
+
+def raise_recheck(con: sqlite3.Connection, triage_id: str, pack: RulePack) -> dict:
+    """Record a re-check flag, but only for a waiting patient whose timer has really run out."""
+    entry = next((r for r in queue(con, pack) if r["triage_id"] == triage_id), None)
+    if entry is None:
+        raise ValueError("not a committed patient in the waiting queue")
+    if not entry["recheck_due"]:
+        raise ValueError(
+            f"not due: triaged {entry['minutes_since_triage']:.0f} min ago, target for "
+            f"{entry['colour']} is {entry['target_minutes']} min"
+        )
+    con.execute(
+        "UPDATE triage SET recheck_raised_at = ? WHERE id = ?", (now().isoformat(), triage_id)
+    )
+    return entry

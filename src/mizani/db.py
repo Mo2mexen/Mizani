@@ -18,7 +18,10 @@ CREATE TABLE IF NOT EXISTS triage (
     approver TEXT,
     decision TEXT,                    -- JSON: action, colour, reason
     committed_at TEXT,
-    run_id TEXT                       -- the agent run that proposed it (_meta.run_id)
+    run_id TEXT,                      -- the agent run that proposed it (_meta.run_id)
+    retriage_of TEXT,                 -- re-score of this earlier triage (W1)
+    superseded_by TEXT,               -- set when a committed re-triage replaces this one
+    recheck_raised_at TEXT            -- last raise_recheck_flag for this triage
 );
 CREATE TABLE IF NOT EXISTS used_token (nonce TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS audit (
@@ -33,6 +36,13 @@ CREATE TABLE IF NOT EXISTS audit (
     hash TEXT NOT NULL
 );
 """
+ADDED_COLUMNS = [
+    ("triage", "run_id"),
+    ("audit", "run_id"),
+    ("triage", "retriage_of"),
+    ("triage", "superseded_by"),
+    ("triage", "recheck_raised_at"),
+]
 
 
 def db_path() -> Path:
@@ -46,10 +56,10 @@ def _connect(path: str) -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.executescript(SCHEMA)
-    for table in ("triage", "audit"):  # databases created before run_id existed
+    for table, column in ADDED_COLUMNS:  # databases created before these columns existed
         columns = {row["name"] for row in con.execute(f"PRAGMA table_info({table})")}
-        if "run_id" not in columns:
-            con.execute(f"ALTER TABLE {table} ADD COLUMN run_id TEXT")
+        if column not in columns:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
     return con
 
 
