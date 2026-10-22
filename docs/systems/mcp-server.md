@@ -20,11 +20,15 @@ The agent reads the rules (`rules://sats/adult`), checks vitals, names chart dis
 | `match_discriminators` | tool, read | `discriminator_ids`, `vitals` | chart signs + `not_on_chart` flags | audit row |
 | `propose_priority` | tool, action | `patient_label`, `complaint`, `vitals`, `discriminator_ids`, optional `retriage_of` | pending `Proposal` (with a `retriage` flag when re-scoring) | new triage row, audit row |
 | `commit_triage` | tool, action, gated | `triage_id`, `approval_token` | committed colour, approver | triage committed (a re-triage replaces the old entry), token used, audit row |
+| `draft_handover` | tool, action | `triage_id`, `text` (1–3 lines) | unreleased draft | stores it; audit row (handover-and-shadow.md) |
+| `release_handover` | tool, action, gated | `triage_id`, `approval_token` (purpose handover) | released text, approver | marks it released, token used; audit row |
+| `record_nurse_assessment` | tool, action | `triage_id`, `nurse_name`, `colour`, `reason` | stored assessment | one per triage; audit row |
 | `raise_recheck_flag` | tool, action | `triage_id` | `recheck_due` flag citing the target time | refused unless the timer ran out; records the flag; audit row |
 | `rules://sats/adult` | resource | | the rule pack (JSON) | none |
 | `rules://sats/targets` | resource | | colours and target minutes | none |
 | `queue://current` | resource | | waiting patients by colour, then arrival, with time waited, `recheck_due` and `recheck_raised` (retriage-watch.md) | none |
-| `patient://{triage_id}/timeline` | resource | | the triage and its audit rows | none |
+| `patient://{triage_id}/timeline` | resource | | the triage, its handover drafts and its audit rows | none |
+| `report://shadow-agreement` | resource | | nurse-vs-Mizani agreement rate and every disagreement | none |
 | `triage_intake` | prompt | `complaint` | intake instructions: every chart sign with its id, colour and, where the EMSSA manual defines it, its meaning; never infer a diagnosis | none |
 | `handover_summary` | prompt | `triage_id` | findings-only handover instructions | none |
 
@@ -51,7 +55,6 @@ docker compose up mizani-mcp                            # same server in Docker
 ```
 
 ## Known limitations
-- `draft_handover` (W2) and `record_nurse_assessment` (W3) are not built yet.
 - One SQLite file; fine for one desk, not for many hospitals (Postgres later).
 - The compose default approval secret is for local demos; set your own for any shared machine.
 

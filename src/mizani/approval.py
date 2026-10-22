@@ -33,10 +33,12 @@ def _sign(body: str) -> str:
     return hmac.new(_secret(), body.encode("ascii"), hashlib.sha256).hexdigest()
 
 
-def issue_approval(triage_id: str, decision: NurseDecision) -> str:
-    """Token for one nurse decision on one triage. Valid for 15 minutes, usable once."""
+def issue_approval(triage_id: str, decision: NurseDecision, purpose: str = "commit") -> str:
+    """Token for one nurse decision on one triage. Valid for 15 minutes, usable once.
+    `purpose` is what it may unlock: "commit" (the triage) or "handover" (releasing the draft)."""
     payload = {
         "triage_id": triage_id,
+        "purpose": purpose,
         "nurse_name": decision.nurse_name,
         "action": decision.action,
         "colour": decision.colour,
@@ -48,7 +50,7 @@ def issue_approval(triage_id: str, decision: NurseDecision) -> str:
     return f"{body}.{_sign(body)}"
 
 
-def verify_approval(token: str, triage_id: str) -> dict:
+def verify_approval(token: str, triage_id: str, purpose: str = "commit") -> dict:
     """The signed payload, or ApprovalError saying why the token is refused."""
     if not token or "." not in token:
         raise ApprovalError("no approval token: a named nurse must approve or override first")
@@ -58,6 +60,8 @@ def verify_approval(token: str, triage_id: str) -> dict:
     payload = json.loads(base64.urlsafe_b64decode(body))
     if payload["triage_id"] != triage_id:
         raise ApprovalError("approval token is for a different triage")
+    if payload.get("purpose", "commit") != purpose:
+        raise ApprovalError(f"approval token is for {payload.get('purpose')}, not {purpose}")
     if payload["exp"] < time.time():
         raise ApprovalError("approval token has expired; ask the nurse to decide again")
     if not str(payload.get("nurse_name", "")).strip():

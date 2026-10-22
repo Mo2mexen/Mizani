@@ -24,6 +24,21 @@ CREATE TABLE IF NOT EXISTS triage (
     recheck_raised_at TEXT            -- last raise_recheck_flag for this triage
 );
 CREATE TABLE IF NOT EXISTS used_token (nonce TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS handover (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    triage_id TEXT NOT NULL,
+    text TEXT NOT NULL,               -- drafted by the agent; findings only
+    drafted_at TEXT NOT NULL,
+    released_by TEXT,                 -- the nurse who released it (approval token)
+    released_at TEXT
+);
+CREATE TABLE IF NOT EXISTS nurse_assessment (
+    triage_id TEXT PRIMARY KEY,       -- shadow mode: one blind assessment per triage
+    nurse_name TEXT NOT NULL,
+    colour TEXT NOT NULL,
+    reason TEXT,
+    recorded_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS audit (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     time TEXT NOT NULL,

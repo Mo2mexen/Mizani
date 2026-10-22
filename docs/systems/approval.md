@@ -9,14 +9,14 @@ Proof that a named nurse approved or overrode one triage. `commit_triage` will n
 
 ## How it works
 1. The nurse presses Approve or Override in the UI. The API validates a `NurseDecision` (a name is required; an override needs a colour and a reason).
-2. The API calls `issue_approval(triage_id, decision)`. The token is the decision, the triage id, an expiry (15 minutes) and a random nonce, signed with HMAC-SHA256.
+2. The API calls `issue_approval(triage_id, decision)`. The token is the decision, the triage id, its purpose (`commit`, or `handover` for releasing a handover draft), an expiry (15 minutes) and a random nonce, signed with HMAC-SHA256. A token unlocks only its own purpose.
 3. The agent passes the token to `commit_triage`. `verify_approval` checks the signature, the triage id, the expiry and the approver name; the store then checks the triage is still pending and the nonce unused, and commits in one transaction.
 
 ## Interfaces
 | Name | Input | Output | Side effects |
 |---|---|---|---|
-| `issue_approval` | triage id, `NurseDecision` | token string | none |
-| `verify_approval` | token, triage id | signed payload, or `ApprovalError` with the reason | none |
+| `issue_approval` | triage id, `NurseDecision`, purpose (`commit` default, or `handover`) | token string | none |
+| `verify_approval` | token, triage id, purpose | signed payload, or `ApprovalError` with the reason | none |
 
 ## Depends on / used by
 - Depends on: `schemas.NurseDecision`, the standard library.

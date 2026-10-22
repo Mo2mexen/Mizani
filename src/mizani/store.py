@@ -145,3 +145,106 @@ def raise_recheck(con: sqlite3.Connection, triage_id: str, pack: RulePack) -> di
         "UPDATE triage SET recheck_raised_at = ? WHERE id = ?", (now().isoformat(), triage_id)
     )
     return entry
+
+
+HANDOVER_MAX_LINES, HANDOVER_MAX_CHARS = 3, 600
+
+
+def draft_handover(con: sqlite3.Connection, triage_id: str, text: str) -> dict:
+    """Store a handover draft for a committed triage. It stays unreleased until a nurse
+    releases it with an approval token."""
+    record = get(con, triage_id)
+    if record is None or record["status"] != "committed":
+        raise ValueError("handover drafts are only for committed triages")
+    lines = [line for line in text.strip().splitlines() if line.strip()]
+    if not lines or len(lines) > HANDOVER_MAX_LINES or len(text) > HANDOVER_MAX_CHARS:
+        raise ValueError(
+            f"a handover is 1 to {HANDOVER_MAX_LINES} lines and at most "
+            f"{HANDOVER_MAX_CHARS} characters"
+        )
+    cur = con.execute(
+        "INSERT INTO handover (triage_id, text, drafted_at) VALUES (?, ?, ?)",
+        (triage_id, "\n".join(lines), now().isoformat()),
+    )
+    return {"triage_id": triage_id, "draft_id": cur.lastrowid, "status": "awaiting_release"}
+
+
+def release_handover(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
+    """Release the latest draft with a verified handover approval. Each token works once."""
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        draft = con.execute(
+            "SELECT id, text FROM handover WHERE triage_id = ? AND released_at IS NULL"
+            " ORDER BY id DESC LIMIT 1",
+            (triage_id,),
+        ).fetchone()
+        if draft is None:
+            raise ApprovalError("no unreleased handover draft for this triage")
+        try:
+            con.execute("INSERT INTO used_token (nonce) VALUES (?)", (approval["nonce"],))
+        except sqlite3.IntegrityError:
+            raise ApprovalError("this approval token was already used") from None
+        released_at = now().isoformat()
+        con.execute(
+            "UPDATE handover SET released_by = ?, released_at = ? WHERE id = ?",
+            (approval["nurse_name"], released_at, draft["id"]),
+        )
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    return {
+        "triage_id": triage_id,
+        "text": draft["text"],
+        "approver": approval["nurse_name"],
+        "released_at": released_at,
+    }
+
+
+def handovers(con: sqlite3.Connection, triage_id: str) -> list[dict]:
+    rows = con.execute("SELECT * FROM handover WHERE triage_id = ? ORDER BY id", (triage_id,))
+    return [dict(row) for row in rows]
+
+
+def record_assessment(
+    con: sqlite3.Connection, triage_id: str, nurse_name: str, colour: str, reason: str | None
+) -> dict:
+    """Shadow mode: the nurse's own colour, recorded once per triage."""
+    if get(con, triage_id) is None:
+        raise ValueError(f"no triage with id {triage_id}")
+    try:
+        con.execute(
+            "INSERT INTO nurse_assessment (triage_id, nurse_name, colour, reason, recorded_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (triage_id, nurse_name, colour, reason, now().isoformat()),
+        )
+    except sqlite3.IntegrityError:
+        raise ValueError("this triage already has a nurse assessment") from None
+    return {"triage_id": triage_id, "approver": nurse_name, "colour": colour}
+
+
+def shadow_agreement(con: sqlite3.Connection) -> dict:
+    """How often the nurse's own colour matched Mizani's proposal, with every disagreement."""
+    rows = con.execute(
+        "SELECT a.triage_id, a.nurse_name, a.colour AS nurse_colour, a.reason, t.proposal"
+        " FROM nurse_assessment a JOIN triage t ON t.id = a.triage_id ORDER BY a.recorded_at"
+    ).fetchall()
+    pairs = []
+    for row in rows:
+        proposal = json.loads(row["proposal"])
+        pairs.append(
+            {
+                "triage_id": row["triage_id"],
+                "nurse_colour": row["nurse_colour"],
+                "mizani_colour": proposal["colour"],
+                "mizani_source": proposal["source"],
+                "nurse_reason": row["reason"],
+            }
+        )
+    agreed = sum(p["nurse_colour"] == p["mizani_colour"] for p in pairs)
+    return {
+        "assessed": len(pairs),
+        "agreed": agreed,
+        "agreement_rate": round(agreed / len(pairs), 3) if pairs else None,
+        "disagreements": [p for p in pairs if p["nurse_colour"] != p["mizani_colour"]],
+    }

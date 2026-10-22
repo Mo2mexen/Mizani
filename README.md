@@ -54,7 +54,8 @@ Audit log (SQLite, hash-chained): every tool call with inputs, outputs, time, ap
 | `propose_priority` | action | Creates a pending triage with colour and citations |
 | `commit_triage` | action, needs approval | Saves the triage; requires an approval token and the approver's name |
 | `raise_recheck_flag` | action | Flags an overdue or deteriorating patient for the nurse |
-| `draft_handover` | action, needs approval | Drafts the doctor handover (findings only) |
+| `draft_handover` | action | Saves the doctor handover draft (findings only, up to 3 lines) |
+| `release_handover` | action, needs approval | Releases the draft to the doctor; requires a nurse's handover approval token |
 | `record_nurse_assessment` | action | Stores the nurse's own colour for shadow mode |
 
 Rule packs, target times, the live queue and each patient's timeline are exposed as MCP resources. The intake and handover instructions are MCP prompts.
@@ -105,7 +106,7 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 | Agent, API, web UI | in progress |
 | FHIR output through wso2 fhir-mcp-server to a local HAPI FHIR | done, verified end to end |
 | Re-triage watch: target-time timers, `raise_recheck_flag`, re-score as a new pending proposal | done (server side) |
-| Handover, shadow mode | not started |
+| Handover gate (draft, nurse release) and shadow mode (nurse's own colour, agreement report) | done (server side) |
 | Evaluation suite | not started |
 
 This table is updated as parts land.
