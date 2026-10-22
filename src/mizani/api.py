@@ -192,10 +192,8 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
 
     @app.get("/api/queue")
     async def queue() -> list[dict]:
-        rows = await read_json("queue://current", mcp_server)
-        # Until the re-triage watch (W1) raises its own flags, a patient is due a re-check once
-        # they have waited longer than the target time for their colour.
-        return [{**r, "recheck_due": r["over_target"]} for r in rows]
+        # `recheck_due` / `recheck_raised` come from the re-triage watch on the MCP server (W1).
+        return await read_json("queue://current", mcp_server)
 
     @app.get("/api/audit")
     async def audit_log(triage_id: str | None = None) -> list[dict]:

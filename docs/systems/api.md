@@ -23,7 +23,7 @@ The HTTP API the nurse's web page talks to. It starts one agent run per patient,
 | `POST /api/triage/{id}/decision` | `NurseDecision` | 200 committed triage, 409 with the reason, 422 invalid | approval token, commit, audit rows |
 | `POST /api/triage/{id}/vitals` | `{vitals}` | 202 | re-scores, new pending triage |
 | `GET /api/colours` | | `[{colour, label, target_minutes, source}]` from the rule pack | none |
-| `GET /api/queue` | | committed patients by colour then arrival, with `waited_minutes`, `target_minutes`, `recheck_due` | none |
+| `GET /api/queue` | | waiting patients by colour then arrival (`queue://current`), with `waited_minutes`, `minutes_since_triage`, `target_minutes`, `recheck_due`, `recheck_raised` | none |
 | `GET /api/audit` | optional `triage_id` | every logged tool call, oldest first | none |
 | `GET /api/audit/verify` | | `{intact, first_broken_row}` | none |
 
@@ -51,7 +51,7 @@ Or open `http://127.0.0.1:8080/docs`. Both processes must use the same `MIZANI_D
 
 ## Known limitations
 - No login: the nurse's name is typed (approval.md).
-- Until the re-triage watch (W1) raises its own flags, `recheck_due` means the patient has waited longer than the target time for their colour.
+- No endpoint yet for the re-triage watch's agent side: raising `raise_recheck_flag` for due patients and re-scoring with `retriage_of` (the server side is on main, retriage-watch.md).
 - The stream events of a run live in memory; after a restart they are rebuilt from the checkpoint, so a run that failed with an error shows its steps but not the error.
 - One process: runs started on one API instance are not shared with another.
 
