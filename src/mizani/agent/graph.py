@@ -231,7 +231,8 @@ def build_graph(llm, tools: list[BaseTool], chart_ids: list[str], checkpointer=N
                 "approval_token": None,
                 "trace": [_step("waiting_for_nurse", "remeasure", fresh, None)],
             }
-        return {"approval_token": answer["approval_token"]}
+        # A decision always goes to commit, even with an empty token: the server refuses it.
+        return {"approval_token": answer.get("approval_token") or ""}
 
     async def commit(state: TriageState, config: RunnableConfig) -> dict:
         args = {
@@ -285,7 +286,7 @@ def build_graph(llm, tools: list[BaseTool], chart_ids: list[str], checkpointer=N
     graph.add_edge("propose", "nurse")
     graph.add_conditional_edges(
         "nurse",
-        lambda s: "commit" if s.get("approval_token") else "validate",
+        lambda s: "validate" if s.get("approval_token") is None else "commit",
         ["commit", "validate"],
     )
     graph.add_conditional_edges(

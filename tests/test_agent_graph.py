@@ -244,3 +244,11 @@ async def test_a_recheck_run_rescores_fresh_vitals_without_the_model():
     await graph.ainvoke(Command(resume=resume), recheck)
     queue = await read_json("queue://current", mcp)
     assert [(r["triage_id"], r["colour"]) for r in queue] == [(proposal["triage_id"], "red")]
+
+
+async def test_a_decision_without_a_token_is_refused_not_taken_as_a_remeasure():
+    graph, config, result = await start([reply()])
+    tid = waiting(result)["proposal"]["triage_id"]
+    out = await graph.ainvoke(Command(resume={"action": "approve", "approval_token": ""}), config)
+    assert "commit refused" in waiting(out)["error"]
+    assert waiting(out)["proposal"]["triage_id"] == tid  # no new pending triage
