@@ -59,6 +59,27 @@ curl -X POST localhost:8090/api/triage/<id>/decision -H 'content-type: applicati
 ```
 Or open `http://127.0.0.1:8090/docs`. Both processes must use the same `MIZANI_DB` and `MIZANI_APPROVAL_SECRET`.
 
+### Full walk-through on the compose stack
+After `docker compose up` (add `-f docker-compose.gpu.yml` on an NVIDIA machine), one patient from intake to a released handover. Bash shown; on Windows use Git Bash, or the same calls from the `/docs` page.
+```
+# 1. Intake: returns the run id
+curl -s -X POST localhost:8090/api/intake -H 'content-type: application/json' -d '{"patient_label":"Test Patient 01","complaint":"Fell from the roof of a two-storey house 20 minutes ago, back pain.","vitals":{"respiratory_rate":18,"heart_rate":100,"systolic_bp":135,"temperature":36.6,"avpu":"alert","mobility":"stretcher","trauma":true}}'
+# 2. The agent's steps live, then the proposal (expected: orange, high energy transfer). Ctrl+C after "proposal".
+curl -N localhost:8090/api/triage/<run_id>/stream
+# 3. The nurse approves: the reply is the committed triage, with its triage_id
+curl -s -X POST localhost:8090/api/triage/<run_id>/decision -H 'content-type: application/json' -d '{"nurse_name":"Nurse A","action":"approve"}'
+# 4. The stream again: it replays the run and ends with the fhir_create step, then "committed"
+curl -N localhost:8090/api/triage/<run_id>/stream
+# 5. Handover: the model drafts (returns draft_id and text), a named nurse releases
+curl -s -X POST localhost:8090/api/queue/<triage_id>/handover
+curl -s -X POST localhost:8090/api/queue/<triage_id>/handover/<draft_id>/release -H 'content-type: application/json' -d '{"nurse_name":"Nurse A"}'
+# 6. The record, the queue and the audit chain
+curl -s localhost:8090/api/queue/<triage_id>
+curl -s localhost:8090/api/queue
+curl -s localhost:8090/api/audit/verify     # {"intact":true,"first_broken_row":null}
+```
+The FHIR records can be read back from HAPI at `http://127.0.0.1:18080/fhir/Encounter`.
+
 ## Known limitations
 - No login: the nurse's name is typed (approval.md).
 - The watch polls every 30 s, so a re-check flag can appear up to 30 s after the target time passes.
