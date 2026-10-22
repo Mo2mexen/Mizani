@@ -208,10 +208,11 @@ def build_graph(
         except ValueError as exc:
             return {**update, "retry_reason": f"arguments are not valid JSON: {exc}"}
         nurse = {k: v for k, v in state["nurse_vitals"].items() if v is not None}
+        written = {k: v for k, v in proposed.items() if v is not None}  # null = not measured
         return {
             **update,
             "retry_reason": None,
-            "vitals": {**proposed, **nurse},
+            "vitals": {**written, **nurse},
             "signs": signs,
         }
 

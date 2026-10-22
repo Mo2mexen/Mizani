@@ -10,7 +10,7 @@ Two features on the server side. The handover is a short note for the doctor, dr
 
 ## How it works
 ### Handover
-1. After a triage is committed, the agent reads `patient://{id}/timeline`, follows the `handover_summary` prompt, and calls `draft_handover(triage_id, text)`. The server accepts 1 to 3 lines, at most 600 characters, and only for a committed triage. The draft is stored unreleased.
+1. After a triage is committed, the API gives the model the record (complaint, measured vitals, TEWS, chart signs, why the colour) and the `handover_summary` prompt; the model writes two lines (findings; what set the colour, with its source) and the API adds the third, the waiting time, from the queue record, so that number never comes from the model. `draft_handover(triage_id, text)` accepts 1 to 3 lines, at most 600 characters, only for a committed triage still in the queue, and refuses any number that is not in the patient's record (complaint, vitals, scores and their sources, the nurse's reason, target and waiting time) and any stated waiting time that is not the real one. A refused draft goes back to the model once with the reason. The draft is stored unreleased.
 2. The nurse reads the draft in the UI and presses Release. The API issues a token with `purpose="handover"` and the `draft_id` she read.
 3. The agent calls `release_handover(triage_id, draft_id, token)`. The server checks the signature, triage, expiry, approver name, purpose (a commit token is refused, and a handover token can't commit) and that the token names this exact draft, so a newer draft can't ride on her approval of an older one. It refuses drafts for a triage a re-triage has replaced, marks the draft released by that nurse, and uses the token up.
 
@@ -31,7 +31,7 @@ Before the UI shows Mizani's colour, the nurse picks her own. `record_nurse_asse
 
 ## Safety rules this system enforces
 - Consequential release needs a named nurse: no handover reaches the doctor without a handover-purpose approval token.
-- Findings only: the prompt asks for findings and forbids diagnosis or treatment advice; the server caps the size, and the nurse reads it before release.
+- Findings only: the prompt asks for findings and forbids diagnosis or treatment advice; the server caps the size and checks every number against the record, and the nurse reads it before release.
 - Shadow mode observes; it never moves a patient or changes a colour.
 
 ## Running and testing it alone
@@ -41,6 +41,7 @@ uv run pytest tests/test_mcp_server.py -k "handover or shadow"
 
 ## Known limitations
 - The server can't tell a finding from a diagnosis in free text; that rests on the prompt, the evals and the nurse's review before release.
+- The number check reads digits only: a number written in words ("twenty minutes") is not checked.
 - The agreement report counts exact colour matches; it doesn't weigh how far apart the colours are.
 
 ## Extending it

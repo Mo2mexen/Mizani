@@ -271,3 +271,13 @@ async def test_a_sign_without_the_complaints_words_is_not_applied():
     assert [f["kind"] for f in proposal["flags"]] == ["not_in_complaint"]
     matched = [s for s in result["trace"] if s["name"] == "match_discriminators"][0]
     assert matched["input"]["complaint"] == "itchy rash on my arm"  # the graph adds it
+
+
+async def test_a_vital_the_model_leaves_null_stays_unmeasured():
+    partial = {k: v for k, v in NORMAL.items() if k != "temperature"}
+    _, _, result = await start(
+        [reply(vitals={**partial, "temperature": None})], nurse_vitals=partial
+    )
+    assert "temperature" not in result["vitals"]
+    flags = waiting(result)["proposal"]["flags"]
+    assert any(f["kind"] == "remeasure" and f["source"] == "input: temperature" for f in flags)

@@ -3,6 +3,8 @@
 # NVIDIA GPU (Windows/Linux):
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
 # Then open http://127.0.0.1:8090 for the nurse's page (API and docs: /api, /docs).
+# Every port listens on this machine only (127.0.0.1). If one is taken, set API_HOST_PORT,
+# MCP_HOST_PORT, FHIR_MCP_HOST_PORT or HAPI_HOST_PORT in .env (see .env.example).
 
 services:
   ollama:
@@ -43,7 +45,7 @@ services:
     volumes:
       - mizani-data:/data
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${MCP_HOST_PORT:-8000}:8000"
 
   # Local FHIR store (HAPI FHIR, R4, its built-in database). Browse it at
   # http://127.0.0.1:18080/fhir from this machine only (18080: 8080 is often taken).
@@ -52,7 +54,7 @@ services:
     environment:
       hapi.fhir.fhir_version: R4
     ports:
-      - "127.0.0.1:18080:8080"
+      - "127.0.0.1:${HAPI_HOST_PORT:-18080}:8080"
 
   # Borrowed MCP server: wso2 fhir-mcp-server, built from the pinned 0.10.0 release commit.
   # Auth is off because HAPI is local and unreachable from outside this machine.
@@ -68,7 +70,7 @@ services:
     depends_on:
       - hapi-fhir
     ports:
-      - "127.0.0.1:8001:8000"
+      - "127.0.0.1:${FHIR_MCP_HOST_PORT:-8001}:8000"
     # HAPI's image has no shell, so its readiness is checked from here: healthy once a FHIR
     # search answers, which also warms HAPI's database up before the first triage is written.
     healthcheck:
@@ -93,7 +95,7 @@ services:
     volumes:
       - mizani-data:/data
     ports:
-      - "127.0.0.1:8090:8090"  # 8090, not 8080: 8080 is often taken
+      - "127.0.0.1:${API_HOST_PORT:-8090}:8090"  # 8090, not 8080: 8080 is often taken
     depends_on:
       mizani-mcp:
         condition: service_started
