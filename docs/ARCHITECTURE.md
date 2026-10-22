@@ -65,4 +65,4 @@ Synthetic patients only. One local SQLite file holds triages, used tokens and th
 | wso2 fhir-mcp-server + HAPI FHIR: the agent's commit step turns a committed triage into a Patient, an Encounter and Observations | built, verified end to end, including a live run with a real model |
 | Re-triage watch (timers on the server; the agent's watch raises re-check flags every 30 s; re-triage endpoint re-scores fresh vitals for the nurse to approve) | built, tested, run live |
 | Handover (the model drafts, a nurse releases that exact draft), shadow mode (nurse's own colour, agreement report) | built, tested, run live |
-| Evaluations: 38 tasks × 5 runs, pass rate, run-to-run variation, latency, tokens, cost ([EVALS.md](../EVALS.md)) | run on Qwen3.5 4B |
+| Evaluations: 38 tasks × 5 runs, pass rate, run-to-run variation, latency, tokens, cost ([EVALS.md](../EVALS.md)) | run on Qwen3.5 4B: 155/190 runs pass (82%); 9B not run yet |

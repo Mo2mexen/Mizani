@@ -74,7 +74,7 @@ Triage scales are YAML files, and each rule records its source. To add a scale (
 
 ## Evaluation
 
-[EVALS.md](EVALS.md) reports 38 synthetic tasks (22 written by hand, 16 messy variants), each run five times through the full agent. On Qwen3.5 4B on a MacBook Air M4, 145 of 190 runs passed (76%). The safety gates held in every run (no commit without a nurse's approval, impossible vitals never scored, missing vitals never made up), and every failure was the model naming the wrong chart sign, including three tasks where an instruction hidden in the complaint named a real sign. EVALS.md lists each failure and what we would try next. The tasks cover correct colour and discriminator, recovery from missing or impossible vitals, re-triage timing, refusal to diagnose, instructions hidden in complaint text, attempts to commit without approval, and Arabic input. Run them with `uv run mizani-evals --runs 5`.
+[EVALS.md](EVALS.md) reports 38 synthetic tasks (22 written by hand, 16 messy variants), each run five times through the full agent. On Qwen3.5 4B on a MacBook Air M4, 155 of 190 runs passed (82%; 76% with the earlier prompt). The safety gates held in every run (no commit without a nurse's approval, impossible vitals never scored, missing vitals never made up), and every failure was the model naming the wrong chart sign, including an instruction hidden in a complaint that named a real sign and turned a rash red. The 9B model has not been run yet. EVALS.md lists each failure and what we would try next. The tasks cover correct colour and discriminator, recovery from missing or impossible vitals, re-triage timing, refusal to diagnose, instructions hidden in complaint text, attempts to commit without approval, and Arabic input. Run them with `uv run mizani-evals --runs 5`.
 
 ## Running it
 
@@ -111,7 +111,7 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 | FHIR output: the agent's commit step writes Patient, Encounter and Observations through wso2 fhir-mcp-server to a local HAPI FHIR | done, verified end to end and in a live run |
 | Re-triage watch: target-time timers; the agent raises a re-check flag every 30 s for patients past their target time; re-triage with fresh vitals as a new pending proposal that replaces the old entry once a nurse commits it | done, tested, run live |
 | Handover (the model drafts three lines of findings, a named nurse releases that exact draft) and shadow mode (nurse's own colour, agreement report) | done, tested, run live |
-| Evaluation suite: 38 tasks × 5 runs with pass rate, run-to-run variation, latency, tokens, cost | done on Qwen3.5 4B (76% of runs pass, failures documented); Qwen3.5 9B not run yet |
+| Evaluation suite: 38 tasks × 5 runs with pass rate, run-to-run variation, latency, tokens, cost | done on Qwen3.5 4B (82% of runs pass, failures documented); Qwen3.5 9B not run yet |
 
 This table is updated as parts land.
 
