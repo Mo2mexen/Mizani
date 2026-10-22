@@ -77,6 +77,7 @@ services:
     environment:
       LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434/v1}
       LLM_MODEL: ${LLM_MODEL:-qwen3.5:4b-q4_K_M}
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT-none}
       MIZANI_MCP_URL: http://mizani-mcp:8000/mcp
       MIZANI_FHIR_MCP_URL: http://fhir-mcp:8000/mcp/
       MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-local-demo-secret-change-me}

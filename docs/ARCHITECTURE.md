@@ -45,7 +45,7 @@ Details: [docs/systems/mcp-server.md](systems/mcp-server.md), [retriage-watch.md
 After a triage is committed, the agent writes Patient, Encounter and Observation resources to a local HAPI FHIR server through wso2's MCP server (pinned release 0.10.0): the Encounter has status `triaged` and the SATS colour as its priority, and the vital signs use the FHIR R4 LOINC codes. FHIR is how hospital record systems exchange data, and a maintained, tested FHIR MCP server (Apache-2.0) saves us writing and securing our own FHIR client. Only nurse-committed triages are written. Details: [docs/systems/fhir.md](systems/fhir.md).
 
 ## Models
-Default `qwen3.5:4b-q4_K_M` (fits a 4 GB GPU or a 16 GB Apple Silicon laptop). A larger Qwen3.5 model can be swapped in on a machine with more memory (not evaluated). Any OpenAI-compatible endpoint works through `LLM_BASE_URL` and `LLM_MODEL`. Ollama runs with an 8k context and cloud features off.
+Default `qwen3.5:4b-q4_K_M` (fits a 4 GB GPU or a 16 GB Apple Silicon laptop). A larger Qwen3.5 model can be swapped in on a machine with more memory (not evaluated); speed and chart-sign accuracy depend on the model, while the rules, approval gate and audit do not. Any OpenAI-compatible endpoint works through `LLM_BASE_URL` and `LLM_MODEL`. Ollama runs with an 8k context and cloud features off.
 
 ## Data
 Synthetic patients only. One local SQLite file holds triages, used tokens and the audit log; LangGraph checkpoints and FHIR data stay on the same machine. Nothing is sent to an outside service.

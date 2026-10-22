@@ -28,6 +28,12 @@ def test_every_request_has_thinking_off_and_temperature_zero(monkeypatch):
     assert payload["model"] == "qwen3.5:4b-q4_K_M"
 
 
+def test_the_thinking_setting_can_be_left_out_for_other_servers(monkeypatch):
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "")
+    payload = chat_model()._get_request_payload([HumanMessage("hi")])
+    assert "reasoning_effort" not in payload
+
+
 async def test_call_reports_model_tokens_and_latency():
     reply = AIMessage(
         "ok",
