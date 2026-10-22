@@ -65,6 +65,10 @@ def commit(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
             raise ApprovalError(f"no triage with id {triage_id}")
         if record["status"] != "pending":
             raise ApprovalError("this triage is already committed")
+        if record["retriage_of"] is not None:  # another re-triage may have replaced it first
+            previous = get(con, record["retriage_of"])
+            if previous["superseded_by"] is not None:
+                raise ApprovalError("this patient was already re-triaged; propose again")
         try:
             con.execute("INSERT INTO used_token (nonce) VALUES (?)", (approval["nonce"],))
         except sqlite3.IntegrityError:
@@ -100,17 +104,21 @@ def _minutes_since(iso: str) -> float:
     return (now() - datetime.fromisoformat(iso)).total_seconds() / 60
 
 
-def queue(con: sqlite3.Connection, pack: RulePack) -> list[dict]:
+def queue(con: sqlite3.Connection, pack: RulePack, triage_id: str | None = None) -> list[dict]:
     """Committed patients still waiting, most urgent colour first, then by arrival. Read only:
     the order comes from the nurses' committed colours, never from the agent.
 
     A re-check is due once the time since the patient's last triage passes the target time to
     be seen for their colour (manual p6, Table 3)."""
     targets = {c.colour: c.target_minutes for c in pack.colours}
-    rows = con.execute(
+    sql = (
         "SELECT id, patient_label, colour, arrived_at, committed_at, recheck_raised_at"
         " FROM triage WHERE status = 'committed' AND superseded_by IS NULL"
-    ).fetchall()
+    )
+    args: tuple = ()
+    if triage_id is not None:
+        sql, args = sql + " AND id = ?", (triage_id,)
+    rows = con.execute(sql, args).fetchall()
     out = []
     for row in rows:
         since_triage = _minutes_since(row["committed_at"])
@@ -133,9 +141,11 @@ def queue(con: sqlite3.Connection, pack: RulePack) -> list[dict]:
 
 def raise_recheck(con: sqlite3.Connection, triage_id: str, pack: RulePack) -> dict:
     """Record a re-check flag, but only for a waiting patient whose timer has really run out."""
-    entry = next((r for r in queue(con, pack) if r["triage_id"] == triage_id), None)
+    entry = next(iter(queue(con, pack, triage_id)), None)
     if entry is None:
         raise ValueError("not a committed patient in the waiting queue")
+    if entry["recheck_raised"]:
+        raise ValueError("a re-check is already raised for this triage")
     if not entry["recheck_due"]:
         raise ValueError(
             f"not due: triaged {entry['minutes_since_triage']:.0f} min ago, target for "
@@ -154,8 +164,8 @@ def draft_handover(con: sqlite3.Connection, triage_id: str, text: str) -> dict:
     """Store a handover draft for a committed triage. It stays unreleased until a nurse
     releases it with an approval token."""
     record = get(con, triage_id)
-    if record is None or record["status"] != "committed":
-        raise ValueError("handover drafts are only for committed triages")
+    if record is None or record["status"] != "committed" or record["superseded_by"]:
+        raise ValueError("handover drafts are only for committed triages still in the queue")
     lines = [line for line in text.strip().splitlines() if line.strip()]
     if not lines or len(lines) > HANDOVER_MAX_LINES or len(text) > HANDOVER_MAX_CHARS:
         raise ValueError(
@@ -169,17 +179,22 @@ def draft_handover(con: sqlite3.Connection, triage_id: str, text: str) -> dict:
     return {"triage_id": triage_id, "draft_id": cur.lastrowid, "status": "awaiting_release"}
 
 
-def release_handover(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
-    """Release the latest draft with a verified handover approval. Each token works once."""
+def release_handover(
+    con: sqlite3.Connection, triage_id: str, draft_id: int, approval: dict
+) -> dict:
+    """Release the exact draft the nurse approved (the token names it). Each token works once."""
+    if approval.get("draft_id") != draft_id:
+        raise ApprovalError("the approval is for a different handover draft")
     con.execute("BEGIN IMMEDIATE")
     try:
         draft = con.execute(
-            "SELECT id, text FROM handover WHERE triage_id = ? AND released_at IS NULL"
-            " ORDER BY id DESC LIMIT 1",
-            (triage_id,),
+            "SELECT h.id, h.text FROM handover h JOIN triage t ON t.id = h.triage_id"
+            " WHERE h.id = ? AND h.triage_id = ? AND h.released_at IS NULL"
+            " AND t.superseded_by IS NULL",
+            (draft_id, triage_id),
         ).fetchone()
         if draft is None:
-            raise ApprovalError("no unreleased handover draft for this triage")
+            raise ApprovalError("no such unreleased draft for this triage still in the queue")
         try:
             con.execute("INSERT INTO used_token (nonce) VALUES (?)", (approval["nonce"],))
         except sqlite3.IntegrityError:

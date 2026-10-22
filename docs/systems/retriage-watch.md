@@ -8,10 +8,10 @@ Watches the waiting queue against the SATS target times and tells the nurse when
 - Tests: `tests/test_mcp_server.py` (`recheck`, `retriage`)
 
 ## How it works
-1. **Timer.** For every committed patient still waiting, the queue (`queue://current`) reports `minutes_since_triage` and `recheck_due`, which turns true once that time passes the target time to be seen for their colour: orange 10 min, yellow 60, green 240, red immediately (SATS training manual p6, Table 3, read from the rule pack).
-2. **Flag.** The agent's watch step reads the queue and calls `raise_recheck_flag(triage_id)` for patients that are due and not yet flagged. The server checks the timer itself and refuses if it hasn't run out. The flag cites the target-time rule, and the queue shows `recheck_raised`.
-3. **Re-score.** After the nurse takes fresh vitals, the agent calls `propose_priority` with `retriage_of` set to the patient's current triage. The engine scores the new vitals; the proposal is pending and carries a `retriage` flag saying whether the colour changed. The patient keeps their original arrival time.
-4. **Nurse decides.** Only when a nurse commits the new proposal (approval token as usual) does it replace the old entry in the queue (`superseded_by`).
+1. Timer: for every committed patient still waiting, the queue (`queue://current`) reports `minutes_since_triage` and `recheck_due`, which turns true once that time passes the target time to be seen for their colour: orange 10 min, yellow 60, green 240, red immediately (SATS training manual p6, Table 3, read from the rule pack).
+2. Flag: the agent's watch step reads the queue and calls `raise_recheck_flag(triage_id)` for patients that are due and not yet flagged. The server checks the timer itself and refuses if it hasn't run out. The flag cites the target-time rule, and the queue shows `recheck_raised`.
+3. Re-score: after the nurse takes fresh vitals, the agent calls `propose_priority` with `retriage_of` set to the patient's current triage. The engine scores the new vitals; the proposal is pending and carries a `retriage` flag saying whether the colour changed. The patient keeps their original arrival time.
+4. Nurse decides: only when a nurse commits the new proposal (approval token as usual) does it replace the old entry in the queue (`superseded_by`).
 
 ## Interfaces
 | Name | Input | Output | Side effects |
@@ -25,7 +25,7 @@ Watches the waiting queue against the SATS target times and tells the nurse when
 - Used by: John's agent (a watch step in the LangGraph flow) and the UI queue board (`recheck_due` badge).
 
 ## Safety rules this system enforces
-- The agent may only raise a deterioration flag, never act on it: no colour change, no queue move.
+- The agent may raise a deterioration flag but can't act on it: it changes no colour and moves no patient.
 - A flag is only raised when the timer has really run out, and it cites the SATS rule.
 - A new colour needs a named nurse's approval like any other triage.
 

@@ -2,7 +2,7 @@
 
 import os
 import sqlite3
-from functools import cache
+import threading
 from pathlib import Path
 
 SCHEMA = """
@@ -64,20 +64,31 @@ def db_path() -> Path:
     return Path(os.environ.get("MIZANI_DB", "data/mizani.db"))
 
 
-@cache
+_schema_lock = threading.Lock()
+_local = threading.local()
+
+
 def _connect(path: str) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+    # timeout: wait for another connection's write lock instead of failing at once
+    con = sqlite3.connect(path, isolation_level=None, timeout=10)
     con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
-    con.executescript(SCHEMA)
-    for table, column in ADDED_COLUMNS:  # databases created before these columns existed
-        columns = {row["name"] for row in con.execute(f"PRAGMA table_info({table})")}
-        if column not in columns:
-            con.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+    with _schema_lock:  # one thread at a time creates or migrates the schema
+        con.execute("PRAGMA journal_mode=WAL")
+        con.executescript(SCHEMA)
+        for table, column in ADDED_COLUMNS:  # databases created before these columns existed
+            columns = {row["name"] for row in con.execute(f"PRAGMA table_info({table})")}
+            if column not in columns:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
     return con
 
 
 def db() -> sqlite3.Connection:
-    """The connection for the configured file (`MIZANI_DB`, default `data/mizani.db`)."""
-    return _connect(str(db_path()))
+    """This thread's connection to the configured file (`MIZANI_DB`, default `data/mizani.db`).
+    The server runs tools in worker threads; one connection per thread keeps each
+    transaction to itself, and SQLite's locking orders the writers."""
+    path = str(db_path())
+    connections = _local.__dict__.setdefault("connections", {})
+    if path not in connections:
+        connections[path] = _connect(path)
+    return connections[path]

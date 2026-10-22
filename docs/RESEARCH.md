@@ -5,9 +5,9 @@ Every clinical rule in Mizani and every number in our problem statement traces t
 ## Triage scale: South African Triage Scale (SATS), adult
 | Used for | Source |
 |---|---|
-| Adult TEWS bands (respiratory rate, heart rate, systolic BP, temperature, AVPU incl. "confused", mobility, trauma), TEWS to colour (0–2 green, 3–4 yellow, 5–6 orange, 7+ red), the 39 adult discriminators, the additional investigations | [1] |
+| Adult TEWS bands (respiratory rate, heart rate, systolic BP, temperature, AVPU incl. "confused", mobility, trauma), TEWS to colour (0 to 2 green, 3 to 4 yellow, 5 to 6 orange, 7 or more red), the 39 adult discriminators, the additional investigations | [1] |
 | Five-step process, target times to be seen (red immediately, orange < 10 min, yellow < 1 h, green < 4 h), senior clinician override, definitions (high-energy transfer, threatened limb, controlled haemorrhage, inhalation burn, pain grades), trauma = any injury in the past 48 hours | [2] |
-| TEWS total range 0–17, TEWS-to-colour bands, discriminators upgrade the colour | [3] |
+| TEWS total range 0 to 17, TEWS-to-colour bands, discriminators upgrade the colour | [3] |
 
 Where the 2012 manual [2] and the newer adult chart [1] differ (the manual also lists "eye injury" as very urgent and says "stabbed neck" where the chart says "stabbed neck or chest"), we follow the chart, the publisher's current version.
 

@@ -33,12 +33,18 @@ def _sign(body: str) -> str:
     return hmac.new(_secret(), body.encode("ascii"), hashlib.sha256).hexdigest()
 
 
-def issue_approval(triage_id: str, decision: NurseDecision, purpose: str = "commit") -> str:
+def issue_approval(
+    triage_id: str, decision: NurseDecision, purpose: str = "commit", draft_id: int | None = None
+) -> str:
     """Token for one nurse decision on one triage. Valid for 15 minutes, usable once.
-    `purpose` is what it may unlock: "commit" (the triage) or "handover" (releasing the draft)."""
+    `purpose` is what it may unlock: "commit" (the triage) or "handover" (releasing the draft).
+    A handover token names the exact draft the nurse read (`draft_id`)."""
+    if purpose == "handover" and draft_id is None:
+        raise ValueError("a handover approval must name the draft the nurse read")
     payload = {
         "triage_id": triage_id,
         "purpose": purpose,
+        "draft_id": draft_id,
         "nurse_name": decision.nurse_name,
         "action": decision.action,
         "colour": decision.colour,
@@ -55,7 +61,11 @@ def verify_approval(token: str, triage_id: str, purpose: str = "commit") -> dict
     if not token or "." not in token:
         raise ApprovalError("no approval token: a named nurse must approve or override first")
     body, signature = token.rsplit(".", 1)
-    if not hmac.compare_digest(signature, _sign(body)):
+    try:
+        valid = hmac.compare_digest(signature, _sign(body))
+    except (UnicodeEncodeError, TypeError):  # non-ASCII text can't be one of our tokens
+        valid = False
+    if not valid:
         raise ApprovalError("approval token signature is invalid")
     payload = json.loads(base64.urlsafe_b64decode(body))
     if payload["triage_id"] != triage_id:

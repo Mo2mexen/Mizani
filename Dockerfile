@@ -11,6 +11,10 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --locked --no-dev
 
+# Run as an unprivileged user; /data is created here so a new volume inherits its owner.
+RUN useradd --create-home --uid 10001 mizani && mkdir -p /data && chown mizani /data
+USER mizani
+
 ENV MIZANI_DB=/data/mizani.db MIZANI_MCP_HOST=0.0.0.0 MIZANI_MCP_PORT=8000
 EXPOSE 8000
 CMD ["mizani-mcp"]

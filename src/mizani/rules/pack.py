@@ -41,12 +41,21 @@ class Band(Rule):
             and (self.gte is None or value >= self.gte)
         )
 
+    @model_validator(mode="after")
+    def has_a_bound(self) -> "Band":
+        if all(v is None for v in (self.lt, self.lte, self.gt, self.gte)):
+            raise ValueError("a band needs at least one of lt, lte, gt, gte")
+        return self
+
     def label(self) -> str:
         if self.gte is not None and self.lte is not None:
             return f"{self.gte:g}-{self.lte:g}"
-        if self.lt is not None:
-            return f"<{self.lt:g}"
-        return f">{self.gt:g}"
+        bounds = (("gt", ">"), ("gte", ">="), ("lt", "<"), ("lte", "<="))
+        return " and ".join(
+            f"{sign}{getattr(self, name):g}"
+            for name, sign in bounds
+            if getattr(self, name) is not None
+        )
 
 
 class TewsRow(Rule):

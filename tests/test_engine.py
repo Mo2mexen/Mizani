@@ -174,3 +174,17 @@ def test_glucose_discriminators(glucose, ketonuria, colour, sign):
 def test_high_glucose_without_ketone_result_asks_for_dipstick():
     p = propose("t1", Vitals(**NORMAL, glucose=20.0), [], PACK)
     assert any("ketones" in f.message for f in p.flags)
+
+
+def test_implausible_glucose_still_gets_the_glucose_reminder():
+    p = propose("t1", Vitals(**{**NORMAL, "avpu": "confused", "glucose": 0.2}), [], PACK)
+    assert any("finger-prick glucose" in f.message for f in p.flags)
+
+
+def test_band_labels_cover_every_bound_combination():
+    from mizani.rules.pack import Band
+
+    assert Band(gte=30, points=3).label() == ">=30"
+    assert Band(gt=100, lte=110, points=1).label() == ">100 and <=110"
+    with pytest.raises(ValueError):
+        Band(points=1)

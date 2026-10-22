@@ -8,10 +8,10 @@ After a nurse commits a triage, it is written as standard FHIR R4 records to a l
 - Tests: `tests/test_fhir.py` (mapping, no Docker); `tests/test_stack.py` (live stack, `MIZANI_E2E=1`)
 
 ## How it works
-`write_triage(client, record)` takes a **committed** triage (from `patient://{id}/timeline`) and an MCP client connected to `fhir-mcp`, then calls wso2's `create` tool:
-1. **Patient**: the synthetic label only (identifier and name text), nothing else.
-2. **Encounter**: status `triaged`, class `EMER`, priority = the SATS colour and who approved it, period start = arrival time.
-3. **Observations**, linked to both: respiratory rate 9279-1, heart rate 8867-4, blood pressure panel 85354-9 with systolic 8480-6, temperature 8310-5, SpO2 2708-6, glucose 15074-8 (LOINC, UCUM units, FHIR R4 vital-signs profile), plus AVPU, mobility, trauma, ketonuria and the TEWS total with every point's source, under the local code system `urn:mizani:sats-adult` (they have no standard code).
+`write_triage(client, record)` takes a committed triage (from `patient://{id}/timeline`) and an MCP client connected to `fhir-mcp`, then calls wso2's `create` tool:
+1. Patient: the synthetic label as identifier and name text, and nothing else.
+2. Encounter: status `triaged`, class `EMER`, priority = the SATS colour and who approved it, period start = arrival time.
+3. Observations, linked to both: respiratory rate 9279-1, heart rate 8867-4, blood pressure panel 85354-9 with systolic 8480-6, temperature 8310-5, SpO2 2708-6, glucose 15074-8 (LOINC, UCUM units, FHIR R4 vital-signs profile), plus AVPU, mobility, trauma, ketonuria and the TEWS total with every point's source, under the local code system `urn:mizani:sats-adult` (they have no standard code).
 
 It returns the new FHIR ids. A pending triage is refused.
 

@@ -10,7 +10,7 @@ Our own MCP server. It gives the agent the SATS tools, stores triages, refuses t
 - Settings: `MIZANI_DB` (default `data/mizani.db`, `/data/mizani.db` in Docker), `MIZANI_APPROVAL_SECRET`, `MIZANI_MCP_HOST`, `MIZANI_MCP_PORT`
 
 ## How it works
-The agent reads the rules (`rules://sats/adult`), checks vitals, names chart discriminators and calls `propose_priority`, which runs the rules engine and stores a **pending** triage. The nurse approves or overrides in the UI; the API turns that into an approval token (approval.md). The agent then calls `commit_triage` with the token. A middleware (`audit_calls`) writes every tool call to the hash-chained audit log (audit.md), including refused calls.
+The agent reads the rules (`rules://sats/adult`), checks vitals, names chart discriminators and calls `propose_priority`, which runs the rules engine and stores a pending triage. The nurse approves or overrides in the UI; the API turns that into an approval token (approval.md). The agent then calls `commit_triage` with the token. A middleware (`audit_calls`) writes every tool call to the hash-chained audit log (audit.md), including refused calls.
 
 ## Interfaces
 | Name | Kind | Input | Output | Side effects |
@@ -20,8 +20,8 @@ The agent reads the rules (`rules://sats/adult`), checks vitals, names chart dis
 | `match_discriminators` | tool, read | `discriminator_ids`, `vitals` | chart signs + `not_on_chart` flags | audit row |
 | `propose_priority` | tool, action | `patient_label`, `complaint`, `vitals`, `discriminator_ids`, optional `retriage_of` | pending `Proposal` (with a `retriage` flag when re-scoring) | new triage row, audit row |
 | `commit_triage` | tool, action, gated | `triage_id`, `approval_token` | committed colour, approver | triage committed (a re-triage replaces the old entry), token used, audit row |
-| `draft_handover` | tool, action | `triage_id`, `text` (1–3 lines) | unreleased draft | stores it; audit row (handover-and-shadow.md) |
-| `release_handover` | tool, action, gated | `triage_id`, `approval_token` (purpose handover) | released text, approver | marks it released, token used; audit row |
+| `draft_handover` | tool, action | `triage_id`, `text` (1 to 3 lines) | unreleased draft | stores it; audit row (handover-and-shadow.md) |
+| `release_handover` | tool, action, gated | `triage_id`, `draft_id`, `approval_token` (purpose handover, naming that draft) | released text, approver | marks it released, token used; audit row |
 | `record_nurse_assessment` | tool, action | `triage_id`, `nurse_name`, `colour`, `reason` | stored assessment | one per triage; audit row |
 | `raise_recheck_flag` | tool, action | `triage_id` | `recheck_due` flag citing the target time | refused unless the timer ran out; records the flag; audit row |
 | `rules://sats/adult` | resource | | the rule pack (JSON) | none |
@@ -42,7 +42,8 @@ Optional `_meta` on a tool call is copied into the audit row: `run_id` (one per 
 - No commit without a named nurse: `commit_triage` refuses a missing, forged, expired, other-triage or reused token, and a token without an approver name. Tests prove each refusal.
 - No unsourced output: every tool result carries sources (the schemas reject output without them).
 - Only chart entries: unknown discriminators are refused with a flag.
-- Patient text is data: the complaint is stored as-is, and the intake prompt wraps it in tags and tells the model to ignore instructions inside it.
+- Patient text is data: the complaint is stored as-is, and the intake prompt escapes it inside its tags (so it can't close them) and tells the model to ignore instructions inside it. Patient label (≤ 80), complaint (≤ 2,000 characters) and discriminator list (≤ 20) are capped.
+- The container runs as an unprivileged user.
 - Read-only queue: the order comes from committed colours and arrival times; no tool reorders it.
 - Every call logged: inputs, outputs, time, approver, model, tokens, latency, cost.
 

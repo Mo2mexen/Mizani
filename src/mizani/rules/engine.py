@@ -161,11 +161,12 @@ def investigations(
     rr = next((c for c in tews.components if c.field == "respiratory_rate"), None)
     if rr is not None and rr.points >= 1:
         due.append(("check_spo2", "respiratory_rate"))
-    if vitals.avpu not in (None, "alert") and vitals.glucose is None:
+    glucose = vitals.glucose if _plausible(vitals, "glucose", pack) else None
+    if vitals.avpu not in (None, "alert") and glucose is None:  # missing or not credible
         due.append(("check_glucose", "avpu"))
     if (
-        vitals.glucose is not None
-        and vitals.glucose >= inv["check_ketones"].glucose_from
+        glucose is not None
+        and glucose >= inv["check_ketones"].glucose_from
         and vitals.ketonuria is None
     ):
         due.append(("check_ketones", "glucose"))
