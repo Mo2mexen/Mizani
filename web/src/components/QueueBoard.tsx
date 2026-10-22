@@ -74,12 +74,16 @@ function Card({ entry, onRetriage }: { entry: QueueEntry; onRetriage: (runId: st
 function Recheck({ entry, onRetriage }: { entry: QueueEntry; onRetriage: (runId: string) => void }) {
   const [vitals, setVitals] = useState(EMPTY_VITALS);
   const [error, setError] = useState<string | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
   async function send() {
+    setIsBusy(true);
     try {
       const { triage_id: runId } = await api.retriage(entry.triage_id, toVitals(vitals));
       onRetriage(runId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Not sent");
+    } finally {
+      setIsBusy(false);
     }
   }
   return (
@@ -87,7 +91,7 @@ function Recheck({ entry, onRetriage }: { entry: QueueEntry; onRetriage: (runId:
       <p className="hint">Fresh vitals only. The chart signs stay; the nurse confirms any new colour.</p>
       <VitalsFields value={vitals} onChange={setVitals} idPrefix={`recheck-${entry.triage_id}`} />
       {error && <p className="error" role="alert">{error}</p>}
-      <button type="button" className="btn btn-primary btn-small" onClick={send}>
+      <button type="button" className="btn btn-primary btn-small" onClick={send} disabled={isBusy}>
         Re-score
       </button>
     </div>

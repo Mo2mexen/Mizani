@@ -8,7 +8,7 @@ const KIND_LABEL: Record<TraceStep["kind"], string> = {
   waiting_for_nurse: "NURSE",
 };
 
-function Step({ step }: { step: TraceStep }) {
+function Step({ step, isHidden }: { step: TraceStep; isHidden: boolean }) {
   const [isOpen, setIsOpen] = useState(false);
   const output = step.output as { error?: string; tokens?: number; model?: string } | null;
   const isError = Boolean(output && typeof output === "object" && "error" in output && output.error);
@@ -25,15 +25,16 @@ function Step({ step }: { step: TraceStep }) {
       </button>
       <div className="trace-io">
         <code>in {short(step.input, isOpen ? 4000 : 120)}</code>
-        <code>out {short(step.output, isOpen ? 4000 : 120)}</code>
+        <code>out {isHidden ? "hidden until you record your own colour (shadow mode)" : short(step.output, isOpen ? 4000 : 120)}</code>
       </div>
     </li>
   );
 }
 
-type Props = { run: RunState | null };
+/** isHidden: shadow mode before the nurse's own colour is in, so the outputs (scores, signs, colour) stay masked. */
+type Props = { run: RunState | null; isHidden: boolean };
 
-export function TracePanel({ run }: Props) {
+export function TracePanel({ run, isHidden }: Props) {
   return (
     <section className="panel trace" aria-labelledby="trace-title">
       <h2 id="trace-title" className="panel-title">
@@ -44,7 +45,7 @@ export function TracePanel({ run }: Props) {
       {run && (
         <ol className="trace-list" aria-live="polite">
           {run.steps.map((s, i) => (
-            <Step key={`${s.time}-${s.name}-${i}`} step={s} />
+            <Step key={`${s.time}-${s.name}-${i}`} step={s} isHidden={isHidden} />
           ))}
           {!run.proposal && !run.error && <li className="trace-wait">the agent is working…</li>}
         </ol>

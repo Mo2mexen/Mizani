@@ -79,7 +79,14 @@ export function openStream(
   const source = new EventSource(`/api/triage/${runId}/stream`);
   for (const event of ["step", "proposal", "committed", "error"] as const) {
     source.addEventListener(event, (e) => {
-      on[event](JSON.parse((e as MessageEvent).data) as never);
+      // The browser also fires a plain "error" Event (no data) when the connection drops.
+      if (!(e instanceof MessageEvent) || typeof e.data !== "string") {
+        if (source.readyState === EventSource.CLOSED) {
+          on.error({ message: "Lost the connection to the API. Reload the page to continue." } as never);
+        }
+        return; // still CONNECTING: the browser retries with Last-Event-ID by itself
+      }
+      on[event](JSON.parse(e.data) as never);
       if (event === "committed" || event === "error") source.close(); // the stream ends here
     });
   }

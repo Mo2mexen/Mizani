@@ -58,9 +58,8 @@ def test_intake_streams_the_steps_then_the_proposal_and_a_named_nurse_commits():
         proposal = stream[-1][1]["proposal"]
         assert (proposal["colour"], proposal["status"]) == ("orange", "pending")
 
-        done = api.post(
-            f"/api/triage/{run}/decision", json={"nurse_name": "Nurse A", "action": "approve"}
-        )
+        approve = {"nurse_name": "Nurse A", "action": "approve", "triage_id": proposal["triage_id"]}
+        done = api.post(f"/api/triage/{run}/decision", json=approve)
         assert done.status_code == 200
         assert (done.json()["colour"], done.json()["approver"]) == ("orange", "Nurse A")
 
@@ -76,9 +75,16 @@ def test_intake_streams_the_steps_then_the_proposal_and_a_named_nurse_commits():
 def test_a_decision_needs_a_nurse_name_and_an_override_needs_a_reason():
     with client(reply()) as api:
         run = intake(api)
-        events(api, run, until="proposal")
-        no_name = {"nurse_name": " ", "action": "approve"}
-        no_reason = {"nurse_name": "Nurse A", "action": "override", "colour": "red"}
+        shown = events(api, run, until="proposal")[-1][1]["proposal"]["triage_id"]
+        no_name = {"nurse_name": " ", "action": "approve", "triage_id": shown}
+        no_reason = {
+            "nurse_name": "Nurse A",
+            "action": "override",
+            "colour": "red",
+            "triage_id": shown,
+        }
+        no_proposal = {"nurse_name": "Nurse A", "action": "approve"}
+        assert api.post(f"/api/triage/{run}/decision", json=no_proposal).status_code == 422
         assert api.post(f"/api/triage/{run}/decision", json=no_name).status_code == 422
         assert api.post(f"/api/triage/{run}/decision", json=no_reason).status_code == 422
 
@@ -86,12 +92,13 @@ def test_a_decision_needs_a_nurse_name_and_an_override_needs_a_reason():
 def test_an_override_to_a_colour_off_the_chart_is_refused_and_the_run_keeps_waiting():
     with client(reply()) as api:
         run = intake(api)
-        events(api, run, until="proposal")
-        bad = {"nurse_name": "Nurse A", "action": "override", "colour": "purple", "reason": "x"}
+        shown = events(api, run, until="proposal")[-1][1]["proposal"]["triage_id"]
+        bad = {"nurse_name": "Nurse A", "action": "override", "colour": "purple", "reason": "x",
+               "triage_id": shown}  # fmt: skip
         refused = api.post(f"/api/triage/{run}/decision", json=bad)
         assert refused.status_code == 409 and "not a SATS colour" in refused.json()["detail"]
 
-        good = {"nurse_name": "Nurse A", "action": "override", "colour": "red", "reason": "pale"}
+        good = {**bad, "colour": "red", "reason": "pale"}
         done = api.post(f"/api/triage/{run}/decision", json=good)
         assert (done.status_code, done.json()["colour"]) == (200, "red")
         again = api.post(f"/api/triage/{run}/decision", json=good)
@@ -112,6 +119,14 @@ def test_remeasured_vitals_stream_a_new_proposal():
         proposal = second[-1][1]["proposal"]
         assert proposal["colour"] == "yellow"
         assert not any(f["kind"] == "incomplete" for f in proposal["flags"])
+
+        # Approving the first proposal after the re-measure is refused, never moved to the new one
+        stale = {"nurse_name": "Nurse A", "action": "approve",
+                 "triage_id": first[-1][1]["proposal"]["triage_id"]}  # fmt: skip
+        refused = api.post(f"/api/triage/{run}/decision", json=stale)
+        assert refused.status_code == 409 and "proposal changed" in refused.json()["detail"]
+        fresh = {**stale, "triage_id": proposal["triage_id"]}
+        assert api.post(f"/api/triage/{run}/decision", json=fresh).json()["colour"] == "yellow"
 
 
 def test_a_model_failure_ends_the_stream_with_an_error():
@@ -137,17 +152,21 @@ def test_a_waiting_patient_is_retriaged_and_replaced_only_once_a_nurse_commits()
         first = events(api, run, until="proposal")[-1][1]["proposal"]["triage_id"]
         assert api.post(f"/api/queue/{first}/retriage", json={"vitals": worse}).status_code == 409
         approve = {"nurse_name": "Nurse A", "action": "approve"}
-        api.post(f"/api/triage/{run}/decision", json=approve)
+        api.post(f"/api/triage/{run}/decision", json={**approve, "triage_id": first})
 
         response = api.post(f"/api/queue/{first}/retriage", json={"vitals": worse})
         assert response.status_code == 202
         rerun = response.json()["triage_id"]
+        twice = api.post(f"/api/queue/{first}/retriage", json={"vitals": worse})
+        assert twice.json()["triage_id"] == rerun  # a double click reuses the open re-triage
         proposal = events(api, rerun, until="proposal")[-1][1]["proposal"]
         assert proposal["colour"] == "red"
         assert any(f["kind"] == "retriage" for f in proposal["flags"])
         assert [r["triage_id"] for r in api.get("/api/queue").json()] == [first]  # not yet
 
-        done = api.post(f"/api/triage/{rerun}/decision", json=approve)
+        done = api.post(
+            f"/api/triage/{rerun}/decision", json={**approve, "triage_id": proposal["triage_id"]}
+        )
         assert (done.status_code, done.json()["colour"]) == (200, "red")
         queue = api.get("/api/queue").json()
         assert [(r["triage_id"], r["colour"]) for r in queue] == [(proposal["triage_id"], "red")]
@@ -157,8 +176,8 @@ def test_a_waiting_patient_is_retriaged_and_replaced_only_once_a_nurse_commits()
 
 
 def committed_patient(api, run):
-    events(api, run, until="proposal")
-    approve = {"nurse_name": "Nurse A", "action": "approve"}
+    shown = events(api, run, until="proposal")[-1][1]["proposal"]["triage_id"]
+    approve = {"nurse_name": "Nurse A", "action": "approve", "triage_id": shown}
     return api.post(f"/api/triage/{run}/decision", json=approve).json()["triage_id"]
 
 
@@ -220,3 +239,16 @@ def test_the_built_nurse_page_is_served_beside_the_api(tmp_path, monkeypatch):
         colours = api.get("/api/colours")
     assert page.status_code == 200 and "<title>Mizani</title>" in page.text
     assert colours.status_code == 200 and colours.json()  # the API still wins under /api
+
+
+def test_an_overridden_handover_cites_the_nurse_not_the_rejected_proposal():
+    from mizani.api import _why
+
+    record = {
+        "approver": "Nurse A",
+        "decision": {"action": "override", "colour": "orange", "reason": "looks unwell"},
+        "proposal": {"colour": "green", "source": "TEWS 1 -> green"},
+    }
+    assert _why(record).startswith("Nurse override by Nurse A: looks unwell")
+    record["decision"] = {"action": "approve", "colour": None, "reason": None}
+    assert _why(record) == "TEWS 1 -> green"

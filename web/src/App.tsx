@@ -16,6 +16,7 @@ export function App() {
   const [runId, setRunId] = useState<string | null>(null);
   const [complaint, setComplaint] = useState<string | null>(null);
   const [isShadow, setIsShadow] = useState(false);
+  const [assessedFor, setAssessedFor] = useState<string | null>(null);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [offline, setOffline] = useState<string | null>(null);
   const run = useRun(runId);
@@ -29,8 +30,16 @@ export function App() {
     }
   }
 
+  // Colours come once, but keep asking until the API answers (it may still be starting).
   useEffect(() => {
-    api.colours().then(setColours, (err: unknown) => setOffline(String(err)));
+    if (colours.length > 0) return;
+    const load = () => api.colours().then(setColours, (err: unknown) => setOffline(String(err)));
+    void load();
+    const id = setInterval(load, QUEUE_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [colours.length]);
+
+  useEffect(() => {
     void refreshQueue();
     const id = setInterval(() => void refreshQueue(), QUEUE_REFRESH_MS);
     return () => clearInterval(id);
@@ -67,13 +76,15 @@ export function App() {
           }}
         />
         <div className="middle">
-          <TracePanel run={run} />
+          <TracePanel run={run} isHidden={isShadow && !run?.committed && assessedFor !== run?.proposal?.triage_id} />
           {run && (
             <ProposalPanel
               run={run}
               complaint={complaint}
               colours={colours}
               isShadow={isShadow}
+              assessedFor={assessedFor}
+              onAssessed={setAssessedFor}
               onCommitted={() => void refreshQueue()}
             />
           )}
