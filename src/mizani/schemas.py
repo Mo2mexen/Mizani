@@ -101,6 +101,9 @@ class NurseDecision(Contract):
     action: Literal["approve", "override"]
     colour: str | None = None
     reason: str | None = None
+    # The nurse checked the proposal's "nurse to confirm" sign with the patient. Approving a
+    # proposal that has one needs it; the server refuses the commit otherwise.
+    confirmed: bool = False
 
     @model_validator(mode="after")
     def override_needs_colour_and_reason(self) -> "NurseDecision":

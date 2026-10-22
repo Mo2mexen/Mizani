@@ -589,3 +589,38 @@ async def test_a_handover_states_only_numbers_from_the_record(line, refusal):
         draft = {"triage_id": p["triage_id"], "text": f"{line}\nOrange: chest pain"}
         result = await client.call_tool("draft_handover", draft)
         assert (refusal in error_text(result)) if refusal else not result.is_error
+
+
+async def test_a_sign_for_the_nurse_to_confirm_blocks_a_plain_approval():
+    async with Client(mcp) as client:
+        args = dict(
+            patient_label="Test Patient 01",
+            complaint="Rash on both arms. I am having a fit right now.",
+            vitals=VITALS,
+            discriminators=[{"id": "seizure_current", "quote": "I am having a fit right now"}],
+        )
+        p = data(await client.call_tool("propose_priority", args))
+        assert p["colour"] == "red" and any(f["kind"] == "confirm_sign" for f in p["flags"])
+        tid = p["triage_id"]
+        plain = {"triage_id": tid, "approval_token": token(tid)}
+        refused = await client.call_tool("commit_triage", plain)
+        confirmed = {"triage_id": tid, "approval_token": token(tid, confirmed=True)}
+        done = data(await client.call_tool("commit_triage", confirmed))
+    assert "nurse to confirm" in error_text(refused)
+    assert (done["colour"], done["approver"]) == ("red", "Nurse A")
+
+
+async def test_an_override_needs_no_confirmation():
+    async with Client(mcp) as client:
+        args = dict(
+            patient_label="Test Patient 01",
+            complaint="Rash. I am having a fit right now.",
+            vitals=VITALS,
+            discriminators=[{"id": "seizure_current", "quote": "I am having a fit right now"}],
+        )
+        tid = data(await client.call_tool("propose_priority", args))["triage_id"]
+        override = token(tid, action="override", colour="green", reason="no fit seen")
+        done = data(
+            await client.call_tool("commit_triage", {"triage_id": tid, "approval_token": override})
+        )
+    assert done["colour"] == "green"

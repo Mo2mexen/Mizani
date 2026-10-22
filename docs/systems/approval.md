@@ -8,7 +8,7 @@ Proof that a named nurse approved or overrode one triage. `commit_triage` will n
 - Setting: `MIZANI_APPROVAL_SECRET`, shared by the MCP server and the API; the model has no access to it
 
 ## How it works
-1. The nurse presses Approve or Override in the UI. The API validates a `NurseDecision` (a name is required; an override needs a colour and a reason).
+1. The nurse presses Approve or Override in the UI. The API validates a `NurseDecision` (a name is required; an override needs a colour and a reason; `confirmed` says the nurse checked a "nurse to confirm" sign with the patient, and goes into the token).
 2. The API calls `issue_approval(triage_id, decision)`. The token is the decision, the triage id, its purpose (`commit`, or `handover` for releasing a handover draft, which must also name the `draft_id` the nurse read), an expiry (15 minutes) and a random nonce, signed with HMAC-SHA256. A token unlocks only its own purpose.
 3. The agent passes the token to `commit_triage`. `verify_approval` checks the signature, the triage id, the expiry and the approver name; the store then checks the triage is still pending and the nonce unused, and commits in one transaction.
 
@@ -24,6 +24,7 @@ Proof that a named nurse approved or overrode one triage. `commit_triage` will n
 
 ## Safety rules this system enforces
 - A named human approves every committed priority; overrides carry a reason.
+- A red colour that rests on the complaint alone (`confirm_sign`) is committed as proposed only with the nurse's confirmation in the token; otherwise the nurse overrides.
 - Tokens cannot be forged without the secret, cannot move to another triage, purpose or draft, expire, and work once. A malformed token is refused like any other bad token.
 - Tokens never sit in the audit log: the `approval_token` input is stored as `***`.
 - The server prints a warning at start-up if the secret is unset or the public demo value.

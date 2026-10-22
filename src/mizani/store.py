@@ -70,6 +70,11 @@ def commit(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
             previous = get(con, record["retriage_of"])
             if previous["superseded_by"] is not None:
                 raise ApprovalError("this patient was already re-triaged; propose again")
+        to_confirm = any(f["kind"] == "confirm_sign" for f in record["proposal"]["flags"])
+        if to_confirm and approval["action"] == "approve" and not approval.get("confirmed"):
+            raise ApprovalError(
+                "a sign here is for the nurse to confirm: confirm it with the patient, or override"
+            )
         try:
             con.execute("INSERT INTO used_token (nonce) VALUES (?)", (approval["nonce"],))
         except sqlite3.IntegrityError:

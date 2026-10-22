@@ -24,7 +24,7 @@ The HTTP API the nurse's web page talks to. It starts one agent run per patient,
 |---|---|---|---|
 | `POST /api/intake` | `{patient_label, complaint, vitals}` | 202 `{triage_id}` (the run id) | starts an agent run |
 | `GET /api/triage/{id}/stream` | optional `Last-Event-ID` | events `step`, `proposal` (`{proposal, error}`), `committed`, `error` | none |
-| `POST /api/triage/{id}/decision` | `{nurse_name, action, colour?, reason?, triage_id}` (`triage_id` from the proposal on screen) | 200 committed triage, 409 with the reason (incl. a newer proposal), 422 invalid | approval token, commit, audit rows |
+| `POST /api/triage/{id}/decision` | `{nurse_name, action, colour?, reason?, confirmed?, triage_id}` (`triage_id` from the proposal on screen; `confirmed: true` when the nurse checked a "nurse to confirm" sign with the patient) | 200 committed triage, 409 with the reason (incl. a newer proposal), 422 invalid | approval token, commit, audit rows |
 | `POST /api/triage/{id}/vitals` | `{vitals}` | 202 | re-scores, new pending triage |
 | `POST /api/queue/{triage_id}/retriage` | `{vitals}` (fresh) | 202 `{triage_id}` (new run id); 404 unknown; 409 not a committed patient still in the queue | re-check run, new pending triage with a `retriage` flag |
 | `GET /api/queue/{triage_id}` | | `{triage, handovers}`: the stored record and its handover drafts | none |

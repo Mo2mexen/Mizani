@@ -215,7 +215,9 @@ def propose_priority(
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
 def commit_triage(triage_id: str, approval_token: str) -> Committed:
     """Commit a pending triage. Refused unless the token comes from a named nurse's decision on
-    this triage, is unexpired and unused. Only the API issues tokens; the agent cannot."""
+    this triage, is unexpired and unused, and, when the proposal has a sign for the nurse to
+    confirm (`confirm_sign`), the nurse confirmed it or overrode. Only the API issues tokens; the
+    agent cannot."""
     try:
         approval = verify_approval(approval_token, triage_id)
         if approval["action"] == "override" and approval["colour"] not in {
