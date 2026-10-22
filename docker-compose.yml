@@ -64,10 +64,18 @@ services:
       FHIR_SERVER_DISABLE_AUTHORIZATION: "True"
       FHIR_MCP_HOST: 0.0.0.0
       FHIR_MCP_PORT: "8000"
+      FHIR_MCP_REQUEST_TIMEOUT: "120"  # seconds; wso2's default 30 can be too short on a slow disk
     depends_on:
       - hapi-fhir
     ports:
       - "127.0.0.1:8001:8000"
+    # HAPI's image has no shell, so its readiness is checked from here: healthy once a FHIR
+    # search answers, which also warms HAPI's database up before the first triage is written.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://hapi-fhir:8080/fhir/Patient?_count=1', timeout=60)"]
+      interval: 5s
+      timeout: 65s
+      retries: 60
 
   # The nurse's page, the API and the agent. Shares mizani-data with the MCP server to read
   # the audit log; agent checkpoints go to /data/checkpoints.db. Reachable from this machine only.
@@ -90,7 +98,7 @@ services:
       mizani-mcp:
         condition: service_started
       fhir-mcp:
-        condition: service_started
+        condition: service_healthy
       ollama-pull:
         condition: service_completed_successfully
 

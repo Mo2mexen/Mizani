@@ -1,6 +1,7 @@
 """Triage records: created pending by `propose_priority`, committed only with a valid approval."""
 
 import json
+import re
 import sqlite3
 from datetime import UTC, datetime
 
@@ -158,13 +159,40 @@ def raise_recheck(con: sqlite3.Connection, triage_id: str, pack: RulePack) -> di
 
 
 HANDOVER_MAX_LINES, HANDOVER_MAX_CHARS = 3, 600
+NUMBER = re.compile(r"\d+(?:\.\d+)?")
+# "waited 20 minutes", "waiting for 2 h": a stated waiting time, checked against the record
+WAITED = re.compile(r"\bwait\w*\D{0,25}?(\d+(?:\.\d+)?)\s*(min|h\b|hour)", re.IGNORECASE)
 
 
-def draft_handover(con: sqlite3.Connection, triage_id: str, text: str) -> dict:
+def _numbers(text: str) -> set[float]:
+    return {float(n) for n in NUMBER.findall(text)}
+
+
+def _check_numbers(record: dict, entry: dict, text: str) -> None:
+    """Every number in a handover must come from the patient's record (complaint, vitals,
+    scores, sources, the nurse's reason, target and waiting time), and a stated waiting time
+    must be the real one: the model once copied "20 minutes ago" from a complaint as the wait."""
+    proposal = {k: v for k, v in record["proposal"].items() if k != "triage_id"}
+    reason = (record["decision"] or {}).get("reason")
+    recorded = json.dumps([record["complaint"], record["vitals"], proposal, reason])
+    waited = entry["waited_minutes"]
+    allowed = _numbers(recorded) | {entry["target_minutes"], *range(int(waited), int(waited) + 2)}
+    extra = sorted(_numbers(text) - allowed)
+    if extra:
+        listed = ", ".join(f"{n:g}" for n in extra)
+        raise ValueError(f"{listed} not in the patient's record; use only the recorded values")
+    for said, unit in WAITED.findall(text):
+        minutes = float(said) * (60 if unit.lower().startswith("h") else 1)
+        if abs(minutes - waited) > 1:
+            raise ValueError(f"the patient has waited {waited:.0f} min, not {said} {unit}")
+
+
+def draft_handover(con: sqlite3.Connection, triage_id: str, text: str, pack: RulePack) -> dict:
     """Store a handover draft for a committed triage. It stays unreleased until a nurse
     releases it with an approval token."""
     record = get(con, triage_id)
-    if record is None or record["status"] != "committed" or record["superseded_by"]:
+    entry = next(iter(queue(con, pack, triage_id)), None)
+    if record is None or entry is None:
         raise ValueError("handover drafts are only for committed triages still in the queue")
     lines = [line for line in text.strip().splitlines() if line.strip()]
     if not lines or len(lines) > HANDOVER_MAX_LINES or len(text) > HANDOVER_MAX_CHARS:
@@ -172,6 +200,7 @@ def draft_handover(con: sqlite3.Connection, triage_id: str, text: str) -> dict:
             f"a handover is 1 to {HANDOVER_MAX_LINES} lines and at most "
             f"{HANDOVER_MAX_CHARS} characters"
         )
+    _check_numbers(record, entry, text)
     cur = con.execute(
         "INSERT INTO handover (triage_id, text, drafted_at) VALUES (?, ?, ?)",
         (triage_id, "\n".join(lines), now().isoformat()),

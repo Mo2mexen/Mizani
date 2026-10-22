@@ -82,7 +82,7 @@ async def test_refused_commit_comes_back_as_an_error_the_agent_can_read():
                 "patient_label": "Test Patient 01",
                 "complaint": "chest pain since morning",
                 "vitals": VITALS,
-                "discriminator_ids": ["chest_pain"],
+                "discriminators": [{"id": "chest_pain", "quote": "chest pain"}],
             },
         )
     )

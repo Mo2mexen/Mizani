@@ -7,7 +7,7 @@ from mizani.evals.generator import MESS, SCORES_ZERO, messy_variants
 from mizani.evals.runner import load_cases, run_suite
 from mizani.rules import engine
 from mizani.rules.pack import load_pack
-from mizani.schemas import Vitals
+from mizani.schemas import SignClaim, Vitals
 
 CASES = load_cases(Path(__file__).parent.parent / "evals" / "cases")
 PACK = load_pack()
@@ -41,15 +41,17 @@ def test_every_task_has_a_source_and_checkable_expectations():
 def test_hand_worked_expectations_agree_with_the_rules_engine(case):
     # Two independent routes to the same answer: the chart worked by hand and the engine.
     expected = case["expected"]
-    signs = expected.get("signs", []) + expected.get("any_signs", [])[:1]
-    proposal = engine.propose("t", Vitals(**case["vitals"]), signs, PACK)
+    ids = expected.get("signs", []) + expected.get("any_signs", [])[:1]
+    signs = [SignClaim(id=i, quote=case["complaint"]) for i in ids]
+    proposal = engine.propose("t", Vitals(**case["vitals"]), signs, PACK, case["complaint"])
     assert (proposal.colour, proposal.tews.total) == (expected["colour"], expected["tews"])
     if "later_tews" in expected:
         later = Vitals(**{**case["vitals"], **case["later_vitals"]})
         assert engine.compute_tews(later, PACK).total == expected["later_tews"]
     if "later_colour" in expected:
         later = Vitals(**{**case["vitals"], **case["later_vitals"]})
-        assert engine.propose("t", later, signs, PACK).colour == expected["later_colour"]
+        later_colour = engine.propose("t", later, signs, PACK, case["complaint"]).colour
+        assert later_colour == expected["later_colour"]
 
 
 def test_messy_variants_are_reproducible_and_keep_the_expectation_derivable():
@@ -85,6 +87,17 @@ async def test_the_runner_passes_right_answers_and_fails_wrong_ones(anyio_backen
 @pytest.mark.parametrize("task", ["commit-without-approval-01", "retriage-01", "remeasure-01"])
 async def test_the_runner_drives_the_extra_steps(anyio_backend, task):
     signs = by_id(task)["expected"].get("signs", [])
-    model = FakeModel(messages=iter([reply(ids=signs)]))
+    model = FakeModel(messages=iter([reply(ids=signs, quote=by_id(task)["complaint"])]))
     (summary,) = await run_suite(model, [by_id(task)], runs=1, log=lambda _: None)
     assert summary["passes"] == 1, summary["failed_checks"] or summary["errors"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"])
+async def test_a_false_claim_fails_on_colour_but_reaches_the_nurse_flagged(anyio_backend):
+    task = by_id("false-claim-01")
+    believed = reply(ids=["seizure_current"], quote="I am having a fit right now")
+    model = FakeModel(messages=iter([believed]))
+    (summary,) = await run_suite(model, [task], runs=1, log=lambda _: None)
+    assert summary["passes"] == 0
+    assert set(summary["failed_checks"]) == {"colour green", "not seizure_current"}

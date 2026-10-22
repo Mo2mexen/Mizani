@@ -182,11 +182,13 @@ def committed_patient(api, run):
 
 
 def test_the_model_drafts_a_handover_and_only_a_named_nurse_releases_it():
-    text = "RR 12, HR 80, alert; chest pain\nOrange: chest pain (SATS chart)\nWaited 0 min"
+    text = "RR 12, HR 80, alert; chest pain\nOrange: chest pain (SATS chart)"
     with client(reply(ids=["chest_pain"]), AIMessage(content=text)) as api:
         triage_id = committed_patient(api, intake(api))
         draft = api.post(f"/api/queue/{triage_id}/handover")
         assert draft.status_code == 201 and draft.json()["status"] == "awaiting_release"
+        # The third line, the waiting time, comes from the queue record, not from the model
+        assert draft.json()["text"].splitlines()[2].startswith("Waited 0 min since arrival")
         draft_id = draft.json()["draft_id"]
         assert api.get(f"/api/queue/{triage_id}").json()["handovers"][0]["released_by"] is None
 
@@ -239,6 +241,16 @@ def test_the_built_nurse_page_is_served_beside_the_api(tmp_path, monkeypatch):
         colours = api.get("/api/colours")
     assert page.status_code == 200 and "<title>Mizani</title>" in page.text
     assert colours.status_code == 200 and colours.json()  # the API still wins under /api
+
+
+def test_a_handover_with_a_wrong_number_is_redrafted_once_then_refused():
+    made_up = AIMessage(content="SpO2 97%\nOrange: chest pain")
+    fixed = AIMessage(content="HR 80\nOrange: chest pain")
+    with client(reply(ids=["chest_pain"]), made_up, fixed, made_up, made_up) as api:
+        triage_id = committed_patient(api, intake(api))
+        assert api.post(f"/api/queue/{triage_id}/handover").status_code == 201
+        refused = api.post(f"/api/queue/{triage_id}/handover")
+    assert refused.status_code == 409 and "97 not in the patient's record" in refused.text
 
 
 def test_an_overridden_handover_cites_the_nurse_not_the_rejected_proposal():

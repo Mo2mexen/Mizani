@@ -56,7 +56,7 @@ async def test_committed_triage_lands_in_hapi_through_wso2(monkeypatch):
             patient_label="Test Patient E2E",
             complaint="chest pain",
             vitals=VITALS,
-            discriminator_ids=["chest_pain"],
+            discriminators=[{"id": "chest_pain", "quote": "chest pain"}],
         )
         proposal = (await mizani.call_tool("propose_priority", args)).structured_content
         token = issue_approval(

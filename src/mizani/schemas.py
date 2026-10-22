@@ -65,6 +65,16 @@ class Tews(Contract):
 class Discriminator(Sourced):
     name: str = Field(min_length=1)
     colour: str = Field(min_length=1)
+    quote: str | None = None  # the complaint's words that show it; None when the vitals prove it
+
+
+class SignClaim(Contract):
+    """A chart discriminator the agent names, with the words of the complaint that show it.
+    The engine applies it only if those words are in the complaint and not in text addressed
+    to the system."""
+
+    id: str = Field(min_length=1)
+    quote: str = ""
 
 
 class Flag(Sourced):

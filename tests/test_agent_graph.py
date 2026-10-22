@@ -7,7 +7,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 from mizani import approval, audit
-from mizani.agent.graph import MAX_ATTEMPTS, _entry, build_graph
+from mizani.agent.graph import MAX_ATTEMPTS, MODEL_TOOLS, _entry, _model_view, build_graph
 from mizani.agent.mcp_tools import load_tools, read_json
 from mizani.db import db
 from mizani.mcp_server import mcp
@@ -34,10 +34,12 @@ class FakeModel(GenericFakeChatModel):
         return self
 
 
-def reply(vitals=None, ids=(), *, skip=(), text=""):
+def reply(vitals=None, ids=(), *, quote="chest pain", skip=(), text=""):
+    """The model's answer: the vitals, and the chart signs `ids`, each quoting `quote`."""
+    signs = [{"id": i, "quote": quote} for i in ids]
     calls = [
         {"name": "validate_vitals", "args": {"vitals": vitals or {}}},
-        {"name": "match_discriminators", "args": {"discriminator_ids": list(ids)}},
+        {"name": "match_discriminators", "args": {"discriminators": signs}},
     ]
     return AIMessage(
         text,
@@ -147,7 +149,7 @@ async def test_vitals_the_server_rejects_go_back_to_the_model_with_its_reason():
 async def test_after_three_failed_tries_the_nurse_vitals_are_used_and_the_trace_says_so():
     bad = [reply(skip=("validate_vitals", "match_discriminators"))] * MAX_ATTEMPTS
     _, _, result = await start(bad)
-    assert result["discriminator_ids"] == []
+    assert result["signs"] == []
     assert result["vitals"] == NORMAL
     assert any(s["name"] == "fallback" for s in result["trace"])
     assert waiting(result)["proposal"]["colour"] == "green"
@@ -229,7 +231,7 @@ async def test_a_recheck_run_rescores_fresh_vitals_without_the_model():
         "complaint": "chest pain since morning",
         "nurse_vitals": worse,
         "vitals": worse,
-        "discriminator_ids": ["chest_pain"],
+        "signs": [{"id": "chest_pain", "quote": "chest pain"}],
         "retriage_of": first,
     }
     out = await graph.ainvoke(entry, recheck)  # the fake model has no replies left
@@ -252,3 +254,20 @@ async def test_a_decision_without_a_token_is_refused_not_taken_as_a_remeasure():
     out = await graph.ainvoke(Command(resume={"action": "approve", "approval_token": ""}), config)
     assert "commit refused" in waiting(out)["error"]
     assert waiting(out)["proposal"]["triage_id"] == tid  # no new pending triage
+
+
+async def test_the_model_fills_in_only_its_own_arguments():
+    tools = {t.name: t for t in await load_tools(mcp)}
+    view = _model_view(tools["match_discriminators"], MODEL_TOOLS["match_discriminators"])
+    assert list(view["function"]["parameters"]["properties"]) == ["discriminators"]
+    assert view["function"]["parameters"]["required"] == ["discriminators"]
+
+
+async def test_a_sign_without_the_complaints_words_is_not_applied():
+    model = reply(ids=["seizure_current"], quote="had a fit")
+    _, _, result = await start([model], complaint="itchy rash on my arm")
+    proposal = waiting(result)["proposal"]
+    assert proposal["colour"] == "green" and proposal["discriminators"] == []
+    assert [f["kind"] for f in proposal["flags"]] == ["not_in_complaint"]
+    matched = [s for s in result["trace"] if s["name"] == "match_discriminators"][0]
+    assert matched["input"]["complaint"] == "itchy rash on my arm"  # the graph adds it
