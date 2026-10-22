@@ -5,6 +5,7 @@ server is on 2.x). Each call can carry `_meta: {model, tokens, cost}` from the m
 asked for it, so the server's audit log records them: `tool.ainvoke(call, with_meta(meta))`.
 """
 
+import json
 import os
 from typing import Any
 
@@ -33,6 +34,13 @@ async def load_tools(server: Any = None) -> list[StructuredTool]:
     async with Client(server) as client:
         tools = (await client.list_tools()).tools
     return [_as_langchain_tool(server, tool) for tool in tools]
+
+
+async def read_json(uri: str, server: Any = None) -> Any:
+    """A JSON resource from the server, e.g. `rules://sats/adult`."""
+    async with Client(server or server_url()) as client:
+        result = await client.read_resource(uri)
+    return json.loads(result.contents[0].text)
 
 
 def _as_langchain_tool(server: Any, tool: Tool) -> StructuredTool:

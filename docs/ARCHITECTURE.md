@@ -51,7 +51,7 @@ Synthetic patients only. One local SQLite file holds triages, used tokens and th
 | SATS adult rule pack and engine | built, 85 tests |
 | `mizani-triage` MCP server: 5 tools, 4 resources, 2 prompts, approval gate, audit chain | built, tested through an MCP client |
 | Model server in compose | built, tested with GPU |
-| Agent model client and MCP tools (model, tokens and cost logged with every call) | built, tested with Qwen3.5 4B against `mizani-triage` |
-| LangGraph flow, FastAPI, web UI | in progress |
+| LangGraph agent: extract → validate → score → discriminators → propose → nurse → commit, with retries, fallback and the re-measure loop | built, tested with a fake model and live with Qwen3.5 4B against `mizani-triage` |
+| FastAPI, web UI | in progress |
 | wso2 fhir-mcp-server + HAPI FHIR | planned |
 | Re-triage watch, handover draft, shadow mode | planned |

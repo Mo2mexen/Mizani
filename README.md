@@ -86,8 +86,8 @@ Triage scales are YAML files, and each rule records its source. To add a scale (
 | Design, rule-pack format, tool list | done |
 | Rules engine (SATS adult), every rule cited | done, 85 tests |
 | MCP server `mizani-triage`: 5 tools, 4 resources, 2 prompts, approval gate, hash-chained audit | done, tested through an MCP client |
-| Agent: model client (any OpenAI-compatible endpoint, thinking off) and MCP tools that log model, tokens and cost with every call | done, tested with Qwen3.5 4B against the MCP server |
-| Agent flow (LangGraph), API, web UI | in progress |
+| Agent (LangGraph): reads the entry, checks vitals, scores through the MCP tools, pauses for the nurse, commits with the nurse's token; retries and falls back when the model's tool calls are wrong; model, tokens and cost logged with every call | done, tested with a fake model and live with Qwen3.5 4B |
+| API, web UI | in progress |
 | FHIR integration | not started |
 | Re-triage watch, handover, shadow mode | not started |
 | Evaluation suite | not started |
