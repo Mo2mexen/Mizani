@@ -142,6 +142,24 @@ async def test_after_three_failed_tries_the_nurse_vitals_are_used_and_the_trace_
     assert result["vitals"] == NORMAL
     assert any(s["name"] == "fallback" for s in result["trace"])
     assert waiting(result)["proposal"]["colour"] == "green"
+    # The three rejected answers still cost tokens; the audit log keeps all of them.
+    assert sum(r["tokens"] for r in audit.entries(db())) == MAX_ATTEMPTS * USAGE["total_tokens"]
+
+
+async def test_every_model_token_is_on_exactly_one_audit_row():
+    graph, config, result = await start(
+        [reply(skip=("validate_vitals",)), reply(ids=["chest_pain"])]
+    )
+    tid = waiting(result)["proposal"]["triage_id"]
+    await graph.ainvoke(Command(resume={"action": "approve", "approval_token": token(tid)}), config)
+    rows = audit.entries(db())
+    tokens = {r["tool"]: r["tokens"] for r in rows}
+    assert (
+        tokens["validate_vitals"] == 2 * USAGE["total_tokens"]
+    )  # the rejected answer + the used one
+    assert tokens["match_discriminators"] == tokens["compute_tews"] == tokens["commit_triage"] == 0
+    assert sum(r["tokens"] for r in rows) == 2 * USAGE["total_tokens"]
+    assert {r["model"] for r in rows} == {"fake-model"}
 
 
 async def test_signs_not_on_the_chart_are_flagged_and_the_rules_set_the_colour():

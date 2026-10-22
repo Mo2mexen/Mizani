@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
@@ -26,6 +27,7 @@ from mizani.agent.model import call_model
 
 MAX_ATTEMPTS = 3  # model calls per extraction: the first one and two retries
 MODEL_TOOLS = ("validate_vitals", "match_discriminators")
+NOTHING_UNLOGGED = {"tokens": 0, "cost": 0.0}
 
 
 class TriageState(TypedDict, total=False):
@@ -34,7 +36,8 @@ class TriageState(TypedDict, total=False):
     nurse_vitals: dict  # what the nurse typed; always wins over the model
     attempts: int
     retry_reason: str | None  # why the last model answer was rejected
-    model_meta: dict  # `_meta` of the model call behind the current tool arguments
+    model: str  # the model behind this run, sent with every tool call
+    unlogged: dict  # tokens and cost of model calls not yet on an audit row
     vitals: dict
     discriminator_ids: list[str]
     flags: list[dict]
@@ -97,17 +100,25 @@ def build_graph(llm, tools: list[BaseTool], chart_ids: list[str], checkpointer=N
     model = llm.bind_tools([by_name[name] for name in MODEL_TOOLS])
     system = _system_prompt(chart_ids)
 
-    async def run_tool(name: str, args: dict, meta: dict) -> tuple[Any, str | None, dict]:
+    async def run_tool(
+        name: str, args: dict, state: TriageState, config: RunnableConfig
+    ) -> tuple[Any, str | None, dict]:
+        """Call one MCP tool. Its audit row takes the model calls not logged yet, so every model
+        token is counted exactly once per run. Returns the result, the error, and the update."""
+        unlogged = state.get("unlogged", NOTHING_UNLOGGED)
+        meta = {
+            "model": state.get("model"),
+            **unlogged,
+            # For the audit to link this call to the patient's run (BACKLOG: per-patient audit).
+            "run_id": config["configurable"].get("thread_id"),
+        }
         started = time.perf_counter()
         call = {"name": name, "args": args, "id": f"{name}-call", "type": "tool_call"}
         message = await by_name[name].ainvoke(call, with_meta(meta))
         error = message.content if message.status == "error" else None
         output = {"error": error} if error else message.artifact
-        return message.artifact, error, _step("tool_call", name, args, output, started)
-
-    def graph_meta(state: TriageState) -> dict:
-        # Calls the flow makes itself spent no model tokens; name the run's model anyway.
-        return {**state.get("model_meta", {}), "tokens": 0, "cost": 0.0}
+        step = _step("tool_call", name, args, output, started)
+        return message.artifact, error, {"unlogged": NOTHING_UNLOGGED, "trace": [step]}
 
     async def extract(state: TriageState) -> dict:
         messages = [SystemMessage(system), HumanMessage(_entry(state))]
@@ -128,7 +139,16 @@ def build_graph(llm, tools: list[BaseTool], chart_ids: list[str], checkpointer=N
             {"tool_calls": call.message.tool_calls, "text": call.message.content, **call.meta()},
         )
         step["latency_ms"] = call.latency_ms
-        update = {"attempts": attempts, "model_meta": call.meta(), "trace": [step]}
+        unlogged = state.get("unlogged", NOTHING_UNLOGGED)
+        update = {
+            "attempts": attempts,
+            "model": call.model,
+            "unlogged": {
+                "tokens": unlogged["tokens"] + call.tokens,
+                "cost": unlogged["cost"] + call.cost,
+            },
+            "trace": [step],
+        }
         missing = [name for name in MODEL_TOOLS if name not in calls]
         if missing:
             return {**update, "retry_reason": f"no call to {' and '.join(missing)}"}
@@ -158,37 +178,40 @@ def build_graph(llm, tools: list[BaseTool], chart_ids: list[str], checkpointer=N
             "trace": [_step("model", "fallback", None, {"warning": warning})],
         }
 
-    async def validate(state: TriageState) -> dict:
-        flags, error, step = await run_tool(
-            "validate_vitals", {"vitals": state["vitals"]}, state["model_meta"]
-        )
+    async def validate(state: TriageState, config: RunnableConfig) -> dict:
+        args = {"vitals": state["vitals"]}
+        flags, error, update = await run_tool("validate_vitals", args, state, config)
         if error:
-            return {"retry_reason": f"validate_vitals refused the vitals: {error}", "trace": [step]}
-        return {"flags": flags, "trace": [step]}
+            return {**update, "retry_reason": f"validate_vitals refused the vitals: {error}"}
+        return {**update, "flags": flags}
 
-    async def score(state: TriageState) -> dict:
-        tews, _, step = await run_tool(
-            "compute_tews", {"vitals": state["vitals"]}, graph_meta(state)
-        )
-        return {"tews": tews, "trace": [step]}
+    async def score(state: TriageState, config: RunnableConfig) -> dict:
+        args = {"vitals": state["vitals"]}
+        tews, _, update = await run_tool("compute_tews", args, state, config)
+        return {**update, "tews": tews}
 
-    async def discriminators(state: TriageState) -> dict:
+    async def discriminators(state: TriageState, config: RunnableConfig) -> dict:
         args = {"discriminator_ids": state["discriminator_ids"], "vitals": state["vitals"]}
-        matched, error, step = await run_tool("match_discriminators", args, state["model_meta"])
+        matched, error, update = await run_tool("match_discriminators", args, state, config)
         if error:
-            return {"retry_reason": f"match_discriminators refused: {error}", "trace": [step]}
-        return {"matched": matched, "trace": [step]}
+            return {**update, "retry_reason": f"match_discriminators refused: {error}"}
+        return {**update, "matched": matched}
 
-    async def propose(state: TriageState) -> dict:
+    async def propose(state: TriageState, config: RunnableConfig) -> dict:
         args = {
             "patient_label": state["patient_label"],
             "complaint": state["complaint"],
             "vitals": state["vitals"],
             "discriminator_ids": state["discriminator_ids"],
         }
-        proposal, _, step = await run_tool("propose_priority", args, graph_meta(state))
+        proposal, _, update = await run_tool("propose_priority", args, state, config)
         waiting = _step("waiting_for_nurse", "nurse", {"triage_id": proposal["triage_id"]}, None)
-        return {"proposal": proposal, "nurse_error": None, "trace": [step, waiting]}
+        return {
+            **update,
+            "proposal": proposal,
+            "nurse_error": None,
+            "trace": update["trace"] + [waiting],
+        }
 
     def nurse(state: TriageState) -> dict:
         answer = interrupt({"proposal": state["proposal"], "error": state.get("nurse_error")})
@@ -202,16 +225,18 @@ def build_graph(llm, tools: list[BaseTool], chart_ids: list[str], checkpointer=N
             }
         return {"approval_token": answer["approval_token"]}
 
-    async def commit(state: TriageState) -> dict:
+    async def commit(state: TriageState, config: RunnableConfig) -> dict:
         args = {
             "triage_id": state["proposal"]["triage_id"],
             "approval_token": state["approval_token"],
         }
-        committed, error, step = await run_tool("commit_triage", args, graph_meta(state))
-        logged = {**step, "input": {"triage_id": args["triage_id"], "approval_token": "(hidden)"}}
+        committed, error, update = await run_tool("commit_triage", args, state, config)
+        (step,) = update["trace"]
+        hidden = {"triage_id": args["triage_id"], "approval_token": "(hidden)"}
+        update = {**update, "approval_token": None, "trace": [{**step, "input": hidden}]}
         if error:
-            return {"nurse_error": error, "approval_token": None, "trace": [logged]}
-        return {"committed": committed, "approval_token": None, "trace": [logged]}
+            return {**update, "nurse_error": error}
+        return {**update, "committed": committed}
 
     def after_extract(state: TriageState) -> str:
         if not state.get("retry_reason"):
