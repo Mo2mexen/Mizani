@@ -32,9 +32,13 @@ export function ShadowFirst({ runId, colours, onDone }: { runId: string; colours
   return (
     <form className="panel proposal shadow" onSubmit={handleSubmit} aria-labelledby="shadow-title">
       <h2 id="shadow-title" className="panel-title">
-        <span className="step-no">3</span> Shadow mode: your colour first
+        <span className="step-no">2</span> Shadow mode: your colour first
       </h2>
-      <p className="hint">Mizani's proposal is ready. Record your own colour before you see it.</p>
+      <p className="hint">
+        Mizani's proposal is ready but hidden. Choose the colour you would give this patient; then Mizani's appears and
+        you decide as usual. Shadow mode is for training and audit: the audit log counts how often you and Mizani agree,
+        and your choice is never changed by Mizani's.
+      </p>
       <label className="field" htmlFor="shadow-nurse">
         <span className="field-label">Your name</span>
         <input id="shadow-nurse" required value={nurse} onChange={(e) => setNurse(e.target.value)} autoComplete="off" />

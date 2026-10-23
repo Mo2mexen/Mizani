@@ -63,7 +63,7 @@ const LINES: Record<string, (input: any, output: any) => Line> = {
   compute_tews: (input, output) => ({
     input: vitals(input?.vitals),
     output: output?.components
-      ? `TEWS ${output.total}: ` +
+      ? `TEWS ${output.total}` + (output.components.some((c: { points: number }) => c.points > 0) ? ": " : "") +
         output.components
           .filter((c: { points: number }) => c.points > 0)
           .map((c: { field: string; points: number }) => `${SHORT_NAMES[c.field] ?? FIELD_LABELS[c.field] ?? c.field} +${c.points}`)

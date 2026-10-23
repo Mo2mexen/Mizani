@@ -11,17 +11,23 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
   const [isIntact, setIsIntact] = useState<boolean | null>(null);
   const [shadow, setShadow] = useState<Shadow | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   async function load() {
+    setIsLoading(true);
     try {
       const [audit, verify, agreement] = await Promise.all([api.audit(), api.verify(), api.shadow()]);
       setRows(audit);
       setIsIntact(verify.intact);
       setShadow(agreement);
       setError(null);
+      setLoadedAt(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Audit not loaded");
+    } finally {
+      setIsLoading(false);
     }
   }
 
@@ -55,8 +61,9 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
             shadow mode: nurse and Mizani agreed {shadow.agreed} of {shadow.assessed}
           </span>
         )}
-        <button type="button" className="btn btn-small" onClick={() => void load()}>
-          Refresh
+        {loadedAt && <span className="count">updated {loadedAt.toLocaleTimeString()}</span>}
+        <button type="button" className="btn btn-small" onClick={() => void load()} disabled={isLoading}>
+          {isLoading ? "Refreshing…" : "Refresh"}
         </button>
         <button ref={closeRef} type="button" className="btn btn-small" onClick={onClose}>
           Close

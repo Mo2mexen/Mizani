@@ -39,6 +39,7 @@ export function App() {
   const [assessedFor, setAssessedFor] = useState<string | null>(null);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [offline, setOffline] = useState<string | null>(null);
+  const [intakeKey, setIntakeKey] = useState(0); // a new key empties the intake for the next patient
   const run = useRun(runId);
   // Shadow mode: Mizani's answer stays hidden until the nurse has recorded their own colour.
   const isMasked = isShadow && !run?.committed && assessedFor !== run?.proposal?.triage_id;
@@ -49,6 +50,14 @@ export function App() {
     window.history.replaceState(null, "", `#run=${id}`);
     // On a narrow screen the proposal sits under the intake: bring it into view (no-op on a desk).
     requestAnimationFrame(() => document.getElementById("proposal-title")?.scrollIntoView({ block: "nearest" }));
+  }
+
+  function nextPatient() {
+    setRunId(null);
+    setComplaint(null);
+    window.history.replaceState(null, "", window.location.pathname);
+    setIntakeKey((k) => k + 1);
+    requestAnimationFrame(() => document.getElementById("patient-label")?.focus());
   }
 
   async function refreshQueue() {
@@ -82,9 +91,9 @@ export function App() {
           <h1 className="brand-name">Mizani</h1>
           <span className="brand-sub">Triage co-pilot for the adult SATS chart. The nurse decides.</span>
         </div>
-        <label className="toggle">
+        <label className="toggle" title="For training and audit: you choose a colour before Mizani's is shown, and the audit log counts how often you agree.">
           <input type="checkbox" checked={isShadow} onChange={(e) => setIsShadow(e.target.checked)} />
-          Shadow mode <span className="toggle-note">(your colour first)</span>
+          Shadow mode <span className="toggle-note">(choose your colour first)</span>
         </label>
         <button type="button" className="btn btn-small" onClick={() => setIsAuditOpen(true)} aria-expanded={isAuditOpen}>
           Audit log
@@ -100,8 +109,7 @@ export function App() {
         {announcement(run, colours, isMasked)}
       </p>
       <main className="workspace">
-        <IntakeForm isReady={colours.length > 0} onStarted={openRun} />
-        <TracePanel run={run} isMasked={isMasked} />
+        <IntakeForm key={intakeKey} isFirst={intakeKey === 0} isReady={colours.length > 0} onStarted={openRun} />
         <ProposalPanel
           run={run}
           complaint={complaint}
@@ -110,8 +118,10 @@ export function App() {
           assessedFor={assessedFor}
           onAssessed={setAssessedFor}
           onCommitted={() => void refreshQueue()}
+          onNextPatient={nextPatient}
         />
       </main>
+      <TracePanel run={run} isMasked={isMasked} />
       <QueueBoard
         colours={colours}
         queue={queue}

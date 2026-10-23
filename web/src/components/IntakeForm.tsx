@@ -4,10 +4,11 @@ import { EMPTY_VITALS, toVitals } from "../vitals";
 import { VitalsFields } from "./VitalsFields";
 
 /** isReady: the API has answered (colour chart loaded), so an intake can be sent. */
-type Props = { isReady: boolean; onStarted: (runId: string, complaint: string) => void };
+/** isFirst: the page's first patient gets a sample label; after "Next patient" the form starts empty. */
+type Props = { isFirst: boolean; isReady: boolean; onStarted: (runId: string, complaint: string) => void };
 
-export function IntakeForm({ isReady, onStarted }: Props) {
-  const [label, setLabel] = useState("Test Patient 01");
+export function IntakeForm({ isFirst, isReady, onStarted }: Props) {
+  const [label, setLabel] = useState(isFirst ? "Test Patient 01" : "");
   const [complaint, setComplaint] = useState("");
   const [vitals, setVitals] = useState(EMPTY_VITALS);
   const [isSending, setIsSending] = useState(false);
@@ -19,9 +20,7 @@ export function IntakeForm({ isReady, onStarted }: Props) {
     setError(null);
     try {
       const { triage_id: runId } = await api.intake(label.trim(), complaint.trim(), toVitals(vitals));
-      onStarted(runId, complaint.trim());
-      setComplaint("");
-      setVitals(EMPTY_VITALS);
+      onStarted(runId, complaint.trim()); // the entry stays on screen until "Next patient"
     } catch (err) {
       setError(err instanceof Error ? err.message : "The intake was not sent");
     } finally {
