@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
-import { minutes } from "../format";
-import type { Colour, HandoverDraft, QueueEntry } from "../types";
+import { clock, FIELD_LABELS, minutes } from "../format";
+import type { Colour, HandoverDraft, PatientRecord, QueueEntry } from "../types";
 import { EMPTY_VITALS, toVitals } from "../vitals";
 import { VitalsFields } from "./VitalsFields";
 
@@ -78,13 +78,22 @@ export function QueueBoard({ colours, queue, onRetriage }: Props) {
 }
 
 function Card({ entry, onRetriage }: { entry: QueueEntry; onRetriage: (runId: string) => void }) {
-  const [panel, setPanel] = useState<"none" | "recheck" | "handover">("none");
+  const [panel, setPanel] = useState<"none" | "details" | "recheck" | "handover">("none");
   const isOver = entry.minutes_since_triage > entry.target_minutes;
-  const toggle = (next: "recheck" | "handover") => setPanel(panel === next ? "none" : next);
+  const toggle = (next: "details" | "recheck" | "handover") => setPanel(panel === next ? "none" : next);
   return (
     <article className={`card${entry.recheck_due ? " card-due" : ""}`} aria-label={entry.patient_label}>
       <header className="card-head">
-        <strong dir="auto">{entry.patient_label}</strong>
+        <button
+          type="button"
+          className="card-name"
+          dir="auto"
+          aria-expanded={panel === "details"}
+          title="Show what was recorded for this patient"
+          onClick={() => toggle("details")}
+        >
+          {entry.patient_label}
+        </button>
         {entry.recheck_due && (
           <span className="badge-due">RE-CHECK DUE{entry.recheck_raised ? " · flagged" : ""}</span>
         )}
@@ -94,6 +103,9 @@ function Card({ entry, onRetriage }: { entry: QueueEntry; onRetriage: (runId: st
         {entry.target_minutes === 0 ? "immediately" : minutes(entry.target_minutes)}
       </p>
       <div className="card-actions">
+        <button type="button" className="btn btn-small" aria-expanded={panel === "details"} onClick={() => toggle("details")}>
+          Details
+        </button>
         <button type="button" className="btn btn-small" aria-expanded={panel === "recheck"} onClick={() => toggle("recheck")}>
           Re-check
         </button>
@@ -101,9 +113,123 @@ function Card({ entry, onRetriage }: { entry: QueueEntry; onRetriage: (runId: st
           Handover
         </button>
       </div>
+      {panel === "details" && <Details entry={entry} />}
       {panel === "recheck" && <Recheck entry={entry} onRetriage={onRetriage} />}
       {panel === "handover" && <Handover entry={entry} />}
     </article>
+  );
+}
+
+const SHOWN: Record<string, string> = {
+  alert: "alert",
+  confused: "confused",
+  voice: "responds to voice",
+  pain: "responds to pain",
+  unresponsive: "unresponsive",
+  walking: "walking",
+  with_help: "walks with help",
+  stretcher: "stretcher / immobile",
+};
+const UNITS: Record<string, string> = {
+  respiratory_rate: "/min",
+  heart_rate: "/min",
+  systolic_bp: " mmHg",
+  temperature: " °C",
+  spo2: " %",
+  glucose: " mmol/L",
+};
+
+function shown(field: string, value: string | number | boolean): string {
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  return typeof value === "string" ? (SHOWN[value] ?? value) : `${value}${UNITS[field] ?? ""}`;
+}
+
+/** What was recorded for a saved patient: read-only, straight from the stored record. */
+function Details({ entry }: { entry: QueueEntry }) {
+  const [record, setRecord] = useState<PatientRecord | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.record(entry.triage_id).then(
+      (r) => setRecord(r.triage),
+      (err: unknown) => setError(err instanceof Error ? err.message : "Not loaded"),
+    );
+  }, [entry.triage_id]);
+
+  if (error) {
+    return (
+      <div className="card-panel">
+        <p className="error" role="alert">
+          {error}
+        </p>
+      </div>
+    );
+  }
+  if (!record) {
+    return (
+      <div className="card-panel">
+        <p className="empty">Loading the record…</p>
+      </div>
+    );
+  }
+  const measured = Object.entries(record.vitals).filter(([, v]) => v !== null && v !== undefined) as [
+    string,
+    string | number | boolean,
+  ][];
+  const missing = Object.keys(record.vitals).filter((k) => record.vitals[k] === null || record.vitals[k] === undefined);
+  const decision = record.decision;
+  return (
+    <div className="card-panel details">
+      <h4 className="details-title">Complaint</h4>
+      <blockquote className="complaint" dir="auto">
+        {record.complaint}
+      </blockquote>
+      <h4 className="details-title">Vitals · TEWS {record.proposal.tews.total}</h4>
+      {measured.length === 0 && <p className="empty">No vitals were measured.</p>}
+      {measured.length > 0 && (
+        <dl className="details-vitals">
+          {measured.map(([k, v]) => (
+            <div key={k}>
+              <dt>{FIELD_LABELS[k] ?? k}</dt>
+              <dd>{shown(k, v)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {missing.length > 0 && (
+        <p className="hint">Not measured: {missing.map((k) => FIELD_LABELS[k] ?? k).join(", ")}.</p>
+      )}
+      <h4 className="details-title">Chart signs</h4>
+      {record.proposal.discriminators.length === 0 && <p className="empty">None; the vitals set the colour.</p>}
+      <ul className="signs">
+        {record.proposal.discriminators.map((d) => (
+          <li key={d.name}>
+            <span className={`chip c-${d.colour}`}>{d.colour.toUpperCase()}</span> {d.name}
+            {d.quote && (
+              <q className="quote" dir="auto">
+                {d.quote}
+              </q>
+            )}
+          </li>
+        ))}
+      </ul>
+      <h4 className="details-title">Decision</h4>
+      <p className="details-decision">
+        {decision?.action === "override" ? (
+          <>
+            Mizani proposed {record.proposal.colour.toUpperCase()}; <strong>{record.approver}</strong> overrode it to{" "}
+            {record.colour.toUpperCase()}
+            {decision.reason ? ` ("${decision.reason}")` : ""}.
+          </>
+        ) : (
+          <>
+            {record.colour.toUpperCase()}, approved by <strong>{record.approver}</strong>.
+          </>
+        )}{" "}
+        Arrived {clock(record.arrived_at)}
+        {record.committed_at ? `, saved ${clock(record.committed_at)}` : ""}
+        {record.retriage_of ? "; this is a re-check of an earlier triage" : ""}.
+      </p>
+    </div>
   );
 }
 

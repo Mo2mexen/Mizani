@@ -60,6 +60,21 @@ export type Committed = {
   committed_at: string;
 };
 
+/** One saved patient as the API stores it (GET /api/queue/{triage_id}). */
+export type PatientRecord = {
+  id: string;
+  patient_label: string;
+  complaint: string;
+  vitals: Record<string, string | number | boolean | null>;
+  proposal: Proposal;
+  colour: string;
+  approver: string | null;
+  decision: { action: string; colour: string | null; reason: string | null } | null;
+  arrived_at: string;
+  committed_at: string | null;
+  retriage_of: string | null;
+};
+
 export type Colour = { colour: string; label: string; target_minutes: number; source: string };
 
 export type QueueEntry = {
