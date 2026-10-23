@@ -157,6 +157,13 @@ async def test_after_three_failed_tries_the_nurse_vitals_are_used_and_the_trace_
     assert sum(r["tokens"] for r in audit.entries(db())) == MAX_ATTEMPTS * USAGE["total_tokens"]
 
 
+async def test_a_refusal_after_the_fallback_stops_the_run_instead_of_looping():
+    # The server refuses even the nurse's own vitals (an unknown field), so the fallback can't help.
+    bad = [reply(skip=("validate_vitals", "match_discriminators"))] * MAX_ATTEMPTS
+    with pytest.raises(RuntimeError, match="validate_vitals refused"):
+        await start(bad, nurse_vitals={"pulse": 118})
+
+
 async def test_every_model_token_is_on_exactly_one_audit_row():
     graph, config, result = await start(
         [reply(skip=("validate_vitals",)), reply(ids=["chest_pain"])]
