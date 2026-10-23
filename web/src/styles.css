@@ -193,8 +193,10 @@ input[type="checkbox"] { width: 1.1rem; height: 1.1rem; margin: 0; accent-color:
 .working p { margin: 0; }
 .working-dot { width: 0.9rem; height: 0.9rem; border-radius: 50%; background: var(--focus); animation: pulse 1.2s ease-in-out infinite; flex: none; }
 
-.breakdown { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 0 1.2rem; align-items: start; }
-@media (max-width: 1399px) { .breakdown { grid-template-columns: minmax(0, 1fr); } }
+/* TEWS beside the signs only when the proposal panel itself is wide enough for both. */
+.proposal { container-type: inline-size; }
+.breakdown { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 1.2rem; align-items: start; }
+@container (min-width: 820px) { .breakdown { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); } }
 table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 caption { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); padding: 0.8rem 0 0.3rem; }
 caption strong { font-family: var(--font-num); font-size: 1.1rem; color: var(--ink); }
