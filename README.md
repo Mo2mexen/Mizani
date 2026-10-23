@@ -4,7 +4,7 @@ Mizani is an offline triage co-pilot for the front desk of a busy public hospita
 
 *Mizani* means "scale" or "balance" in Swahili (*mizani*) and Arabic (*mīzān*).
 
-> Built for the [African Agentic AI Design Challenge](https://agentic-africa-challenge.lovable.app/), Healthcare track ("The Triage Desk"). **Demo video:** ⟪VIDEO⟫.
+> Built for the [African Agentic AI Design Challenge](https://agentic-africa-challenge.lovable.app/), Healthcare track ("The Triage Desk").
 >
 > **One command, on Windows, macOS or Linux:** `git clone https://github.com/Mo2mexen/Mizani.git`, `cd Mizani`, `docker compose up`, then open **http://127.0.0.1:8090**. Steps for each system: [Running it](#running-it).
 >
