@@ -12,7 +12,7 @@
 2. Once `ollama list` answers, `ollama-pull` downloads `LLM_MODEL` into the `ollama-models` volume and exits. The first run downloads 3.3 GB for the default model; later runs reuse the volume.
 3. `mizani-mcp` (our MCP server, built from this repo) listens at `http://mizani-mcp:8000/mcp`, and at `127.0.0.1:8000` from this machine.
 4. `app` (command `mizani-api`) starts after the model is pulled and `fhir-mcp` is healthy: the API and the agent at `http://127.0.0.1:8090/api` (api.md; 8090 because 8080 is often taken). It shares the `mizani-data` volume with `mizani-mcp` so it can read the audit log, and keeps agent checkpoints in `/data/checkpoints.db`. It also serves the nurse's web page at `http://127.0.0.1:8090`, built from `web/` in the image's first stage (web.md).
-5. `hapi-fhir` (HAPI FHIR v8.12.0-2, R4) is the local FHIR store, at `127.0.0.1:18080/fhir` from this machine (18080 because 8080 is often taken).
+5. `hapi-fhir` (HAPI FHIR v8.12.0-2, R4) is the local FHIR store, at `127.0.0.1:18080/fhir` from this machine (18080 because 8080 is often taken). Its H2 database lives in the `hapi-data` volume (mounted at the image user's home, `/home/nonroot`, so the volume gets that user as owner).
 6. `fhir-mcp` (wso2 fhir-mcp-server, built from the pinned 0.10.0 commit) is the borrowed MCP server in front of HAPI, at `http://fhir-mcp:8000/mcp/` and `127.0.0.1:8001`. Auth is off because HAPI is local only. HAPI's image has no shell, so `fhir-mcp` carries the readiness check: it turns healthy once a FHIR search on HAPI answers, which also warms HAPI's database up, so the first patient's FHIR write after a cold start does not time out. Its request timeout is raised from 30 s to 120 s for slow disks.
 
 The server runs with an 8k context window, flash attention and a q8_0 KV cache. The context size is set here because the OpenAI-compatible `/v1` API cannot set it per request, and at Ollama's 4k default a prompt with all tool definitions gets cut off without an error.
@@ -31,6 +31,8 @@ The server runs with an 8k context window, flash attention and a q8_0 KV cache. 
 ## Safety rules this system enforces
 - Everything runs locally; the model server is not exposed outside the compose network.
 - `OLLAMA_NO_CLOUD=1` turns off Ollama's cloud models and web search, so no prompt (and no patient text) can leave the machine.
+
+Data survives `docker compose down` and `up`: the waiting room, audit log and checkpoints in `mizani-data`, the FHIR records in `hapi-data`, the model in `ollama-models`. `docker compose down -v` deletes all three. Every published port is bound to 127.0.0.1, and each can be moved with `API_HOST_PORT`, `MCP_HOST_PORT`, `FHIR_MCP_HOST_PORT` or `HAPI_HOST_PORT` in `.env`.
 
 ## Running and testing it alone
 ```

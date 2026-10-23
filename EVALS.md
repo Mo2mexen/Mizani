@@ -97,8 +97,8 @@ In every failing run the proposal names each sign with the complaint's words and
 3. **A stroke described in Arabic gets the wrong sign (1 task, 5 runs).** "For forty minutes her face droops on the right, her right arm is weak and her speech is unclear", in Arabic, gets a compound fracture instead of acute focal neurology. The colour is orange either way, so the run fails on the sign, not the colour. The same complaint in English passes.
 
 ## What we would try next
-1. **The false claim stays with the nurse.** It cannot be fixed from text; what can improve is how quickly the nurse sees it. A count of how often nurses override "nurse to confirm" signs, from shadow mode in a pilot, would show whether the flag is noticed.
-2. **Check meaning, not just presence.** For each sign, a short list of words from the manual's definition that the quote must contain (for example a fracture needs a broken bone, a deformity or broken skin), so "twisted my ankle" cannot back a dislocation. This needs care for Arabic.
+1. **The false claim stays with the nurse.** It cannot be fixed from text, but the flag can be made easier to notice. A count of how often nurses override "nurse to confirm" signs, from shadow mode in a pilot, would show whether the flag is noticed.
+2. **Check what the quoted words mean.** For each sign, a short list of words from the manual's definition that the quote must contain (for example a fracture needs a broken bone, a deformity or broken skin), so "twisted my ankle" cannot back a dislocation. This needs care for Arabic.
 3. **Arabic.** Add the chart-sign definitions in Arabic, or have the model restate the complaint in English before naming signs, and add more Arabic tasks.
 4. **A larger model.** A bigger Qwen3.5 model on a machine with more memory may name signs more accurately; it is a configuration change (`LLM_MODEL`), but we have not measured it.
 5. **More sign lists like the one in `sore-throat-01~vitals_in_text`.** The server already refuses a list longer than 20 and the agent retries; telling the model that limit in the prompt would save the second call.
