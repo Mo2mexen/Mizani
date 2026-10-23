@@ -66,7 +66,7 @@ function Card({ entry, onRetriage }: { entry: QueueEntry; onRetriage: (runId: st
       </header>
       <p className={`card-time${isOver ? " over" : ""}`}>
         waited {minutes(entry.waited_minutes)} · last triage {minutes(entry.minutes_since_triage)} ago · target{" "}
-        {minutes(entry.target_minutes)}
+        {entry.target_minutes === 0 ? "immediately" : minutes(entry.target_minutes)}
       </p>
       <div className="card-actions">
         <button type="button" className="btn btn-small" aria-expanded={panel === "recheck"} onClick={() => toggle("recheck")}>
@@ -173,7 +173,7 @@ function Handover({ entry }: { entry: QueueEntry }) {
                 Your name
               </label>
               <input id={nameId} dir="auto" placeholder="your name" value={nurse} onChange={(e) => setNurse(e.target.value)} />
-              <button type="submit" className="btn btn-primary btn-small" disabled={!nurse.trim() || isBusy}>
+              <button type="submit" className="btn btn-primary" disabled={!nurse.trim() || isBusy}>
                 {isBusy ? "Releasing…" : "Release to doctor"}
               </button>
             </form>

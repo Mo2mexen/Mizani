@@ -227,7 +227,8 @@ td.src { display: table-cell; }
 .flag-retriage, .flag-recheck_due { border-left-color: var(--focus); }
 
 .decision { margin-top: 1rem; border-top: 2px solid var(--ink); padding-top: 0.6rem; }
-.decision-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+/* A button beside a field is as tall as the field. */
+.decision-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: stretch; }
 .decision-row input { flex: 1 1 10rem; width: auto; }
 .override fieldset {
   margin: 0.8rem 0 0; border: 1px dashed var(--line-strong); border-radius: var(--radius);
