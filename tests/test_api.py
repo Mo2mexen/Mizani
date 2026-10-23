@@ -255,7 +255,7 @@ def test_a_handover_with_a_wrong_number_is_redrafted_once_then_refused():
 
 def test_a_handover_with_extra_lines_is_tidied_not_refused():
     wordy = AIMessage(
-        content="- HR 80, alert. The patient has waited 1321 minutes.\n- Orange: chest pain\n"
+        content="- HR 80, alert. The patient has waited 1321 minutes. 20\n- Orange: chest pain\n"
         "chest pain since morning\nWaited 20 minutes"
     )
     with client(reply(ids=["chest_pain"]), wordy) as api:

@@ -88,6 +88,7 @@ export function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
+          <img className="brand-logo" src="/favicon.svg" alt="" width="30" height="30" />
           <h1 className="brand-name">Mizani</h1>
           <span className="brand-sub">Triage co-pilot for the adult SATS chart. The nurse decides.</span>
         </div>
@@ -121,12 +122,12 @@ export function App() {
           onNextPatient={nextPatient}
         />
       </main>
-      <TracePanel run={run} isMasked={isMasked} />
       <QueueBoard
         colours={colours}
         queue={queue}
         onRetriage={(id) => openRun(id, null)}
       />
+      <TracePanel run={run} isMasked={isMasked} />
       <AuditDrawer isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />
       <footer className="foot">
         Synthetic patients only. Mizani suggests; a named nurse approves every priority. Every number shows the rule it

@@ -51,9 +51,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem var(--gap);
   padding: 0.7rem 0; border-bottom: 2px solid var(--ink); margin-bottom: var(--gap);
 }
-.brand { display: flex; align-items: baseline; gap: 0.2rem 0.75rem; flex: 1 1 20rem; flex-wrap: wrap; min-width: 0; }
+.brand { display: flex; align-items: center; gap: 0.2rem 0.65rem; flex: 1 1 20rem; flex-wrap: wrap; min-width: 0; }
+.brand-logo { display: block; width: 30px; height: 30px; border-radius: 6px; flex: none; }
 .brand-name { margin: 0; font-size: 1.6rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
-.brand-sub { color: var(--ink-soft); font-size: 0.9rem; }
+.brand-sub { color: var(--ink-soft); font-size: 0.9rem; padding-top: 0.15rem; }
 .toggle { display: flex; gap: 0.4rem; align-items: center; font-size: 0.9rem; cursor: pointer; }
 .toggle-note { color: var(--ink-soft); font-size: 0.8rem; }
 .banner {
@@ -287,6 +288,9 @@ td.src { display: table-cell; }
 .card-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
 .card-panel { margin-top: 0.5rem; border-top: 1px dashed var(--line-strong); padding-top: 0.5rem; }
 .card-panel .vitals-grid { grid-template-columns: minmax(0, 1fr); }
+/* Inside a narrow card the name and the release button stack, each the full width. */
+.card-panel .decision-row { flex-direction: column; }
+.card-panel .decision-row > * { width: 100%; }
 .handover-text { white-space: pre-wrap; background: #f6f3ea; padding: 0.5rem; border-radius: var(--radius); font-size: 0.85rem; overflow-wrap: anywhere; }
 
 /* Audit drawer */

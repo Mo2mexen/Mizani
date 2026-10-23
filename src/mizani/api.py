@@ -64,7 +64,9 @@ def _two_lines(content: str) -> list[str]:
     into the second. The server still checks every number."""
     lines = []
     for raw in content.splitlines():
-        kept = [s for s in SENTENCE.split(raw.strip().lstrip("-*#• ")) if not WAIT.search(s)]
+        parts = SENTENCE.split(raw.strip().lstrip("-*#• "))
+        # a fragment with no words left ("20") is a remnant of a dropped sentence
+        kept = [s for s in parts if not WAIT.search(s) and re.search(r"[^\W\d_]", s)]
         if " ".join(kept).strip():
             lines.append(" ".join(kept).strip())
     return lines[:1] + ([" ".join(lines[1:])] if len(lines) > 1 else [])
