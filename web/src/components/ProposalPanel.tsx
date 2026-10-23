@@ -35,7 +35,7 @@ export function ProposalPanel({ run, complaint, colours, isShadow, assessedFor, 
         <p className="error" role="alert">
           {run.error}
         </p>
-        <p className="hint">Nothing was saved for this patient. Start the intake again.</p>
+        <p className="hint">Nothing was saved for this patient.</p>
       </Shell>
     );
   }
@@ -104,7 +104,8 @@ function Shell({ pending, children }: { pending?: boolean; children: React.React
 function Reconnecting() {
   return (
     <p className="warning" role="status">
-      Lost the connection to the API; retrying. Nothing is lost: the run continues where it stopped.
+      Lost the connection to the API; retrying. Saved patients are safe. If the API restarted before this proposal
+      reached you, the page will say so; then start the intake again.
     </p>
   );
 }
