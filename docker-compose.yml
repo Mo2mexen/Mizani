@@ -3,6 +3,8 @@
 # NVIDIA GPU (Windows/Linux):
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
 # Then open http://127.0.0.1:8090 for the nurse's page (API and docs: /api, /docs).
+# Every port listens on this machine only (127.0.0.1). If one is taken, set API_HOST_PORT,
+# MCP_HOST_PORT, FHIR_MCP_HOST_PORT or HAPI_HOST_PORT in .env (see .env.example).
 
 services:
   ollama:
@@ -43,16 +45,21 @@ services:
     volumes:
       - mizani-data:/data
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${MCP_HOST_PORT:-8000}:8000"
 
-  # Local FHIR store (HAPI FHIR, R4, its built-in database). Browse it at
+  # Local FHIR store (HAPI FHIR, R4, its built-in H2 database). Browse it at
   # http://127.0.0.1:18080/fhir from this machine only (18080: 8080 is often taken).
   hapi-fhir:
     image: hapiproject/hapi:v8.12.0-2
     environment:
       hapi.fhir.fhir_version: R4
+      # Its database in a volume, so `docker compose down` keeps the FHIR records. /home/nonroot
+      # belongs to the image's user (65532), and a new volume mounted there inherits that owner.
+      spring.datasource.url: jdbc:h2:file:/home/nonroot/h2
+    volumes:
+      - hapi-data:/home/nonroot
     ports:
-      - "127.0.0.1:18080:8080"
+      - "127.0.0.1:${HAPI_HOST_PORT:-18080}:8080"
 
   # Borrowed MCP server: wso2 fhir-mcp-server, built from the pinned 0.10.0 release commit.
   # Auth is off because HAPI is local and unreachable from outside this machine.
@@ -64,10 +71,18 @@ services:
       FHIR_SERVER_DISABLE_AUTHORIZATION: "True"
       FHIR_MCP_HOST: 0.0.0.0
       FHIR_MCP_PORT: "8000"
+      FHIR_MCP_REQUEST_TIMEOUT: "120"  # seconds; wso2's default 30 can be too short on a slow disk
     depends_on:
       - hapi-fhir
     ports:
-      - "127.0.0.1:8001:8000"
+      - "127.0.0.1:${FHIR_MCP_HOST_PORT:-8001}:8000"
+    # HAPI's image has no shell, so its readiness is checked from here: healthy once a FHIR
+    # search answers, which also warms HAPI's database up before the first triage is written.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://hapi-fhir:8080/fhir/Patient?_count=1', timeout=60)"]
+      interval: 5s
+      timeout: 65s
+      retries: 60
 
   # The nurse's page, the API and the agent. Shares mizani-data with the MCP server to read
   # the audit log; agent checkpoints go to /data/checkpoints.db. Reachable from this machine only.
@@ -85,15 +100,16 @@ services:
     volumes:
       - mizani-data:/data
     ports:
-      - "127.0.0.1:8090:8090"  # 8090, not 8080: 8080 is often taken
+      - "127.0.0.1:${API_HOST_PORT:-8090}:8090"  # 8090, not 8080: 8080 is often taken
     depends_on:
       mizani-mcp:
         condition: service_started
       fhir-mcp:
-        condition: service_started
+        condition: service_healthy
       ollama-pull:
         condition: service_completed_successfully
 
 volumes:
   ollama-models:
   mizani-data:
+  hapi-data:

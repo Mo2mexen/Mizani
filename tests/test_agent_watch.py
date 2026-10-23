@@ -40,9 +40,9 @@ def call(name, args):
 async def committed(tools, signs):
     args = {
         "patient_label": "Test Patient 01",
-        "complaint": "test",
+        "complaint": "chest pain",
         "vitals": NORMAL,
-        "discriminator_ids": signs,
+        "discriminators": [{"id": s, "quote": "chest pain"} for s in signs],
     }
     tid = (await tools["propose_priority"].ainvoke(call("propose_priority", args))).artifact[
         "triage_id"

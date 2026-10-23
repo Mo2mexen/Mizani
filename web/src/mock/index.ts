@@ -14,6 +14,7 @@ import type {
   TraceStep,
   Vitals,
 } from "../types";
+import type { StreamHandlers } from "../api";
 
 const FAKE_COLOURS: Colour[] = [
   { colour: "red", label: "Emergency", target_minutes: 0, source: "FAKE mock target" },
@@ -23,8 +24,7 @@ const FAKE_COLOURS: Colour[] = [
 ];
 
 let queue: QueueEntry[] = [];
-type Handlers = { [event in "step" | "proposal" | "committed" | "error"]: (data: never) => void };
-const streams = new Map<string, Handlers>(); // like the API, a decision ends the run's stream
+const streams = new Map<string, StreamHandlers>(); // like the API, a decision ends the run's stream
 const audit: AuditRow[] = [];
 const now = () => new Date().toISOString();
 
@@ -41,7 +41,9 @@ function fakeProposal(triageId: string): Proposal {
         { field: "heart_rate", value: 88, points: 0, source: "FAKE mock rule" },
       ],
     },
-    discriminators: [{ name: "Chest pain", colour: "orange", source: "FAKE mock rule" }],
+    discriminators: [
+      { name: "Chest pain", colour: "orange", quote: "chest pain since this morning", source: "FAKE mock rule; matched from input: complaint" },
+    ],
     flags: [
       { kind: "remeasure", message: "Temperature is missing (FAKE mock)", source: "input: temperature" },
       { kind: "investigation", message: "Immediate ECG (FAKE mock)", source: "FAKE mock rule" },
@@ -112,17 +114,14 @@ export const api = {
   verify: async () => ({ intact: true, first_broken_row: null }),
 };
 
-export function openStream(
-  runId: string,
-  on: { [event in "step" | "proposal" | "committed" | "error"]: (data: never) => void },
-): () => void {
+export function openStream(runId: string, on: StreamHandlers): () => void {
   const triageId = `mock-${runId}`;
   streams.set(runId, on);
-  const events: [keyof typeof on, unknown][] = [
+  const events: ["step" | "proposal", unknown][] = [
     ["step", step("model", "extract", { attempt: 1 }, { tool_calls: [], tokens: 1640, model: "FAKE mock model" })],
     ["step", step("tool_call", "validate_vitals", { vitals: {} }, [])],
     ["step", step("tool_call", "compute_tews", { vitals: {} }, { total: 2 })],
-    ["step", step("tool_call", "match_discriminators", { discriminator_ids: ["chest_pain"] }, {})],
+    ["step", step("tool_call", "match_discriminators", { discriminators: [{ id: "chest_pain", quote: "chest pain since this morning" }] }, {})],
     ["step", step("tool_call", "propose_priority", {}, { triage_id: triageId })],
     ["step", step("waiting_for_nurse", "nurse", { triage_id: triageId }, null)],
     ["proposal", { proposal: fakeProposal(triageId), error: null }],

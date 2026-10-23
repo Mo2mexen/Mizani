@@ -6,7 +6,7 @@ import pytest
 from mizani.fhir import encounter, observations, patient, write_triage
 from mizani.rules.engine import propose
 from mizani.rules.pack import load_pack
-from mizani.schemas import Vitals
+from mizani.schemas import SignClaim, Vitals
 
 pytestmark = pytest.mark.anyio
 
@@ -28,7 +28,8 @@ def anyio_backend():
 
 
 def committed(status="committed"):
-    proposal = propose("t1", VITALS, ["chest_pain"], load_pack())
+    chest_pain = [SignClaim(id="chest_pain", quote="chest pain")]
+    proposal = propose("t1", VITALS, chest_pain, load_pack(), "chest pain")
     return {
         "id": "t1",
         "patient_label": "Test Patient 01",

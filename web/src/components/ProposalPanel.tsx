@@ -1,12 +1,11 @@
-import { useState } from "react";
-import { api } from "../api";
+import { useEffect, useState } from "react";
 import { colourLabel, FIELD_LABELS, FLAG_LABELS } from "../format";
 import type { Colour, Proposal, RunState } from "../types";
-import { EMPTY_VITALS, toVitals } from "../vitals";
-import { VitalsFields } from "./VitalsFields";
+import { DecisionForm } from "./DecisionForm";
+import { ShadowFirst } from "./ShadowFirst";
 
 type Props = {
-  run: RunState;
+  run: RunState | null;
   complaint: string | null;
   colours: Colour[];
   isShadow: boolean;
@@ -16,45 +15,138 @@ type Props = {
   onCommitted: () => void;
 };
 
+const SLOW_SECONDS = 20; // past this, say why the first patient after a start is slow
+
 /** The nurse's screen: the proposal with every source, then approve, override or re-measure. */
 export function ProposalPanel({ run, complaint, colours, isShadow, assessedFor, onAssessed, onCommitted }: Props) {
-  const proposal = run.proposal;
-
+  if (!run) {
+    return (
+      <Shell>
+        <p className="empty">
+          No patient yet. Fill in the intake: the proposed colour appears here first, with the rule behind every number,
+          and nothing is saved until you approve or override it.
+        </p>
+      </Shell>
+    );
+  }
+  if (run.error) {
+    return (
+      <Shell>
+        <p className="error" role="alert">
+          {run.error}
+        </p>
+        <p className="hint">Nothing was saved for this patient.</p>
+      </Shell>
+    );
+  }
   if (run.committed) return <CommittedView run={run} colours={colours} />;
-  if (!proposal) return null;
+  const proposal = run.proposal;
+  if (!proposal) return <AgentWorking key={run.runId} run={run} />;
   // One blind assessment per proposal: a re-measure makes a new proposal, so she is asked again.
   if (isShadow && assessedFor !== proposal.triage_id) {
     return <ShadowFirst runId={run.runId} colours={colours} onDone={() => onAssessed(proposal.triage_id)} />;
   }
+  const toConfirm = proposal.flags.filter((f) => f.kind === "confirm_sign");
+  // After a reload the intake text is gone from the page; the propose step still carries it.
+  const proposed = run.steps.find((s) => s.name === "propose_priority")?.input as { complaint?: string } | undefined;
+  const shownComplaint = complaint ?? proposed?.complaint ?? null;
   return (
-    <section className="panel proposal" aria-labelledby="proposal-title">
-      <h2 id="proposal-title" className="panel-title">
-        <span className="step-no">3</span> Proposal <span className="pending">pending, not saved</span>
-      </h2>
-      {complaint && (
-        <p className="complaint" dir="auto">
-          {complaint}
-        </p>
-      )}
+    <Shell pending>
       <ColourBand proposal={proposal} colours={colours} />
+      {toConfirm.length > 0 && (
+        <div className="confirm" role="note" aria-label="Nurse to confirm">
+          <p className="confirm-title">Nurse to confirm before approving</p>
+          <ul>
+            {toConfirm.map((f, i) => (
+              <li key={i}>
+                {f.message}
+                <span className="src">{f.source}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {shownComplaint && (
+        <blockquote className="complaint" dir="auto">
+          {shownComplaint}
+        </blockquote>
+      )}
+      {run.isReconnecting && <Reconnecting />}
       <Breakdown proposal={proposal} />
       {run.commitError && (
         <p className="error" role="alert">
-          Commit refused: {run.commitError}
+          Not saved: {run.commitError}
         </p>
       )}
-      <DecisionForm key={proposal.triage_id} run={run} proposal={proposal} colours={colours} onCommitted={onCommitted} />
+      <DecisionForm
+        key={proposal.triage_id}
+        run={run}
+        proposal={proposal}
+        colours={colours}
+        needsConfirm={toConfirm.length > 0}
+        onCommitted={onCommitted}
+      />
+    </Shell>
+  );
+}
+
+function Shell({ pending, children }: { pending?: boolean; children: React.ReactNode }) {
+  return (
+    <section className="panel proposal" aria-labelledby="proposal-title">
+      <h2 id="proposal-title" className="panel-title">
+        <span className="step-no">3</span> Proposal {pending && <span className="pending">pending: not saved</span>}
+      </h2>
+      {children}
     </section>
+  );
+}
+
+function Reconnecting() {
+  return (
+    <p className="warning" role="status">
+      Lost the connection to the API; retrying. Saved patients are safe. If the API restarted before this proposal
+      reached you, the page will say so; then start the intake again.
+    </p>
+  );
+}
+
+function AgentWorking({ run }: { run: RunState }) {
+  const [started] = useState(() => Date.now());
+  const [now, setNow] = useState(started);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const seconds = Math.floor((now - started) / 1000);
+  const isModelStep = run.steps.length === 0 || run.steps[run.steps.length - 1].name === "extract";
+  return (
+    <Shell>
+      <div className="working" role="status">
+        <span className="working-dot" aria-hidden="true" />
+        <p>
+          <strong>The agent is working</strong> · {seconds} s
+          <br />
+          {isModelStep ? "The model is reading the complaint." : "The rules engine is scoring."}
+        </p>
+      </div>
+      {run.isReconnecting && <Reconnecting />}
+      {seconds >= SLOW_SECONDS && (
+        <p className="hint">
+          The model may still be loading: the first patient after a start can take a minute or two. Later patients are
+          faster.
+        </p>
+      )}
+    </Shell>
   );
 }
 
 function ColourBand({ proposal, colours }: { proposal: Proposal; colours: Colour[] }) {
   return (
     <div className={`colour-band c-${proposal.colour}`}>
-      <div className="colour-name">
+      <p className="colour-name">
         <span className="swatch" aria-hidden="true" />
         {proposal.colour.toUpperCase()} <span className="colour-label">{colourLabel(colours, proposal.colour)}</span>
-      </div>
+      </p>
       <p className="colour-why">
         <span className="src-tag">why</span> {proposal.source}
       </p>
@@ -63,6 +155,7 @@ function ColourBand({ proposal, colours }: { proposal: Proposal; colours: Colour
 }
 
 function Breakdown({ proposal }: { proposal: Proposal }) {
+  const flags = proposal.flags.filter((f) => f.kind !== "confirm_sign");
   return (
     <div className="breakdown">
       <table className="tews">
@@ -71,16 +164,20 @@ function Breakdown({ proposal }: { proposal: Proposal }) {
         </caption>
         <thead>
           <tr>
-            <th>Vital</th>
-            <th className="num">Value</th>
-            <th className="num">Points</th>
-            <th>Source</th>
+            <th scope="col">Vital</th>
+            <th scope="col" className="num">
+              Value
+            </th>
+            <th scope="col" className="num">
+              Points
+            </th>
+            <th scope="col">Source</th>
           </tr>
         </thead>
         <tbody>
           {proposal.tews.components.map((c) => (
             <tr key={c.field}>
-              <td>{FIELD_LABELS[c.field] ?? c.field}</td>
+              <th scope="row">{FIELD_LABELS[c.field] ?? c.field}</th>
               <td className="num">{String(c.value)}</td>
               <td className="num">{c.points}</td>
               <td className="src">{c.source}</td>
@@ -88,191 +185,69 @@ function Breakdown({ proposal }: { proposal: Proposal }) {
           ))}
         </tbody>
       </table>
-      <h3 className="sub-title">Chart signs</h3>
-      {proposal.discriminators.length === 0 && <p className="empty">None named or proven.</p>}
-      <ul className="signs">
-        {proposal.discriminators.map((d) => (
-          <li key={d.name}>
-            <span className={`chip c-${d.colour}`}>{d.colour.toUpperCase()}</span> {d.name}
-            <span className="src">{d.source}</span>
-          </li>
-        ))}
-      </ul>
-      {proposal.flags.length > 0 && (
-        <>
-          <h3 className="sub-title">Flags</h3>
-          <ul className="flags">
-            {proposal.flags.map((f, i) => (
-              <li key={`${f.kind}-${i}`} className={`flag flag-${f.kind}`}>
-                <span className="flag-kind">{FLAG_LABELS[f.kind] ?? f.kind}</span> {f.message}
-                <span className="src">{f.source}</span>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-    </div>
-  );
-}
-
-type DecisionProps = { run: RunState; proposal: Proposal; colours: Colour[]; onCommitted: () => void };
-
-function DecisionForm({ run, proposal, colours, onCommitted }: DecisionProps) {
-  const [nurse, setNurse] = useState("");
-  const [overrideColour, setOverrideColour] = useState("");
-  const [reason, setReason] = useState("");
-  const [isRemeasuring, setIsRemeasuring] = useState(false);
-  const [vitals, setVitals] = useState(EMPTY_VITALS);
-  const [isBusy, setIsBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const flagged = new Set(proposal.flags.filter((f) => f.kind === "remeasure").map((f) => f.source.split(";")[0].replace("input: ", "")));
-  const named = nurse.trim().length > 0;
-
-  async function act(work: () => Promise<unknown>) {
-    setIsBusy(true);
-    setError(null);
-    try {
-      await work();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Not sent");
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
-  const approve = () =>
-    act(async () => {
-      await api.decide(run.runId, { nurse_name: nurse.trim(), action: "approve", triage_id: proposal.triage_id });
-      onCommitted();
-    });
-  const override = () =>
-    act(async () => {
-      await api.decide(run.runId, {
-        nurse_name: nurse.trim(),
-        action: "override",
-        colour: overrideColour,
-        reason: reason.trim(),
-        triage_id: proposal.triage_id,
-      });
-      onCommitted();
-    });
-  const remeasure = () =>
-    act(async () => {
-      await api.remeasure(run.runId, toVitals(vitals));
-      setIsRemeasuring(false);
-      setVitals(EMPTY_VITALS);
-    });
-
-  return (
-    <div className="decision">
-      <h3 className="sub-title">Nurse decision</h3>
-      <label className="field" htmlFor="nurse-name">
-        <span className="field-label">Your name (required to save)</span>
-        <input id="nurse-name" value={nurse} onChange={(e) => setNurse(e.target.value)} autoComplete="off" />
-      </label>
-      <div className="decision-row">
-        <button type="button" className="btn btn-primary" disabled={!named || isBusy} onClick={approve}>
-          Approve {proposal.colour.toUpperCase()}
-        </button>
-        <button type="button" className="btn" disabled={isBusy} onClick={() => setIsRemeasuring(!isRemeasuring)}>
-          {isRemeasuring ? "Cancel re-measure" : "Enter re-measured vitals"}
-        </button>
-      </div>
-      <fieldset className="override">
-        <legend>Override (colour and reason required)</legend>
-        <select aria-label="Override colour" value={overrideColour} onChange={(e) => setOverrideColour(e.target.value)}>
-          <option value="">choose a colour</option>
-          {colours.map((c) => (
-            <option key={c.colour} value={c.colour}>
-              {c.colour.toUpperCase()} · {c.label}
-            </option>
+      <div>
+        <h3 className="sub-title">Chart signs</h3>
+        {proposal.discriminators.length === 0 && <p className="empty">None applies. The vitals set the colour.</p>}
+        <ul className="signs">
+          {proposal.discriminators.map((d) => (
+            <li key={d.name}>
+              <span className={`chip c-${d.colour}`}>{d.colour.toUpperCase()}</span> {d.name}
+              {d.quote && (
+                <q className="quote" dir="auto">
+                  {d.quote}
+                </q>
+              )}
+              <span className="src">{d.source}</span>
+            </li>
           ))}
-        </select>
-        <input aria-label="Override reason" placeholder="reason" value={reason} onChange={(e) => setReason(e.target.value)} />
-        <button
-          type="button"
-          className="btn btn-warn"
-          disabled={!named || !overrideColour || !reason.trim() || isBusy}
-          onClick={override}
-        >
-          Override
-        </button>
-      </fieldset>
-      {isRemeasuring && (
-        <div className="remeasure">
-          <p className="hint">Highlighted fields were missing or impossible. The agent re-scores without the model.</p>
-          <VitalsFields value={vitals} onChange={setVitals} highlight={flagged} idPrefix="remeasure" />
-          <button type="button" className="btn btn-primary" disabled={isBusy} onClick={remeasure}>
-            Re-score with these vitals
-          </button>
-        </div>
-      )}
-      {error && <p className="error" role="alert">{error}</p>}
+        </ul>
+        {flags.length > 0 && (
+          <>
+            <h3 className="sub-title">Flags</h3>
+            <ul className="flags">
+              {flags.map((f, i) => (
+                <li key={`${f.kind}-${i}`} className={`flag flag-${f.kind}`}>
+                  <span className="flag-kind">{FLAG_LABELS[f.kind] ?? f.kind}</span> <span dir="auto">{f.message}</span>
+                  <span className="src">{f.source}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
     </div>
-  );
-}
-
-function ShadowFirst({ runId, colours, onDone }: { runId: string; colours: Colour[]; onDone: () => void }) {
-  const [nurse, setNurse] = useState("");
-  const [colour, setColour] = useState("");
-  const [reason, setReason] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    try {
-      await api.assess(runId, nurse.trim(), colour, reason.trim() || undefined);
-      onDone();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Not recorded");
-    }
-  }
-
-  return (
-    <form className="panel proposal shadow" onSubmit={handleSubmit}>
-      <h2 className="panel-title">
-        <span className="step-no">3</span> Shadow mode: your colour first
-      </h2>
-      <p className="hint">Mizani's proposal is ready. Record your own colour before you see it.</p>
-      <label className="field" htmlFor="shadow-nurse">
-        <span className="field-label">Your name</span>
-        <input id="shadow-nurse" required value={nurse} onChange={(e) => setNurse(e.target.value)} />
-      </label>
-      <select aria-label="Your colour" required value={colour} onChange={(e) => setColour(e.target.value)}>
-        <option value="">your colour</option>
-        {colours.map((c) => (
-          <option key={c.colour} value={c.colour}>
-            {c.colour.toUpperCase()} · {c.label}
-          </option>
-        ))}
-      </select>
-      <input aria-label="Your reason" placeholder="reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} />
-      {error && <p className="error" role="alert">{error}</p>}
-      <button className="btn btn-primary" type="submit">
-        Record and show Mizani's proposal
-      </button>
-    </form>
   );
 }
 
 function CommittedView({ run, colours }: { run: RunState; colours: Colour[] }) {
   const c = run.committed!;
   const fhir = run.steps.find((s) => s.name === "fhir_create");
+  const fhirError = (fhir?.output as { error?: string } | null)?.error;
   return (
-    <section className="panel proposal committed" aria-live="polite">
-      <h2 className="panel-title">
+    <section className="panel proposal committed" aria-labelledby="saved-title">
+      <h2 id="saved-title" className="panel-title">
         <span className="step-no">3</span> Saved
       </h2>
       <div className={`colour-band c-${c.colour}`}>
-        <div className="colour-name">
+        <p className="colour-name">
           <span className="swatch" aria-hidden="true" />
           {c.colour.toUpperCase()} <span className="colour-label">{colourLabel(colours, c.colour)}</span>
-        </div>
+        </p>
         <p className="colour-why">
-          {c.action === "override" ? "Overridden" : "Approved"} by {c.approver} at {new Date(c.committed_at).toLocaleTimeString()}
-          {fhir ? " · FHIR record written" : ""}
+          {c.action === "override" ? "Overridden" : "Approved"} by <strong>{c.approver}</strong> at{" "}
+          {new Date(c.committed_at).toLocaleTimeString()}
         </p>
       </div>
+      {fhir && !fhirError && <p className="ok">FHIR record written to the local HAPI server.</p>}
+      {fhirError && (
+        <p className="warning" role="status">
+          The triage is saved, but the FHIR record was not written: {fhirError}
+        </p>
+      )}
+      <p className="hint">The patient is in the waiting room below. Draft the doctor handover from their card.</p>
+      <button type="button" className="btn" onClick={() => document.getElementById("complaint")?.focus()}>
+        Next patient
+      </button>
     </section>
   );
 }

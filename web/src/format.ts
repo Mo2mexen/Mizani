@@ -20,6 +20,9 @@ export const FLAG_LABELS: Record<FlagKind, string> = {
   investigation: "Investigation",
   not_on_chart: "Not on chart, ignored",
   conflicts_with_vitals: "Conflicts with vitals, ignored",
+  not_in_complaint: "Not in the complaint, ignored",
+  ignored_instruction: "Instruction in the complaint, ignored",
+  confirm_sign: "Nurse to confirm",
   retriage: "Re-triage",
   recheck_due: "Re-check due",
 };

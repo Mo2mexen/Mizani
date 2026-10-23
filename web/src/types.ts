@@ -34,15 +34,21 @@ export type FlagKind =
   | "investigation"
   | "not_on_chart"
   | "conflicts_with_vitals"
+  | "not_in_complaint"
+  | "ignored_instruction"
+  | "confirm_sign"
   | "retriage"
   | "recheck_due";
+
+/** A chart sign; `quote` is the complaint's words behind it (null when the vitals prove it). */
+export type Sign = Sourced & { name: string; colour: string; quote?: string | null };
 
 export type Proposal = Sourced & {
   triage_id: string;
   colour: string;
   status: "pending";
   tews: { total: number; components: ({ field: string; value: unknown; points: number } & Sourced)[] };
-  discriminators: ({ name: string; colour: string } & Sourced)[];
+  discriminators: Sign[];
   flags: ({ kind: FlagKind; message: string } & Sourced)[];
 };
 
@@ -87,6 +93,8 @@ export type Decision = {
   action: "approve" | "override";
   colour?: string;
   reason?: string;
+  /** The nurse checked the "nurse to confirm" sign with the patient; needed to approve one. */
+  confirmed?: boolean;
   /** The proposal on screen; the API refuses the decision if the agent re-scored since. */
   triage_id: string;
 };
@@ -115,4 +123,6 @@ export type RunState = {
   commitError: string | null;
   committed: Committed | null;
   error: string | null;
+  /** The stream dropped and the browser is reconnecting (it resumes with Last-Event-ID). */
+  isReconnecting: boolean;
 };

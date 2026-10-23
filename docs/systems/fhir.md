@@ -44,6 +44,7 @@ Browse the records at `http://127.0.0.1:18080/fhir/Encounter`.
 - wso2's server uses MCP SDK 1.x; a 2.x client must connect with `mode="legacy"` and the trailing-slash URL, or wso2's server errors on the first request and needs a restart. `write_triage` itself doesn't care which client is used.
 - Records are created one by one, not as one FHIR transaction; a failure part-way leaves earlier resources in place.
 - Re-triages create a new Encounter rather than updating the old one.
+- On a cold start HAPI needs from about 20 s (M4) to a few minutes (slow disk) before it answers. Compose holds the `app` back until a FHIR search answers through `fhir-mcp`'s healthcheck (compose.md); run outside compose, the first write can still time out, and the step then shows the error while the triage stays saved.
 
 ## Extending it
 Another resource (for example a Flag for re-checks) is one more builder in `fhir.py` and one more `create` call, with a test in `tests/test_fhir.py`.

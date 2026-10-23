@@ -65,6 +65,16 @@ class Tews(Contract):
 class Discriminator(Sourced):
     name: str = Field(min_length=1)
     colour: str = Field(min_length=1)
+    quote: str | None = None  # the complaint's words that show it; None when the vitals prove it
+
+
+class SignClaim(Contract):
+    """A chart discriminator the agent names, with the words of the complaint that show it.
+    The engine applies it only if those words are in the complaint and not in text addressed
+    to the system."""
+
+    id: str = Field(min_length=1, max_length=80)
+    quote: str = Field(default="", max_length=300)  # a phrase, not the whole complaint
 
 
 class Flag(Sourced):
@@ -91,6 +101,9 @@ class NurseDecision(Contract):
     action: Literal["approve", "override"]
     colour: str | None = None
     reason: str | None = None
+    # The nurse checked the proposal's "nurse to confirm" sign with the patient. Approving a
+    # proposal that has one needs it; the server refuses the commit otherwise.
+    confirmed: bool = False
 
     @model_validator(mode="after")
     def override_needs_colour_and_reason(self) -> "NurseDecision":

@@ -98,7 +98,7 @@ discriminators:
   - {id: seizure_post_ictal, name: Seizure - post ictal, colour: orange, source: "chart: Very urgent signs"}
   - {id: focal_neurology_acute, name: Focal neurology - acute (stroke), colour: orange, source: "chart: Very urgent signs"}
   - {id: aggression, name: Aggression, colour: orange, source: "chart: Very urgent signs"}
-  - {id: threatened_limb, name: Threatened limb, colour: orange, source: "chart: Very urgent signs; manual p9", hint: "a painful, pale, pulseless, weak or numb limb"}
+  - {id: threatened_limb, name: Threatened limb, colour: orange, source: "chart: Very urgent signs; manual p9", hint: "a limb losing its blood supply: pain with pallor, no pulse, coldness, numbness or paralysis; pain or swelling alone is not enough"}
   - {id: dislocation_larger_joint, name: Dislocation of larger joint (not finger or toe), colour: orange, source: "chart: Very urgent signs"}
   - {id: fracture_compound, name: Fracture - compound (with a break in skin), colour: orange, source: "chart: Very urgent signs"}
   - {id: burn_over_20, name: Burn over 20%, colour: orange, source: "chart: Very urgent signs"}

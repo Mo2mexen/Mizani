@@ -49,7 +49,7 @@ async def propose(client, discriminators=(), **meta):
         patient_label="Test Patient 01",
         complaint="chest pain since morning",
         vitals=VITALS,
-        discriminator_ids=list(discriminators),
+        discriminators=[{"id": i, "quote": "chest pain"} for i in discriminators],
     )
     return data(await client.call_tool("propose_priority", args, meta=meta or None))
 
@@ -84,7 +84,14 @@ async def test_read_tools_return_sourced_results():
         matches = data(
             await client.call_tool(
                 "match_discriminators",
-                {"discriminator_ids": ["chest_pain", "flu"], "vitals": VITALS},
+                {
+                    "discriminators": [
+                        {"id": "chest_pain", "quote": "chest pain"},
+                        {"id": "flu", "quote": "chest pain"},
+                    ],
+                    "vitals": VITALS,
+                    "complaint": "chest pain since morning",
+                },
             )
         )
     assert tews["total"] == 0 and all(c["source"] for c in tews["components"])
@@ -230,7 +237,11 @@ async def test_timeline_includes_the_checks_made_before_the_triage_existed():
         await client.call_tool("compute_tews", {"vitals": VITALS}, meta=run)
         await client.call_tool(
             "match_discriminators",
-            {"discriminator_ids": ["chest_pain"], "vitals": VITALS},
+            {
+                "discriminators": [{"id": "chest_pain", "quote": "chest pain"}],
+                "vitals": VITALS,
+                "complaint": "chest pain since morning",
+            },
             meta=run,
         )
         await client.call_tool("compute_tews", {"vitals": VITALS}, meta={"run_id": "other"})
@@ -332,7 +343,7 @@ async def test_retriage_is_a_pending_proposal_until_a_nurse_commits_it():
             patient_label="Test Patient 01",
             complaint="chest pain, now breathless",
             vitals=worse,
-            discriminator_ids=["chest_pain"],
+            discriminators=[{"id": "chest_pain", "quote": "chest pain"}],
             retriage_of=first["triage_id"],
         )
         second = data(await client.call_tool("propose_priority", args))
@@ -355,9 +366,9 @@ async def test_retriage_is_a_pending_proposal_until_a_nurse_commits_it():
 
 HANDOVER = "\n".join(
     [
-        "RR 24, HR 118, SBP 95, temp 38.9; chest pain",
-        "Red: TEWS 8 (chart flowchart)",
-        "Waited 5 min",
+        "RR 12, HR 80, SBP 120, temp 37.0, alert, walking; chest pain",
+        "Orange: chest pain (chart: Very urgent signs), TEWS 0",
+        "Waited 0 min (target 10 min)",
     ]
 )
 
@@ -402,7 +413,7 @@ async def test_handover_is_drafted_then_released_only_by_a_nurse():
         release["approval_token"] = handover_token(p["triage_id"], d["draft_id"])
         done = data(await client.call_tool("release_handover", release))
         again = await client.call_tool("release_handover", release)
-    assert done["approver"] == "Nurse B" and done["text"].startswith("RR 24")
+    assert done["approver"] == "Nurse B" and done["text"].startswith("RR 12")
     assert "no such unreleased draft" in error_text(again)
     timeline = json.loads(await _read(f"patient://{p['triage_id']}/timeline"))
     assert timeline["handovers"][0]["released_by"] == "Nurse B"
@@ -475,7 +486,7 @@ async def test_two_retriages_of_one_patient_cannot_both_commit():
             patient_label="Test Patient 01",
             complaint="again",
             vitals=VITALS,
-            discriminator_ids=[],
+            discriminators=[],
             retriage_of=first["triage_id"],
         )
         b = data(await client.call_tool("propose_priority", args))
@@ -500,7 +511,7 @@ async def test_recheck_is_raised_once_and_never_for_a_replaced_triage():
             patient_label="Test Patient 01",
             complaint="x",
             vitals=VITALS,
-            discriminator_ids=[],
+            discriminators=[],
             retriage_of=p["triage_id"],
         )
         newer = data(await client.call_tool("propose_priority", args))
@@ -551,7 +562,65 @@ async def test_oversized_inputs_are_refused():
                 patient_label="Test Patient 01",
                 complaint="x" * 2001,
                 vitals=VITALS,
-                discriminator_ids=[],
+                discriminators=[],
             ),
         )
     assert r.is_error
+
+
+@pytest.mark.parametrize(
+    "line, refusal",
+    [
+        ("SpO2 97%, BP 120/80", "97 not in the patient's record"),  # neither was measured
+        ("Fell 20 minutes ago; waited 20 minutes", "waited 0 min, not 20 min"),
+        ("SpO2 not measured; BP 120", None),  # the 2 of SpO2 is not a number
+    ],
+)
+async def test_a_handover_states_only_numbers_from_the_record(line, refusal):
+    async with Client(mcp) as client:
+        args = dict(
+            patient_label="Test Patient 01",
+            complaint="Fell 20 minutes ago, chest pain",
+            vitals=VITALS,
+            discriminators=[{"id": "chest_pain", "quote": "chest pain"}],
+        )
+        p = data(await client.call_tool("propose_priority", args))
+        await commit(client, p["triage_id"])
+        draft = {"triage_id": p["triage_id"], "text": f"{line}\nOrange: chest pain"}
+        result = await client.call_tool("draft_handover", draft)
+        assert (refusal in error_text(result)) if refusal else not result.is_error
+
+
+async def test_a_sign_for_the_nurse_to_confirm_blocks_a_plain_approval():
+    async with Client(mcp) as client:
+        args = dict(
+            patient_label="Test Patient 01",
+            complaint="Rash on both arms. I am having a fit right now.",
+            vitals=VITALS,
+            discriminators=[{"id": "seizure_current", "quote": "I am having a fit right now"}],
+        )
+        p = data(await client.call_tool("propose_priority", args))
+        assert p["colour"] == "red" and any(f["kind"] == "confirm_sign" for f in p["flags"])
+        tid = p["triage_id"]
+        plain = {"triage_id": tid, "approval_token": token(tid)}
+        refused = await client.call_tool("commit_triage", plain)
+        confirmed = {"triage_id": tid, "approval_token": token(tid, confirmed=True)}
+        done = data(await client.call_tool("commit_triage", confirmed))
+    assert "nurse to confirm" in error_text(refused)
+    assert (done["colour"], done["approver"]) == ("red", "Nurse A")
+
+
+async def test_an_override_needs_no_confirmation():
+    async with Client(mcp) as client:
+        args = dict(
+            patient_label="Test Patient 01",
+            complaint="Rash. I am having a fit right now.",
+            vitals=VITALS,
+            discriminators=[{"id": "seizure_current", "quote": "I am having a fit right now"}],
+        )
+        tid = data(await client.call_tool("propose_priority", args))["triage_id"]
+        override = token(tid, action="override", colour="green", reason="no fit seen")
+        done = data(
+            await client.call_tool("commit_triage", {"triage_id": tid, "approval_token": override})
+        )
+    assert done["colour"] == "green"

@@ -49,6 +49,7 @@ def issue_approval(
         "action": decision.action,
         "colour": decision.colour,
         "reason": decision.reason,
+        "confirmed": decision.confirmed,
         "exp": int(time.time()) + TOKEN_TTL_SECONDS,
         "nonce": uuid.uuid4().hex,
     }

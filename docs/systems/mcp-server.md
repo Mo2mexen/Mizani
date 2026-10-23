@@ -10,17 +10,17 @@ Our own MCP server. It gives the agent the SATS tools, stores triages, refuses t
 - Settings: `MIZANI_DB` (default `data/mizani.db`, `/data/mizani.db` in Docker), `MIZANI_APPROVAL_SECRET`, `MIZANI_MCP_HOST`, `MIZANI_MCP_PORT`
 
 ## How it works
-The agent reads the rules (`rules://sats/adult`), checks vitals, names chart discriminators and calls `propose_priority`, which runs the rules engine and stores a pending triage. The nurse approves or overrides in the UI; the API turns that into an approval token (approval.md). The agent then calls `commit_triage` with the token. A middleware (`audit_calls`) writes every tool call to the hash-chained audit log (audit.md), including refused calls.
+The agent reads the rules (`rules://sats/adult`), checks vitals, names chart discriminators, each with the words of the complaint that show it, and calls `propose_priority`, which runs the rules engine and stores a pending triage. The nurse approves or overrides in the UI; the API turns that into an approval token (approval.md). The agent then calls `commit_triage` with the token. A middleware (`audit_calls`) writes every tool call to the hash-chained audit log (audit.md), including refused calls.
 
 ## Interfaces
 | Name | Kind | Input | Output | Side effects |
 |---|---|---|---|---|
 | `validate_vitals` | tool, read | `vitals` | re-measure flags | audit row |
 | `compute_tews` | tool, read | `vitals` | TEWS with a source per point | audit row |
-| `match_discriminators` | tool, read | `discriminator_ids`, `vitals` | chart signs + `not_on_chart` flags | audit row |
-| `propose_priority` | tool, action | `patient_label`, `complaint`, `vitals`, `discriminator_ids`, optional `retriage_of` | pending `Proposal` (with a `retriage` flag when re-scoring) | new triage row, audit row |
-| `commit_triage` | tool, action, gated | `triage_id`, `approval_token` | committed colour, approver | triage committed (a re-triage replaces the old entry), token used, audit row |
-| `draft_handover` | tool, action | `triage_id`, `text` (1 to 3 lines) | unreleased draft | stores it; audit row (handover-and-shadow.md) |
+| `match_discriminators` | tool, read | `discriminators` (`[{id, quote}]`), `vitals`, `complaint` | chart signs with their quotes, and a flag for each refused sign (`not_on_chart`, `conflicts_with_vitals`, `not_in_complaint`, `ignored_instruction`; rules-engine.md) | audit row |
+| `propose_priority` | tool, action | `patient_label`, `complaint`, `vitals`, `discriminators` (`[{id, quote}]`), optional `retriage_of` | pending `Proposal` (a `confirm_sign` flag when red rests on the complaint alone; a `retriage` flag when re-scoring) | new triage row, audit row |
+| `commit_triage` | tool, action, gated | `triage_id`, `approval_token` | committed colour, approver; refused to approve a proposal with a `confirm_sign` flag unless the nurse confirmed it (an override needs no confirmation) | triage committed (a re-triage replaces the old entry), token used, audit row |
+| `draft_handover` | tool, action | `triage_id`, `text` (1 to 3 lines) | unreleased draft; refused if a number is not in the record or the stated waiting time is wrong | stores it; audit row (handover-and-shadow.md) |
 | `release_handover` | tool, action, gated | `triage_id`, `draft_id`, `approval_token` (purpose handover, naming that draft) | released text, approver | marks it released, token used; audit row |
 | `record_nurse_assessment` | tool, action | `triage_id`, `nurse_name`, `colour`, `reason` | stored assessment | one per triage; audit row |
 | `raise_recheck_flag` | tool, action | `triage_id` | `recheck_due` flag citing the target time | refused unless the timer ran out; records the flag; audit row |
@@ -29,7 +29,7 @@ The agent reads the rules (`rules://sats/adult`), checks vitals, names chart dis
 | `queue://current` | resource | | waiting patients by colour, then arrival, with time waited, `recheck_due` and `recheck_raised` (retriage-watch.md) | none |
 | `patient://{triage_id}/timeline` | resource | | the triage, its handover drafts and its audit rows | none |
 | `report://shadow-agreement` | resource | | nurse-vs-Mizani agreement rate and every disagreement | none |
-| `triage_intake` | prompt | `complaint` | intake instructions: every chart sign with its id, colour and, where the EMSSA manual defines it, its meaning; never infer a diagnosis | none |
+| `triage_intake` | prompt | `complaint` | intake instructions: every chart sign with its id, colour and, where the EMSSA manual defines it, its meaning; a quote from the complaint for each sign; never infer a diagnosis | none |
 | `handover_summary` | prompt | `triage_id` | findings-only handover instructions | none |
 
 Optional `_meta` on a tool call is copied into the audit row: `run_id` (one per patient run; links the checks made before the triage existed to that triage's timeline), and `model`, `tokens`, `cost` (which model asked for the call and what it cost). Refused or failed calls get `error: true`.
@@ -42,6 +42,8 @@ Optional `_meta` on a tool call is copied into the audit row: `run_id` (one per 
 - No commit without a named nurse: `commit_triage` refuses a missing, forged, expired, other-triage or reused token, and a token without an approver name. Tests prove each refusal.
 - No unsourced output: every tool result carries sources (the schemas reject output without them).
 - Only chart entries: unknown discriminators are refused with a flag.
+- Words behind every sign: a sign needs a quote that is in the complaint and outside text addressed to the software; a red colour from the complaint alone carries a `confirm_sign` flag for the nurse.
+- Handover numbers from the record: `draft_handover` refuses a number that is not in the patient's record, and a waiting time that is not the real one.
 - Patient text is data: the complaint is stored as-is, and the intake prompt escapes it inside its tags (so it can't close them) and tells the model to ignore instructions inside it. Patient label (≤ 80), complaint (≤ 2,000 characters) and discriminator list (≤ 20) are capped.
 - The container runs as an unprivileged user.
 - Read-only queue: the order comes from committed colours and arrival times; no tool reorders it.

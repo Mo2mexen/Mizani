@@ -3,9 +3,10 @@ import { api } from "../api";
 import { EMPTY_VITALS, toVitals } from "../vitals";
 import { VitalsFields } from "./VitalsFields";
 
-type Props = { onStarted: (runId: string, complaint: string) => void };
+/** isReady: the API has answered (colour chart loaded), so an intake can be sent. */
+type Props = { isReady: boolean; onStarted: (runId: string, complaint: string) => void };
 
-export function IntakeForm({ onStarted }: Props) {
+export function IntakeForm({ isReady, onStarted }: Props) {
   const [label, setLabel] = useState("Test Patient 01");
   const [complaint, setComplaint] = useState("");
   const [vitals, setVitals] = useState(EMPTY_VITALS);
@@ -35,7 +36,7 @@ export function IntakeForm({ onStarted }: Props) {
       </h2>
       <label className="field" htmlFor="patient-label">
         <span className="field-label">Patient label</span>
-        <input id="patient-label" required value={label} onChange={(e) => setLabel(e.target.value)} />
+        <input id="patient-label" dir="auto" required maxLength={80} value={label} onChange={(e) => setLabel(e.target.value)} />
         <span className="field-note">synthetic labels only, never a real name</span>
       </label>
       <label className="field" htmlFor="complaint">
@@ -45,16 +46,21 @@ export function IntakeForm({ onStarted }: Props) {
           dir="auto"
           required
           rows={3}
+          maxLength={2000}
           value={complaint}
           onChange={(e) => setComplaint(e.target.value)}
-          placeholder="e.g. chest pain since this morning, sweaty — English or Arabic"
+          placeholder="e.g. chest pain since this morning, sweaty (English or Arabic)"
         />
       </label>
       <p className="hint">Leave a vital empty if it wasn't measured: Mizani asks for a re-measure, it never guesses.</p>
       <VitalsFields value={vitals} onChange={setVitals} idPrefix="intake" />
-      {error && <p className="error" role="alert">{error}</p>}
-      <button className="btn btn-primary" type="submit" disabled={isSending}>
-        {isSending ? "Sending…" : "Start triage"}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      <button className="btn btn-primary" type="submit" disabled={isSending || !isReady}>
+        {isSending ? "Sending…" : isReady ? "Start triage" : "Waiting for the API…"}
       </button>
     </form>
   );

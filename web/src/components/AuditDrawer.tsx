@@ -1,16 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { clock } from "../format";
 import type { AuditRow, Shadow } from "../types";
 
 type Props = { isOpen: boolean; onClose: () => void };
 
-/** Every logged tool call, newest first, and whether the hash chain is intact. */
+/** Every logged tool call, newest first, and whether the hash chain is intact. Escape closes it. */
 export function AuditDrawer({ isOpen, onClose }: Props) {
-  const [rows, setRows] = useState<AuditRow[]>([]);
+  const [rows, setRows] = useState<AuditRow[] | null>(null);
   const [isIntact, setIsIntact] = useState<boolean | null>(null);
   const [shadow, setShadow] = useState<Shadow | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   async function load() {
     try {
@@ -25,15 +26,24 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
   }
 
   useEffect(() => {
-    if (isOpen) void load();
-  }, [isOpen]);
+    if (!isOpen) return;
+    const opener = document.activeElement; // focus goes back here on close
+    void load();
+    closeRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (opener instanceof HTMLElement) opener.focus();
+    };
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!isOpen) return null;
   return (
-    <aside className="drawer" aria-labelledby="audit-title">
+    <aside className="drawer" role="dialog" aria-modal="false" aria-labelledby="audit-title">
       <header className="drawer-head">
         <h2 id="audit-title" className="panel-title">
-          Audit log <span className="count">{rows.length} calls</span>
+          Audit log {rows && <span className="count">{rows.length} tool calls</span>}
         </h2>
         {isIntact !== null && (
           <span className={isIntact ? "chain ok" : "chain broken"}>
@@ -42,46 +52,60 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
         )}
         {shadow && shadow.assessed > 0 && (
           <span className="chain">
-            shadow mode: nurse and Mizani agreed {shadow.agreed}/{shadow.assessed}
+            shadow mode: nurse and Mizani agreed {shadow.agreed} of {shadow.assessed}
           </span>
         )}
         <button type="button" className="btn btn-small" onClick={() => void load()}>
           Refresh
         </button>
-        <button type="button" className="btn btn-small" onClick={onClose}>
+        <button ref={closeRef} type="button" className="btn btn-small" onClick={onClose}>
           Close
         </button>
       </header>
-      {error && <p className="error" role="alert">{error}</p>}
-      <div className="drawer-body">
-        <table className="audit">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Tool</th>
-              <th>Approver</th>
-              <th>Model</th>
-              <th className="num">Tokens</th>
-              <th className="num">Latency ms</th>
-              <th className="num">Cost</th>
-              <th>Result</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[...rows].reverse().map((r) => (
-              <tr key={r.hash} className={r.error ? "is-error" : undefined}>
-                <td>{clock(r.time)}</td>
-                <td>{r.tool}</td>
-                <td>{r.approver ?? ""}</td>
-                <td>{r.model ?? ""}</td>
-                <td className="num">{r.tokens ?? ""}</td>
-                <td className="num">{Math.round(r.latency_ms)}</td>
-                <td className="num">{r.cost.toFixed(4)}</td>
-                <td>{r.error ? "refused / failed" : "ok"}</td>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="drawer-body" tabIndex={0} aria-label="Audit rows, newest first">
+        {rows === null && !error && <p className="empty">Loading the audit log…</p>}
+        {rows?.length === 0 && <p className="empty">No tool calls yet. Every call of every run is logged here.</p>}
+        {rows && rows.length > 0 && (
+          <table className="audit">
+            <thead>
+              <tr>
+                <th scope="col">Time</th>
+                <th scope="col">Tool</th>
+                <th scope="col">Approver</th>
+                <th scope="col">Model</th>
+                <th scope="col" className="num">
+                  Tokens
+                </th>
+                <th scope="col" className="num">
+                  Latency ms
+                </th>
+                <th scope="col" className="num">
+                  Cost $
+                </th>
+                <th scope="col">Result</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {[...rows].reverse().map((r) => (
+                <tr key={r.hash} className={r.error ? "is-error" : undefined}>
+                  <td>{clock(r.time)}</td>
+                  <td>{r.tool}</td>
+                  <td>{r.approver ?? ""}</td>
+                  <td>{r.model ?? ""}</td>
+                  <td className="num">{r.tokens ?? ""}</td>
+                  <td className="num">{Math.round(r.latency_ms)}</td>
+                  <td className="num">{r.cost.toFixed(4)}</td>
+                  <td>{r.error ? "refused / failed" : "ok"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </aside>
   );

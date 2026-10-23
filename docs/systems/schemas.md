@@ -17,7 +17,8 @@ Every model extends `Contract`, which rejects unknown fields (a typo like `pulse
   - `glucose` (mmol/L) and `ketonuria` are finger-prick and urine-dipstick results, used only by the three diabetic discriminators.
 - `Sourced`: base for anything shown to the nurse. `source` (rule id or input field) is required and cannot be blank.
 - `TewsComponent`, `Tews`: one scored vital and the total. `Tews` rejects a total that differs from the sum of its components.
-- `Discriminator`, `Flag`: a matched chart entry or a warning, each with its source.
+- `Discriminator`, `Flag`: a matched chart entry or a warning, each with its source. A `Discriminator` named from the complaint carries `quote`, the complaint's words behind it.
+- `SignClaim`: a chart sign the agent names, `{id, quote}`; the engine applies it only if the quote is in the complaint outside text addressed to the software.
 - `Proposal`: the suggested colour. Its `source` is a one-line, cited reason for the colour (the TEWS total or the discriminator that set it). `status` can only be `"pending"`; committing happens elsewhere, after a nurse decision.
 - `NurseDecision`: needs a nurse name. An override needs a colour and a reason; an approval cannot carry a colour.
 - `AuditEntry`: one logged tool call (inputs, outputs, time, approver, model, tokens, latency, cost). The audit store adds the hash chain.
