@@ -14,13 +14,36 @@ type Props = {
 
 /** One column per colour, cards in the order the API sends. The UI never reorders anything. */
 export function QueueBoard({ colours, queue, onRetriage }: Props) {
+  const [search, setSearch] = useState("");
   const isLoading = queue === null || colours.length === 0;
+  // Search only hides cards that don't match the label; the order is still the API's.
+  const needle = search.trim().toLowerCase();
+  const visible = (queue ?? []).filter((e) => !needle || e.patient_label.toLowerCase().includes(needle));
   return (
     <section className="panel queue" aria-labelledby="queue-title">
       <h2 id="queue-title" className="panel-title">
-        <span className="step-no">4</span> Waiting room
-        {queue && <span className="count">{queue.length} waiting · order from the saved colours</span>}
+        <span className="step-no">3</span> Waiting room
+        {queue && <span className="count">{queue.length} waiting</span>}
+        {queue && queue.length > 0 && (
+          <input
+            type="search"
+            className="queue-search"
+            aria-label="Find a patient by label"
+            placeholder="Find a patient"
+            dir="auto"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        )}
       </h2>
+      {needle && (
+        <p className="hint" role="status">
+          {visible.length} of {queue?.length ?? 0} match "{search.trim()}".{" "}
+          <button type="button" className="btn btn-small" onClick={() => setSearch("")}>
+            Clear
+          </button>
+        </p>
+      )}
       {isLoading && <p className="empty">Loading the waiting room…</p>}
       {!isLoading && queue.length === 0 && (
         <p className="empty">Nobody is waiting. Saved patients appear here, in the colour a nurse approved.</p>
@@ -28,7 +51,7 @@ export function QueueBoard({ colours, queue, onRetriage }: Props) {
       {!isLoading && (
         <div className="queue-columns">
           {colours.map((c) => {
-            const entries = queue.filter((e) => e.colour === c.colour);
+            const entries = visible.filter((e) => e.colour === c.colour);
             return (
               <div key={c.colour} className={`queue-col c-${c.colour}`}>
                 <h3 className="queue-head">
@@ -40,9 +63,11 @@ export function QueueBoard({ colours, queue, onRetriage }: Props) {
                   {c.target_minutes === 0 ? "seen immediately" : `seen within ${minutes(c.target_minutes)}`}
                   <span className="src">{c.source}</span>
                 </p>
-                {entries.map((e) => (
-                  <Card key={e.triage_id} entry={e} onRetriage={onRetriage} />
-                ))}
+                <div className="queue-cards">
+                  {entries.map((e) => (
+                    <Card key={e.triage_id} entry={e} onRetriage={onRetriage} />
+                  ))}
+                </div>
               </div>
             );
           })}
@@ -66,7 +91,7 @@ function Card({ entry, onRetriage }: { entry: QueueEntry; onRetriage: (runId: st
       </header>
       <p className={`card-time${isOver ? " over" : ""}`}>
         waited {minutes(entry.waited_minutes)} · last triage {minutes(entry.minutes_since_triage)} ago · target{" "}
-        {minutes(entry.target_minutes)}
+        {entry.target_minutes === 0 ? "immediately" : minutes(entry.target_minutes)}
       </p>
       <div className="card-actions">
         <button type="button" className="btn btn-small" aria-expanded={panel === "recheck"} onClick={() => toggle("recheck")}>
@@ -173,7 +198,7 @@ function Handover({ entry }: { entry: QueueEntry }) {
                 Your name
               </label>
               <input id={nameId} dir="auto" placeholder="your name" value={nurse} onChange={(e) => setNurse(e.target.value)} />
-              <button type="submit" className="btn btn-primary btn-small" disabled={!nurse.trim() || isBusy}>
+              <button type="submit" className="btn btn-primary" disabled={!nurse.trim() || isBusy}>
                 {isBusy ? "Releasing…" : "Release to doctor"}
               </button>
             </form>

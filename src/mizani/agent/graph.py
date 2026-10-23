@@ -44,6 +44,7 @@ class TriageState(TypedDict, total=False):
     nurse_vitals: dict  # what the nurse typed; always wins over the model
     attempts: int
     retry_reason: str | None  # why the last model answer was rejected
+    fell_back: bool  # the run already went on with the nurse's vitals and no signs
     retriage_of: str | None  # re-check run: the committed triage this one re-scores (W1)
     model: str  # the model behind this run, sent with every tool call
     unlogged: dict  # tokens and cost of model calls not yet on an audit row
@@ -224,6 +225,7 @@ def build_graph(
         )
         return {
             "retry_reason": None,
+            "fell_back": True,
             "vitals": dict(state["nurse_vitals"]),
             "signs": [],
             "trace": [_step("model", "fallback", None, {"warning": warning})],
@@ -314,6 +316,10 @@ def build_graph(
         def route(state: TriageState) -> str:
             if not state.get("retry_reason"):
                 return next_node
+            if state.get("fell_back"):
+                # Refused with the nurse's own vitals and no signs: another round cannot help,
+                # so the run stops with the reason instead of looping (the API shows it).
+                raise RuntimeError(state["retry_reason"])
             return "extract" if state.get("attempts", 0) < MAX_ATTEMPTS else "fallback"
 
         return route

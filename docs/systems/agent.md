@@ -27,6 +27,8 @@ extract (model) ─► validate ─► score ─► discriminators ─► propos
 4. `nurse`: the run pauses (LangGraph `interrupt`) with the proposal. The nurse answers with re-measured vitals, which re-run validate to propose without another model call, or with an approval token issued by the API.
 5. `commit`: `commit_triage` with the token. A refusal (expired, forged, reused) goes back to the nurse with the server's reason. After a successful commit, when `write_fhir` is set (the API sets it from `MIZANI_FHIR_MCP_URL`), the run writes the record to FHIR through wso2's server and adds a `fhir_create` step (fhir.md).
 
+If the server refuses even the fallback (the nurse's own vitals with no chart signs), another round cannot help: the run stops with the server's reason, and the page shows it, instead of looping.
+
 Every step adds a trace row (`time`, `kind`, `name`, `input`, `output`, `latency_ms`; the UI's `TraceStep`). The approval token is shown as `(hidden)` in the trace and never enters the model's messages.
 
 Re-check runs (W1): `watch()` asks the server every 30 s to flag patients past their SATS target time (`raise_recheck_flag`; the server checks the timer). It never changes a colour. When the nurse re-measures a flagged patient, the API starts a run with `retriage_of`, the fresh vitals and the patient's current chart signs with their quotes. That run starts at validate and never calls the model, so only the vitals can change the colour; `propose_priority(retriage_of=...)` adds a `retriage` flag saying whether it changed, and the nurse approves it like any proposal.

@@ -253,6 +253,20 @@ def test_a_handover_with_a_wrong_number_is_redrafted_once_then_refused():
     assert refused.status_code == 409 and "97 not in the patient's record" in refused.text
 
 
+def test_a_handover_with_extra_lines_is_tidied_not_refused():
+    wordy = AIMessage(
+        content="- HR 80, alert. The patient has waited 1321 minutes. 20\n- Orange: chest pain\n"
+        "chest pain since morning\nWaited 20 minutes"
+    )
+    with client(reply(ids=["chest_pain"]), wordy) as api:
+        triage_id = committed_patient(api, intake(api))
+        draft = api.post(f"/api/queue/{triage_id}/handover")
+    assert draft.status_code == 201
+    first, second, waited = draft.json()["text"].splitlines()
+    assert (first, second) == ("HR 80, alert.", "Orange: chest pain chest pain since morning")
+    assert waited.startswith("Waited 0 min")  # the record's wait, not the model's "20 minutes"
+
+
 def test_an_overridden_handover_cites_the_nurse_not_the_rejected_proposal():
     from mizani.api import _why
 

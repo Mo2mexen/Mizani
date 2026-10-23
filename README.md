@@ -86,6 +86,16 @@ Scoring is done by deterministic rules, so the language model only reads free te
 
 Triage scales are YAML files, and each rule records its source. To add a scale (paediatric SATS, the WHO/ICRC/MSF Integrated Interagency Triage Tool, Manchester), you add a YAML file. The engine code stays the same.
 
+The adult SATS pack encodes the 7 TEWS vitals with their scoring bands, the 4 colours with their target times, 39 chart signs (6 red, 23 orange, 10 yellow), the additional investigations and the plausible range of each vital, each with its source.
+
+### When a case is not covered
+
+- **The complaint matches no chart sign:** the colour comes from the vitals alone, and the proposal says so.
+- **The model names a sign that is not on the chart, or one the complaint's words do not show:** the server refuses it and the proposal shows the flag.
+- **A vital is missing or impossible:** Mizani asks for a re-measure and never fills it in.
+- **A child, or a case outside the adult chart:** not covered yet (see Later).
+- **In every case** the nurse decides and can override with a reason. Mizani never forces a colour.
+
 ## Evaluation
 
 [EVALS.md](EVALS.md) reports 39 synthetic tasks (23 written by hand, 16 messy variants), each run five times through the full agent. On Qwen3.5 4B on a MacBook Air M4, 170 of 195 runs passed (87%), with no run-to-run variation, about 10 s and 2,160 tokens per run, and $0 per run on the local model. The safety gates held in every run: no commit without a nurse's approval, impossible vitals never scored, missing vitals never made up, and hidden instructions in a complaint never set a sign. One failure is kept on purpose: a patient who falsely reports a fit gets a red proposal, because as text the report is identical to a true one; Mizani shows the sign with the patient's words, asks the nurse to confirm it and saves nothing until a named nurse decides. The other failures are the model naming the wrong chart sign while quoting real words from the complaint. The tasks cover correct colour and discriminator, recovery from missing or impossible vitals, re-triage timing, refusal to diagnose, instructions hidden in complaint text, attempts to commit without approval, a false claim and Arabic input. Run them with `uv run mizani-evals --runs 5`.
@@ -117,6 +127,7 @@ Then open **http://127.0.0.1:8090** once the log shows `Uvicorn running on http:
 `docker compose up` starts the model server (Ollama, pulling the model once), our MCP server at `http://127.0.0.1:8000/mcp` (try it by hand with `npx @modelcontextprotocol/inspector`), the API with the agent at `http://127.0.0.1:8090` (try it from `http://127.0.0.1:8090/docs`, or with curl as in [docs/systems/api.md](docs/systems/api.md)), wso2's FHIR MCP server at `http://127.0.0.1:8001/mcp/` and a local HAPI FHIR store at `http://127.0.0.1:18080/fhir`. The API waits until HAPI answers, so the first patient's FHIR record is written too.
 
 - **Stop:** Ctrl+C, or `docker compose down`. The waiting room, the audit log, the FHIR records and the model are kept in Docker volumes, so the next `docker compose up` starts where you left off; `docker compose down -v` deletes them for a clean start.
+- **After `git pull`:** run `docker compose up --build`, so every image is rebuilt from the new code. Plain `up` reuses the images built before, and an old MCP server with a new agent refuses its calls.
 - **A port is taken:** copy `.env.example` to `.env` and set `API_HOST_PORT`, `MCP_HOST_PORT`, `FHIR_MCP_HOST_PORT` or `HAPI_HOST_PORT` (the page is then at `http://127.0.0.1:<API_HOST_PORT>`). Every port listens on this machine only.
 - **Everything else you might install** (for running and for development) is listed in [packages.txt](packages.txt). How the parts fit: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -149,7 +160,7 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 | MCP server `mizani-triage`: 9 tools, 5 resources, 2 prompts, approval gate, hash-chained audit; a chart sign counts only with the complaint's own words behind it, never from text addressed to the software; a red colour from the complaint alone needs the nurse's confirmation | done, tested through an MCP client |
 | Agent (LangGraph): reads the entry, checks vitals, scores through the MCP tools, pauses for the nurse, commits with the nurse's token; retries and falls back when the model's tool calls are wrong; model, tokens and cost logged with every call | done, tested with a fake model and live with Qwen3.5 4B |
 | API (FastAPI): intake, live agent steps as server-sent events, nurse decision (approval token), re-measure, re-triage, handover draft and release, shadow-mode assessment and report, queue, colours, audit log with chain check | done, tested, run live |
-| Web page (React + Vite): intake, the agent's steps live, the proposal with a source on every number and the words behind every sign, nurse decision with name, re-measure, shadow mode, waiting room with re-check and handover, audit log with the chain check; desk, tablet and phone layouts, keyboard and screen-reader use | done; served by the API at http://127.0.0.1:8090; every scenario tested in a browser on the full stack |
+| Web page (React + Vite): intake, the proposal with a source on every number and the words behind every sign, nurse decision with name, re-measure, shadow mode, waiting room with re-check and handover, the agent's steps live (a section the nurse can hide), audit log with the chain check, waiting-room search; desk, tablet and phone layouts, keyboard and screen-reader use | done; served by the API at http://127.0.0.1:8090; every scenario tested in a browser on the full stack |
 | FHIR output: the agent's commit step writes Patient, Encounter and Observations through wso2 fhir-mcp-server to a local HAPI FHIR | done, verified end to end and in a live run |
 | Re-triage watch: target-time timers; the agent raises a re-check flag every 30 s for patients past their target time; re-triage with fresh vitals as a new pending proposal that replaces the old entry once a nurse commits it | done, tested, run live |
 | Handover (the model drafts two lines of findings, the waiting time comes from the record, every number is checked against the record, a named nurse releases that exact draft) and shadow mode (nurse's own colour, agreement report) | done, tested, run live |
@@ -166,11 +177,16 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 - There is no login. The nurse types a name, and the API trusts anyone who can reach it, so every port listens on 127.0.0.1 only. A hospital deployment would need accounts behind the approval step. The default approval secret is public: change `MIZANI_APPROVAL_SECRET` in `.env` on any shared machine.
 - One desk, one SQLite file. The page is in English; complaints can be typed in Arabic or English.
 - Speed depends on the machine and the model (see [Running it](#running-it)). The first patient after a start also loads the model; the page says so while it waits.
-- The handover's two lines of findings are written by the model, so a nurse must read them before release. Every number in them is checked against the patient's record and the waiting time comes from the record, but a number written in words is not checked.
+- The handover's two lines of findings are written by the model, so a nurse must read them before release. The API tidies the draft (two lines, no bullets, no waiting time of the model's own), every number in it is checked against the patient's record, and the waiting time comes from the record; a number written in words is not checked, and a weaker model writes clumsier sentences.
 
 ## Later
 
-Paediatric SATS and the WHO/ICRC/MSF triage tool as rule packs, voice input for complaints, WhatsApp check-in before arrival, Bluetooth pulse oximeters, daily counts to DHIS2, a training mode for new nurses, and a multi-hospital deployment on Postgres.
+- **A ward deployment.** Today one machine runs everything and only that machine can open the page. In a hospital, one server (a PC or small server in the department, with a GPU for a larger model) would run the stack, and nurses would open the page from any browser on the hospital network, at the desk or on a tablet. That needs nurse accounts and a login behind the approval step first, and the approval secret set per site.
+- **More desks and hospitals.** SQLite serves one desk. Several desks or hospitals need a shared database (Postgres) and accounts per facility.
+- **A larger model.** A bigger open-weights model on a GPU server is a configuration change (`LLM_MODEL`, `LLM_BASE_URL`); speed and chart-sign accuracy should improve, and EVALS.md would be re-run for it.
+- **More rule packs.** Paediatric SATS, the WHO/ICRC/MSF triage tool and Manchester, each as a YAML file.
+- **Arabic interface.** Complaints can already be typed in Arabic; the page itself is English.
+- **And:** voice input for complaints, WhatsApp check-in before arrival, Bluetooth pulse oximeters, daily counts to DHIS2, a training mode for new nurses built on shadow mode.
 
 ## Third-party components
 

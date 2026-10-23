@@ -35,7 +35,7 @@ body {
   background: var(--paper);
   color: var(--ink);
   font: 15px/1.45 var(--font-ui);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums lining-nums;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -51,51 +51,70 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem var(--gap);
   padding: 0.7rem 0; border-bottom: 2px solid var(--ink); margin-bottom: var(--gap);
 }
-.brand { display: flex; align-items: baseline; gap: 0.6rem; flex: 1; flex-wrap: wrap; min-width: 0; }
-.brand-mark { font-size: 1.4rem; }
-.brand-name { margin: 0; font-size: 1.5rem; font-weight: 800; letter-spacing: -0.02em; }
-.brand-sub { color: var(--ink-soft); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; }
+/* Name and tagline share a baseline; the logo is centred on the name. */
+.brand { display: flex; align-items: baseline; gap: 0.2rem 0.65rem; flex: 1 1 20rem; flex-wrap: wrap; min-width: 0; }
+.brand-logo { display: block; width: 30px; height: 30px; border-radius: 6px; flex: none; align-self: center; }
+.brand-name { margin: 0; font-size: 1.6rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+.brand-sub { color: var(--ink-soft); font-size: 0.9rem; }
 .toggle { display: flex; gap: 0.4rem; align-items: center; font-size: 0.9rem; cursor: pointer; }
 .toggle-note { color: var(--ink-soft); font-size: 0.8rem; }
+.toggle-wrap { display: flex; align-items: center; gap: 0.4rem; position: relative; }
+/* A small "?" that explains shadow mode on hover or keyboard focus. */
+.info {
+  display: inline-grid; place-items: center; width: 1.25rem; height: 1.25rem; border-radius: 50%;
+  border: 1px solid var(--ink-soft); color: var(--ink-soft); font-size: 0.75rem; font-weight: 700; cursor: help;
+}
+.info .tip {
+  display: none; position: absolute; right: 0; top: calc(100% + 0.45rem); z-index: 20; width: min(22rem, 80vw);
+  background: var(--ink); color: var(--panel); font-size: 0.85rem; font-weight: 400; line-height: 1.45;
+  padding: 0.6rem 0.75rem; border-radius: var(--radius); box-shadow: var(--shadow); text-align: left;
+}
+.info:hover .tip, .info:focus .tip, .info:focus-within .tip { display: block; }
 .banner {
   background: var(--danger-bg); border: 1px solid var(--danger); color: var(--danger);
   padding: 0.6rem 0.9rem; border-radius: var(--radius); margin: 0 0 var(--gap);
 }
 
-/* Layout: intake | proposal | trace on a desk screen; the proposal comes first after the
-   intake on narrower screens, so the colour and its reason are what the nurse reads first. */
+/* The nurse's steps, left to right: 1 intake, 2 proposal (the widest), then 3 the waiting room
+   below. The agent's own steps sit between them in a section the nurse can hide. */
 .workspace {
   display: grid; gap: var(--gap); align-items: start;
-  grid-template-columns: minmax(270px, 0.8fr) minmax(0, 1.35fr) minmax(280px, 1fr);
-  grid-template-areas: "intake proposal trace";
+  grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1.6fr);
+  grid-template-areas: "intake proposal";
 }
 .intake { grid-area: intake; }
 .proposal { grid-area: proposal; }
-.trace { grid-area: trace; }
 @media (max-width: 1199px) {
   .workspace {
     grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.4fr);
-    grid-template-areas: "intake proposal" "intake trace";
   }
 }
 @media (max-width: 819px) {
-  .workspace { grid-template-columns: minmax(0, 1fr); grid-template-areas: "intake" "proposal" "trace"; }
+  .workspace { grid-template-columns: minmax(0, 1fr); grid-template-areas: "intake" "proposal"; }
+  .trace-list { max-height: 50vh; }
 }
+.trace { margin-top: var(--gap); }
+.trace .panel-title { margin-bottom: 0; }
+.trace #trace-body { margin-top: 0.8rem; }
+.trace-toggle { margin-left: auto; }
+/* Steps in reading order, left to right then down. */
+.trace .trace-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr)); gap: 0 1.6rem; max-height: none; }
 
 .panel {
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 0.9rem 1rem; box-shadow: var(--shadow); min-width: 0;
 }
 .panel-title {
-  display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap;
-  margin: 0 0 0.7rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em;
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  margin: 0 0 0.8rem; font-size: 1.05rem; font-weight: 700; letter-spacing: -0.005em;
 }
 .step-no {
   display: inline-grid; place-items: center; width: 1.4rem; height: 1.4rem; flex: none;
   background: var(--ink); color: var(--panel); border-radius: 50%; font-size: 0.75rem;
 }
-.sub-title { margin: 0.9rem 0 0.4rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); }
-.run-id, .count, .pending { font-family: var(--font-num); font-size: 0.75rem; color: var(--ink-soft); text-transform: none; letter-spacing: 0; }
+.sub-title { margin: 1rem 0 0.4rem; font-size: 0.9rem; font-weight: 700; color: var(--ink); }
+.run-id, .count, .pending { font-size: 0.8rem; font-weight: 400; color: var(--ink-soft); }
+.run-id { font-family: var(--font-num); }
 .pending { color: var(--danger); font-weight: 700; }
 .empty, .hint { color: var(--ink-soft); font-size: 0.88rem; margin: 0.3rem 0 0.6rem; }
 .error { color: var(--danger); font-weight: 600; overflow-wrap: anywhere; }
@@ -107,20 +126,28 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* Forms */
 .field { display: grid; gap: 0.15rem; margin-bottom: 0.55rem; }
-.field-label { font-size: 0.78rem; font-weight: 600; }
-.unit, .field-note { color: var(--ink-soft); font-weight: 400; font-size: 0.75rem; }
+.field-label { font-size: 0.85rem; font-weight: 600; }
+.unit, .field-note { color: var(--ink-soft); font-weight: 400; font-size: 0.78rem; }
 input, select, textarea {
   width: 100%; min-width: 0; padding: 0.45rem 0.55rem; border: 1px solid var(--line-strong);
   border-radius: var(--radius); background: #fff;
 }
 input:hover, select:hover, textarea:hover { border-color: var(--ink-soft); }
 textarea { resize: vertical; }
-input[type="number"] { font-family: var(--font-num); }
+/* One arrow for every browser, with room on its right. */
+select {
+  appearance: none; -webkit-appearance: none; padding-right: 2.2rem; cursor: pointer;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%2357544c' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 0.85rem center;
+}
+input[type="number"] { font-variant-numeric: tabular-nums lining-nums; }
 input[type="checkbox"] { width: 1.1rem; height: 1.1rem; margin: 0; accent-color: var(--ink); flex: none; }
 .vitals-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 0.7rem; }
-/* A label that wraps ("Respiratory rate breaths/min") must not push its input below its neighbour's. */
-.vitals-grid > .field { grid-template-rows: 1fr auto auto; }
+/* Each field spans three shared rows (label, input, note), so neighbours line up whatever wraps:
+   a two-line label or a two-line note no longer pushes the field next to it down. */
+.vitals-grid { grid-auto-rows: auto; }
+.vitals-grid > .field { grid-row: span 3; grid-template-rows: subgrid; gap: 0.2rem; margin-bottom: 0.7rem; }
 .vitals-grid .field-label { align-self: end; }
+.vitals-grid .field-note { align-self: start; }
 .field-flagged input, .field-flagged select { border: 2px solid var(--sats-orange); background: var(--warn-bg); }
 .check { display: flex; gap: 0.5rem; align-items: center; margin: 0.2rem 0 0.6rem; font-weight: 600; cursor: pointer; }
 
@@ -174,8 +201,10 @@ input[type="checkbox"] { width: 1.1rem; height: 1.1rem; margin: 0; accent-color:
   display: flex; align-items: center; flex-wrap: wrap; gap: 0.2rem 0.6rem; line-height: 1.1;
 }
 .colour-label { font-size: 1.05rem; font-weight: 600; color: var(--ink-soft); }
-.colour-why { margin: 0.4rem 0 0; font-size: 0.95rem; overflow-wrap: anywhere; }
-.src-tag { font-family: var(--font-num); font-size: 0.7rem; text-transform: uppercase; background: var(--ink); color: var(--panel); padding: 0.05rem 0.3rem; border-radius: 2px; }
+.colour-set { margin: 0.45rem 0 0; font-size: 1.05rem; font-weight: 600; overflow-wrap: anywhere; }
+.colour-why { margin: 0.35rem 0 0; font-size: 0.85rem; overflow-wrap: anywhere; }
+.colour-why.src { display: block; }
+.src-tag { font-size: 0.72rem; font-weight: 700; background: var(--ink); color: var(--panel); padding: 0.05rem 0.35rem; border-radius: 2px; }
 .swatch { width: 0.9em; height: 0.9em; border-radius: 2px; background: var(--c); border: 1px solid rgba(0, 0, 0, 0.35); display: inline-block; flex: none; }
 .c-red { --c: var(--sats-red); }
 .c-orange { --c: var(--sats-orange); }
@@ -186,24 +215,36 @@ input[type="checkbox"] { width: 1.1rem; height: 1.1rem; margin: 0; accent-color:
   margin-top: 0.7rem; border: 2px solid var(--danger); background: var(--danger-bg);
   border-radius: var(--radius); padding: 0.55rem 0.8rem;
 }
-.confirm-title { margin: 0 0 0.3rem; font-weight: 800; color: var(--danger); text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.06em; }
+.confirm-title { margin: 0 0 0.3rem; font-weight: 800; color: var(--danger); font-size: 0.95rem; }
 .confirm ul { margin: 0; padding-left: 1.1rem; }
 
-.working { display: flex; gap: 0.8rem; align-items: center; padding: 1.2rem 0.4rem; }
+.working { padding: 1.1rem 0.2rem; }
 .working p { margin: 0; }
-.working-dot { width: 0.9rem; height: 0.9rem; border-radius: 50%; background: var(--focus); animation: pulse 1.2s ease-in-out infinite; flex: none; }
+.working-head { display: flex; align-items: center; gap: 0.6rem; font-size: 1.05rem; }
+.working-now { margin-top: 0.35rem !important; color: var(--ink-soft); }
+/* A live, breathing dot: green means the agent is running fine. */
+.working-dot {
+  width: 0.8rem; height: 0.8rem; border-radius: 50%; background: var(--ok); flex: none;
+  animation: breathe 1.6s ease-in-out infinite;
+}
+@keyframes breathe {
+  0% { box-shadow: 0 0 0 0 rgba(31, 107, 53, 0.55); transform: scale(0.9); }
+  70% { box-shadow: 0 0 0 0.6rem rgba(31, 107, 53, 0); transform: scale(1); }
+  100% { box-shadow: 0 0 0 0 rgba(31, 107, 53, 0); transform: scale(0.9); }
+}
 
 /* TEWS beside the signs only when the proposal panel itself is wide enough for both. */
 .proposal { container-type: inline-size; }
 .breakdown { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 1.2rem; align-items: start; }
 @container (min-width: 820px) { .breakdown { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); } }
 table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-caption { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); padding: 0.8rem 0 0.3rem; }
+caption { text-align: left; font-size: 0.9rem; font-weight: 700; color: var(--ink); padding: 0.9rem 0 0.35rem; }
 caption strong { font-family: var(--font-num); font-size: 1.1rem; color: var(--ink); }
-th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); border-bottom: 1px solid var(--line-strong); padding: 0.3rem 0.4rem; }
+th { text-align: left; font-size: 0.78rem; font-weight: 600; color: var(--ink-soft); border-bottom: 1px solid var(--line-strong); padding: 0.3rem 0.4rem; }
 tbody th { font-size: 0.85rem; text-transform: none; letter-spacing: 0; color: var(--ink); font-weight: 600; border-bottom: 1px solid var(--line); }
 td { border-bottom: 1px solid var(--line); padding: 0.3rem 0.4rem; vertical-align: top; }
-.num { font-family: var(--font-num); text-align: right; }
+.num { text-align: right; font-variant-numeric: tabular-nums lining-nums; }
+th.num { font-family: var(--font-ui); }
 .src { display: block; font-family: var(--font-num); font-size: 0.72rem; color: var(--ink-soft); overflow-wrap: anywhere; }
 td.src { display: table-cell; }
 .signs, .flags { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.45rem; }
@@ -217,13 +258,14 @@ td.src { display: table-cell; }
 .flag-retriage, .flag-recheck_due { border-left-color: var(--focus); }
 
 .decision { margin-top: 1rem; border-top: 2px solid var(--ink); padding-top: 0.6rem; }
-.decision-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+/* A button beside a field is as tall as the field. */
+.decision-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: stretch; }
 .decision-row input { flex: 1 1 10rem; width: auto; }
 .override fieldset {
   margin: 0.8rem 0 0; border: 1px dashed var(--line-strong); border-radius: var(--radius);
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 0 0.6rem; align-items: end;
 }
-.override legend { font-size: 0.75rem; color: var(--ink-soft); }
+.override legend { font-size: 0.85rem; font-weight: 600; color: var(--ink-soft); padding: 0 0.3rem; }
 .override .btn { margin-bottom: 0.55rem; }
 .remeasure { margin-top: 0.8rem; padding-top: 0.6rem; border-top: 1px dashed var(--line-strong); }
 .committed .btn { margin-top: 0.3rem; }
@@ -236,18 +278,32 @@ td.src { display: table-cell; }
   .queue-columns, .vitals-grid { grid-template-columns: minmax(0, 1fr); }
   .override fieldset { grid-template-columns: minmax(0, 1fr); }
 }
+.queue-search {
+  width: auto; flex: 0 1 16rem; margin-left: auto; font-size: 0.9rem; padding: 0.4rem 0.6rem 0.4rem 2rem;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Ccircle cx='7' cy='7' r='5' fill='none' stroke='%2357544c' stroke-width='1.8'/%3E%3Cpath d='M11 11l3.5 3.5' stroke='%2357544c' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat 0.6rem center;
+}
+/* Every patient stays on the board: a long column scrolls on its own instead of paging. */
+.queue-cards { max-height: min(70vh, 640px); overflow-y: auto; padding-right: 0.15rem; }
+.more { display: flex; gap: 0.6rem; align-items: center; color: var(--ink-soft); font-size: 0.88rem; margin: 0.6rem 0; }
 .queue-col { border-top: 6px solid var(--c); background: #faf8f2; padding: 0.5rem; border-radius: 0 0 var(--radius) var(--radius); min-height: 6rem; min-width: 0; }
 .queue-head { margin: 0; font-size: 0.85rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
-.target { margin: 0.1rem 0 0.5rem; font-family: var(--font-num); font-size: 0.72rem; color: var(--ink-soft); }
+.target { margin: 0.15rem 0 0.5rem; font-size: 0.8rem; color: var(--ink-soft); }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 0.5rem 0.6rem; margin-bottom: 0.5rem; }
 .card-due { border: 2px solid var(--danger); }
-.card-head { display: flex; justify-content: space-between; gap: 0.4rem; flex-wrap: wrap; }
-.badge-due { font-family: var(--font-num); font-size: 0.68rem; font-weight: 700; color: var(--panel); background: var(--danger); padding: 0.05rem 0.35rem; border-radius: 2px; }
-.card-time { font-family: var(--font-num); font-size: 0.75rem; color: var(--ink-soft); margin: 0.25rem 0; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.badge-due {
+  display: inline-flex; align-items: center; justify-content: center; align-self: center; line-height: 1;
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em; color: var(--panel); background: var(--danger);
+  padding: 0.25rem 0.45rem; border-radius: 3px; white-space: nowrap;
+}
+.card-time { font-size: 0.8rem; color: var(--ink-soft); margin: 0.25rem 0 0.4rem; }
 .card-time.over { color: var(--danger); }
 .card-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
 .card-panel { margin-top: 0.5rem; border-top: 1px dashed var(--line-strong); padding-top: 0.5rem; }
 .card-panel .vitals-grid { grid-template-columns: minmax(0, 1fr); }
+/* Inside a narrow card the name and the release button stack, each the full width. */
+.card-panel .decision-row { flex-direction: column; }
+.card-panel .decision-row > * { width: 100%; }
 .handover-text { white-space: pre-wrap; background: #f6f3ea; padding: 0.5rem; border-radius: var(--radius); font-size: 0.85rem; overflow-wrap: anywhere; }
 
 /* Audit drawer */
@@ -265,7 +321,7 @@ td.src { display: table-cell; }
 .chain.broken { color: var(--panel); background: var(--danger); }
 .audit tr.is-error td { color: var(--danger); }
 
-.foot { margin: var(--gap) 0 4rem; color: var(--ink-soft); font-size: 0.8rem; border-top: 1px solid var(--line); padding-top: 0.6rem; }
+.foot { margin: calc(var(--gap) * 1.5) 0 0; padding: 1rem 0 2.5rem; color: var(--ink-soft); font-size: 0.85rem; line-height: 1.6; border-top: 1px solid var(--line-strong); }
 
 @media (prefers-reduced-motion: reduce) {
   .trace-wait, .working-dot { animation: none; }

@@ -39,6 +39,7 @@ export function App() {
   const [assessedFor, setAssessedFor] = useState<string | null>(null);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [offline, setOffline] = useState<string | null>(null);
+  const [intakeKey, setIntakeKey] = useState(0); // a new key empties the intake for the next patient
   const run = useRun(runId);
   // Shadow mode: Mizani's answer stays hidden until the nurse has recorded their own colour.
   const isMasked = isShadow && !run?.committed && assessedFor !== run?.proposal?.triage_id;
@@ -49,6 +50,14 @@ export function App() {
     window.history.replaceState(null, "", `#run=${id}`);
     // On a narrow screen the proposal sits under the intake: bring it into view (no-op on a desk).
     requestAnimationFrame(() => document.getElementById("proposal-title")?.scrollIntoView({ block: "nearest" }));
+  }
+
+  function nextPatient() {
+    setRunId(null);
+    setComplaint(null);
+    window.history.replaceState(null, "", window.location.pathname);
+    setIntakeKey((k) => k + 1);
+    requestAnimationFrame(() => document.getElementById("patient-label")?.focus());
   }
 
   async function refreshQueue() {
@@ -79,16 +88,28 @@ export function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            ⚖
-          </span>
+          <img className="brand-logo" src="/favicon.svg" alt="" width="30" height="30" />
           <h1 className="brand-name">Mizani</h1>
-          <span className="brand-sub">triage co-pilot · SATS adult · the nurse decides</span>
+          <span className="brand-sub">Triage co-pilot for the adult SATS chart. The nurse decides.</span>
         </div>
-        <label className="toggle">
-          <input type="checkbox" checked={isShadow} onChange={(e) => setIsShadow(e.target.checked)} />
-          Shadow mode <span className="toggle-note">(your colour first)</span>
-        </label>
+        <div className="toggle-wrap">
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={isShadow}
+              onChange={(e) => setIsShadow(e.target.checked)}
+              aria-describedby="shadow-help"
+            />
+            Shadow mode <span className="toggle-note">(your colour first)</span>
+          </label>
+          <span className="info" tabIndex={0} aria-label="What is shadow mode?">
+            ?
+            <span role="tooltip" id="shadow-help" className="tip">
+              For training and audit. You choose a colour for each patient before Mizani's is shown, so Mizani can't
+              sway you. Then you decide as usual. The audit log shows how often you and Mizani agreed.
+            </span>
+          </span>
+        </div>
         <button type="button" className="btn btn-small" onClick={() => setIsAuditOpen(true)} aria-expanded={isAuditOpen}>
           Audit log
         </button>
@@ -103,7 +124,7 @@ export function App() {
         {announcement(run, colours, isMasked)}
       </p>
       <main className="workspace">
-        <IntakeForm isReady={colours.length > 0} onStarted={openRun} />
+        <IntakeForm key={intakeKey} isFirst={intakeKey === 0} isReady={colours.length > 0} onStarted={openRun} />
         <ProposalPanel
           run={run}
           complaint={complaint}
@@ -112,14 +133,15 @@ export function App() {
           assessedFor={assessedFor}
           onAssessed={setAssessedFor}
           onCommitted={() => void refreshQueue()}
+          onNextPatient={nextPatient}
         />
-        <TracePanel run={run} isMasked={isMasked} />
       </main>
       <QueueBoard
         colours={colours}
         queue={queue}
         onRetriage={(id) => openRun(id, null)}
       />
+      <TracePanel run={run} isMasked={isMasked} />
       <AuditDrawer isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />
       <footer className="foot">
         Synthetic patients only. Mizani suggests; a named nurse approves every priority. Every number shows the rule it

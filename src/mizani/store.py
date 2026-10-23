@@ -181,7 +181,10 @@ def _check_numbers(record: dict, entry: dict, text: str) -> None:
     reason = (record["decision"] or {}).get("reason")
     recorded = json.dumps([record["complaint"], record["vitals"], proposal, reason])
     waited = entry["waited_minutes"]
-    allowed = _numbers(recorded) | {entry["target_minutes"], *range(int(waited), int(waited) + 2)}
+    allowed = _numbers(recorded) | {
+        entry["target_minutes"],
+        *range(int(waited) - 1, int(waited) + 2),
+    }
     extra = sorted(_numbers(text) - allowed)
     if extra:
         listed = ", ".join(f"{n:g}" for n in extra)
