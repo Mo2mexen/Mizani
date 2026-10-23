@@ -34,12 +34,16 @@ export function IntakeForm({ isFirst, isReady, onStarted }: Props) {
         <span className="step-no">1</span> Intake
       </h2>
       <label className="field" htmlFor="patient-label">
-        <span className="field-label">Patient label</span>
+        <span className="field-label">
+          Patient label <span className="unit">required</span>
+        </span>
         <input id="patient-label" dir="auto" required maxLength={80} value={label} onChange={(e) => setLabel(e.target.value)} />
         <span className="field-note">synthetic labels only, never a real name</span>
       </label>
       <label className="field" htmlFor="complaint">
-        <span className="field-label">Complaint, as told</span>
+        <span className="field-label">
+          Complaint, as told <span className="unit">required</span>
+        </span>
         <textarea
           id="complaint"
           dir="auto"
@@ -51,7 +55,7 @@ export function IntakeForm({ isFirst, isReady, onStarted }: Props) {
           placeholder="e.g. chest pain since this morning, sweaty (English or Arabic)"
         />
       </label>
-      <p className="hint">Leave a vital empty if it wasn't measured: Mizani asks for a re-measure, it never guesses.</p>
+      <p className="hint">Vitals are optional: leave one empty if it wasn't measured. Mizani asks for a re-measure; it never guesses.</p>
       <VitalsFields value={vitals} onChange={setVitals} idPrefix="intake" />
       {error && (
         <p className="error" role="alert">

@@ -142,12 +142,11 @@ function AgentWorking({ run }: { run: RunState }) {
   return (
     <Shell>
       <div className="working" role="status">
-        <span className="working-dot" aria-hidden="true" />
-        <p>
+        <p className="working-head">
+          <span className="working-dot" aria-hidden="true" />
           <strong>The agent is working</strong> · {seconds} s
-          <br />
-          {doing}
         </p>
+        <p className="working-now">{doing}</p>
       </div>
       {run.isReconnecting && <Reconnecting />}
       {seconds >= SLOW_SECONDS && (
