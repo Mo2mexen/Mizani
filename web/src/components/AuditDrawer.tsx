@@ -5,6 +5,8 @@ import type { AuditRow, Shadow } from "../types";
 
 type Props = { isOpen: boolean; onClose: () => void };
 
+const PAGE = 100; // a busy desk logs thousands of calls; drawing them all at once is slow
+
 /** Every logged tool call, newest first, and whether the hash chain is intact. Escape closes it. */
 export function AuditDrawer({ isOpen, onClose }: Props) {
   const [rows, setRows] = useState<AuditRow[] | null>(null);
@@ -13,6 +15,7 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
+  const [shown, setShown] = useState(PAGE); // newest rows first, a page at a time
   const closeRef = useRef<HTMLButtonElement>(null);
 
   async function load() {
@@ -61,7 +64,7 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
             shadow mode: nurse and Mizani agreed {shadow.agreed} of {shadow.assessed}
           </span>
         )}
-        {loadedAt && <span className="count">updated {loadedAt.toLocaleTimeString()}</span>}
+        {loadedAt && <span className="count">updated {clock(loadedAt)}</span>}
         <button type="button" className="btn btn-small" onClick={() => void load()} disabled={isLoading}>
           {isLoading ? "Refreshing…" : "Refresh"}
         </button>
@@ -98,7 +101,7 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
               </tr>
             </thead>
             <tbody>
-              {[...rows].reverse().map((r) => (
+              {[...rows].reverse().slice(0, shown).map((r) => (
                 <tr key={r.hash} className={r.error ? "is-error" : undefined}>
                   <td>{clock(r.time)}</td>
                   <td>{r.tool}</td>
@@ -112,6 +115,14 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
               ))}
             </tbody>
           </table>
+        )}
+        {rows && rows.length > shown && (
+          <p className="more">
+            Showing the newest {shown} of {rows.length}.{" "}
+            <button type="button" className="btn btn-small" onClick={() => setShown(shown + PAGE)}>
+              Show {Math.min(PAGE, rows.length - shown)} more
+            </button>
+          </p>
         )}
       </div>
     </aside>

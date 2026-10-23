@@ -40,8 +40,9 @@ export function minutes(value: number): string {
   return rest ? `${Math.floor(total / 60)} h ${rest} min` : `${total / 60} h`;
 }
 
-export function clock(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+/** One time format everywhere, 12-hour with seconds ("3:13:48 PM"), whatever the browser's language. */
+export function clock(time: string | Date): string {
+  return new Date(time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true });
 }
 
 export function short(value: unknown, max = 160): string {

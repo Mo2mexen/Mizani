@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { colourLabel, FIELD_LABELS, FLAG_LABELS } from "../format";
+import { clock, colourLabel, FIELD_LABELS, FLAG_LABELS } from "../format";
 import type { Colour, Proposal, RunState } from "../types";
 import { DecisionForm } from "./DecisionForm";
 import { ShadowFirst } from "./ShadowFirst";
@@ -274,7 +274,7 @@ function CommittedView({ run, colours, onNextPatient }: { run: RunState; colours
         </p>
         <p className="colour-set">
           {c.action === "override" ? "Overridden" : "Approved"} by <strong>{c.approver}</strong> at{" "}
-          {new Date(c.committed_at).toLocaleTimeString()}
+          {clock(c.committed_at)}
         </p>
       </div>
       {fhir && !fhirError && <p className="ok">FHIR record written to the local HAPI server.</p>}

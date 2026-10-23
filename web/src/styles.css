@@ -253,6 +253,10 @@ td.src { display: table-cell; }
   .queue-columns, .vitals-grid { grid-template-columns: minmax(0, 1fr); }
   .override fieldset { grid-template-columns: minmax(0, 1fr); }
 }
+.queue-search { width: auto; flex: 0 1 16rem; margin-left: auto; font-size: 0.9rem; padding: 0.35rem 0.55rem; }
+/* Every patient stays on the board: a long column scrolls on its own instead of paging. */
+.queue-cards { max-height: min(70vh, 640px); overflow-y: auto; padding-right: 0.15rem; }
+.more { display: flex; gap: 0.6rem; align-items: center; color: var(--ink-soft); font-size: 0.88rem; margin: 0.6rem 0; }
 .queue-col { border-top: 6px solid var(--c); background: #faf8f2; padding: 0.5rem; border-radius: 0 0 var(--radius) var(--radius); min-height: 6rem; min-width: 0; }
 .queue-head { margin: 0; font-size: 0.85rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
 .target { margin: 0.15rem 0 0.5rem; font-size: 0.8rem; color: var(--ink-soft); }
