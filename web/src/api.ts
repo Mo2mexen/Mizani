@@ -1,7 +1,7 @@
 // Every call to the Mizani API, in one place. With VITE_USE_MOCK=true (web/.env.local) the same
 // functions answer from src/mock/ instead, so the screens work without the backend.
 import * as mock from "./mock";
-import type {
+import type { PatientRecord,
   AuditRow,
   Colour,
   Committed,
@@ -60,6 +60,7 @@ export const api = USE_MOCK
         call<unknown>("POST", `/api/triage/${runId}/assessment`, { nurse_name, colour, reason }),
       shadow: () => call<Shadow>("GET", "/api/shadow"),
       queue: () => call<QueueEntry[]>("GET", "/api/queue"),
+      record: (triageId: string) => call<{ triage: PatientRecord }>("GET", `/api/queue/${triageId}`),
       retriage: (triageId: string, vitals: Vitals) =>
         call<{ triage_id: string }>("POST", `/api/queue/${triageId}/retriage`, { vitals }),
       draftHandover: (triageId: string) =>

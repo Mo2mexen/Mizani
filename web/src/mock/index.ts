@@ -8,6 +8,7 @@ import type {
   Decision,
   HandoverDraft,
   HandoverReleased,
+  PatientRecord,
   Proposal,
   QueueEntry,
   Shadow,
@@ -55,6 +56,16 @@ function step(kind: TraceStep["kind"], name: string, input: unknown, output: unk
   return { time: now(), kind, name, input, output, latency_ms: Math.round(Math.random() * 40) };
 }
 
+const FAKE_PROPOSAL_FOR_RECORD: PatientRecord["proposal"] = {
+  triage_id: "mock",
+  colour: "orange",
+  status: "pending",
+  source: "FAKE mock: discriminator 'Chest pain' -> orange",
+  tews: { total: 2, components: [{ field: "respiratory_rate", value: 24, points: 2, source: "FAKE mock rule" }] },
+  discriminators: [{ name: "Chest pain", colour: "orange", quote: "chest pain since this morning", source: "FAKE mock rule" }],
+  flags: [],
+};
+
 export const api = {
   colours: async () => FAKE_COLOURS,
   intake: async (patient_label: string, _complaint: string, _vitals: Vitals) => {
@@ -96,6 +107,21 @@ export const api = {
   assess: async () => ({}),
   shadow: async (): Promise<Shadow> => ({ assessed: 0, agreed: 0, agreement_rate: null, disagreements: [] }),
   queue: async () => queue,
+  record: async (triageId: string): Promise<{ triage: PatientRecord }> => ({
+    triage: {
+      id: triageId,
+      patient_label: "Test Patient 01",
+      complaint: "FAKE mock complaint: chest pain since this morning",
+      vitals: { respiratory_rate: 24, heart_rate: 88, systolic_bp: null, temperature: null, avpu: "alert" },
+      proposal: FAKE_PROPOSAL_FOR_RECORD,
+      colour: "orange",
+      approver: "Nurse A",
+      decision: { action: "approve", colour: null, reason: null },
+      arrived_at: now(),
+      committed_at: now(),
+      retriage_of: null,
+    },
+  }),
   retriage: async (triageId: string, _vitals: Vitals) => {
     void _vitals;
     return { triage_id: `mock-retriage-${triageId}` };
