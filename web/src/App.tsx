@@ -100,13 +100,14 @@ export function App() {
               onChange={(e) => setIsShadow(e.target.checked)}
               aria-describedby="shadow-help"
             />
-            Shadow mode <span className="toggle-note">(your colour first)</span>
+            Shadow mode
           </label>
           <span className="info" tabIndex={0} aria-label="What is shadow mode?">
             ?
             <span role="tooltip" id="shadow-help" className="tip">
-              For training and audit. You choose a colour for each patient before Mizani's is shown, so Mizani can't
-              sway you. Then you decide as usual. The audit log shows how often you and Mizani agreed.
+              <strong>Shadow mode: you choose first.</strong> For each patient you pick a colour before you see
+              Mizani's, so it can't influence you. Then you decide as usual. Use it for training, or to check how
+              often you and Mizani agree (shown in the audit log).
             </span>
           </span>
         </div>
