@@ -19,7 +19,7 @@ export function QueueBoard({ colours, queue, onRetriage }: Props) {
     <section className="panel queue" aria-labelledby="queue-title">
       <h2 id="queue-title" className="panel-title">
         <span className="step-no">4</span> Waiting room
-        {queue && <span className="count">{queue.length} waiting · order from the saved colours</span>}
+        {queue && <span className="count">{queue.length} waiting</span>}
       </h2>
       {isLoading && <p className="empty">Loading the waiting room…</p>}
       {!isLoading && queue.length === 0 && (

@@ -79,11 +79,8 @@ export function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            ⚖
-          </span>
           <h1 className="brand-name">Mizani</h1>
-          <span className="brand-sub">triage co-pilot · SATS adult · the nurse decides</span>
+          <span className="brand-sub">Triage co-pilot for the adult SATS chart. The nurse decides.</span>
         </div>
         <label className="toggle">
           <input type="checkbox" checked={isShadow} onChange={(e) => setIsShadow(e.target.checked)} />
@@ -104,6 +101,7 @@ export function App() {
       </p>
       <main className="workspace">
         <IntakeForm isReady={colours.length > 0} onStarted={openRun} />
+        <TracePanel run={run} isMasked={isMasked} />
         <ProposalPanel
           run={run}
           complaint={complaint}
@@ -113,7 +111,6 @@ export function App() {
           onAssessed={setAssessedFor}
           onCommitted={() => void refreshQueue()}
         />
-        <TracePanel run={run} isMasked={isMasked} />
       </main>
       <QueueBoard
         colours={colours}
