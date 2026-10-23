@@ -84,16 +84,7 @@ function Card({ entry, onRetriage }: { entry: QueueEntry; onRetriage: (runId: st
   return (
     <article className={`card${entry.recheck_due ? " card-due" : ""}`} aria-label={entry.patient_label}>
       <header className="card-head">
-        <button
-          type="button"
-          className="card-name"
-          dir="auto"
-          aria-expanded={panel === "details"}
-          title="Show what was recorded for this patient"
-          onClick={() => toggle("details")}
-        >
-          {entry.patient_label}
-        </button>
+        <strong dir="auto">{entry.patient_label}</strong>
         {entry.recheck_due && (
           <span className="badge-due">RE-CHECK DUE{entry.recheck_raised ? " · flagged" : ""}</span>
         )}
@@ -307,7 +298,7 @@ function Handover({ entry }: { entry: QueueEntry }) {
           disabled={isBusy}
           onClick={() => run(async () => setDraft(await api.draftHandover(entry.triage_id)))}
         >
-          {isBusy ? "The model is drafting…" : "Draft handover (model)"}
+          {isBusy ? "AI is drafting…" : "Draft handover with AI"}
         </button>
       )}
       {draft && (
