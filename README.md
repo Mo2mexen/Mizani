@@ -4,7 +4,11 @@ Mizani is an offline triage co-pilot for the front desk of a busy public hospita
 
 *Mizani* means "scale" or "balance" in Swahili (*mizani*) and Arabic (*mīzān*).
 
-> Status: in development for the [African Agentic AI Design Challenge](https://agentic-africa-challenge.lovable.app/), Healthcare track ("The Triage Desk"). **Quickstart:** `git clone https://github.com/Mo2mexen/Mizani.git`, `cd Mizani`, `docker compose up`, then open **http://127.0.0.1:8090**. See [What works today](#what-works-today).
+> Built for the [African Agentic AI Design Challenge](https://agentic-africa-challenge.lovable.app/), Healthcare track ("The Triage Desk"). **Demo video:** ⟪VIDEO⟫.
+>
+> **One command, on Windows, macOS or Linux:** `git clone https://github.com/Mo2mexen/Mizani.git`, `cd Mizani`, `docker compose up`, then open **http://127.0.0.1:8090**. Steps for each system: [Running it](#running-it).
+>
+> **It needs a local language model, and `docker compose up` provides one.** The first start downloads the model (Qwen3.5 4B, 3.3 GB) and the container images, about 7 GB in all; on our test machine it took 41 minutes on a 27 Mbit/s connection, nearly all of it downloading. After that Mizani runs offline, with no API keys or accounts, and starts in about 25 seconds. **Speed and chart-sign accuracy depend on the model and the machine:** a patient took 10 to 25 seconds with the model on a MacBook Air M4's GPU, and 1 to 2 minutes with the model inside Docker on its CPU. To use another model, copy `.env.example` to `.env` and set `LLM_MODEL`, `LLM_BASE_URL` and `LLM_REASONING_EFFORT` ([docs/REMOTE_MODEL.md](docs/REMOTE_MODEL.md)).
 
 ## Submission summary
 
@@ -84,15 +88,37 @@ Triage scales are YAML files, and each rule records its source. To add a scale (
 
 ## Evaluation
 
-[EVALS.md](EVALS.md) reports 38 synthetic tasks (22 written by hand, 16 messy variants), each run five times through the full agent. On Qwen3.5 4B on a MacBook Air M4, 155 of 190 runs passed (82%; 76% with the earlier prompt). The safety gates held in every run (no commit without a nurse's approval, impossible vitals never scored, missing vitals never made up), and every failure was the model naming the wrong chart sign, including an instruction hidden in a complaint that named a real sign and turned a rash red. EVALS.md lists each failure and what we would try next. The tasks cover correct colour and discriminator, recovery from missing or impossible vitals, re-triage timing, refusal to diagnose, instructions hidden in complaint text, attempts to commit without approval, and Arabic input. Run them with `uv run mizani-evals --runs 5`.
+[EVALS.md](EVALS.md) reports 39 synthetic tasks (23 written by hand, 16 messy variants), each run five times through the full agent. On Qwen3.5 4B on a MacBook Air M4, 170 of 195 runs passed (87%), with no run-to-run variation, about 10 s and 2,160 tokens per run, and $0 per run on the local model. The safety gates held in every run: no commit without a nurse's approval, impossible vitals never scored, missing vitals never made up, and hidden instructions in a complaint never set a sign. One failure is kept on purpose: a patient who falsely reports a fit gets a red proposal, because as text the report is identical to a true one; Mizani shows the sign with the patient's words, asks the nurse to confirm it and saves nothing until a named nurse decides. The other failures are the model naming the wrong chart sign while quoting real words from the complaint. The tasks cover correct colour and discriminator, recovery from missing or impossible vitals, re-triage timing, refusal to diagnose, instructions hidden in complaint text, attempts to commit without approval, a false claim and Arabic input. Run them with `uv run mizani-evals --runs 5`.
 
 ## Running it
 
-**What you need.** Docker: Docker Desktop on Windows or macOS, Docker Engine with Compose on Linux, with about 8 GB of memory available to it. Mizani needs a language model running on your machine or your local network. `docker compose up` starts one for you (Ollama) and downloads Qwen3.5 4B (3.3 GB) on the first start, so the first start needs internet and takes several minutes. After that everything runs offline, with no API keys or accounts.
+**What you need.** Docker: Docker Desktop on Windows (with WSL 2) or macOS, Docker Engine with the Compose plugin on Linux. Give Docker at least 8 GB of memory: on our test machine the whole stack peaked at 5.5 GB while the model answered. About 16 GB of free disk for the images, the model and the data. Internet for the first start only. Ports 8090, 8000, 8001 and 18080 on 127.0.0.1 (each can be changed, see below).
 
-**Speed depends on your machine and the model.** The rules, MCP tools and audit log take about three seconds per patient; the rest is the model. On a MacBook Air M4 a patient takes about 12 s with Ollama installed on the Mac, and 36 to 72 s with the model inside Docker, because Docker on macOS has no GPU access. The first patient after a start is slower while the model loads. For more speed, or better chart-sign choices, run a larger model on a stronger machine: set `LLM_MODEL` (and `LLM_BASE_URL` if the model runs elsewhere) in `.env`, starting from `.env.example`; [docs/REMOTE_MODEL.md](docs/REMOTE_MODEL.md) shows how to use a GPU machine on your network. We evaluated only the 4B model; the safety checks do not depend on which model runs.
+**Speed.** The rules, MCP tools and audit log take a few seconds per patient; the rest is the model. Measured on a MacBook Air M4 (16 GB): 1 to 2 minutes per patient with the model inside Docker (Docker on macOS has no GPU access), 10 to 25 seconds with Ollama installed on the Mac, and about 10 seconds in the evaluation runs. The first patient after a start also loads the model; the page says so while it waits. On a Mac, for speed, install Ollama, run `ollama pull qwen3.5:4b-q4_K_M`, and put `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. On Windows or Linux with an NVIDIA GPU, add the GPU file: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up`. For better chart-sign choices, use a larger model on a stronger machine: set `LLM_MODEL` (and `LLM_BASE_URL` if it runs elsewhere) in `.env`; [docs/REMOTE_MODEL.md](docs/REMOTE_MODEL.md) shows how to use a GPU machine on your network. We evaluated only the 4B model; the safety checks do not depend on which model runs.
 
-`git clone`, then `docker compose up`. This starts the model server (Ollama, pulling the model once), our MCP server at `http://127.0.0.1:8000/mcp` (try it by hand with `npx @modelcontextprotocol/inspector`), the API with the agent at `http://127.0.0.1:8090` (try it from `http://127.0.0.1:8090/docs`, or with curl as in [docs/systems/api.md](docs/systems/api.md)), wso2's FHIR MCP server at `http://127.0.0.1:8001/mcp/` and a local HAPI FHIR store at `http://127.0.0.1:18080/fhir`. Then open **http://127.0.0.1:8090**: the nurse's page (intake, the agent's steps live, the proposal with the rule behind every number, approval, the waiting room and the audit log), served by the API ([docs/systems/web.md](docs/systems/web.md)). On a Mac, Docker has no GPU access, so the model is faster in the Ollama app on the Mac itself: set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. Everything you need to install, for running and for development, is listed in [packages.txt](packages.txt). How the parts fit: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+**macOS or Linux**
+```
+git clone https://github.com/Mo2mexen/Mizani.git
+cd Mizani
+docker compose up
+```
+**Windows** (PowerShell)
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with the WSL 2 backend (the default; if it asks for WSL, run `wsl --install` in an administrator PowerShell and restart) and [Git for Windows](https://git-scm.com/download/win). Start Docker Desktop.
+2. Memory: WSL 2 gives Docker half of your RAM, so 8 GB on a 16 GB laptop is enough. With less RAM, create `%UserProfile%\.wslconfig` containing the two lines `[wsl2]` and `memory=8GB`, run `wsl --shutdown`, and start Docker Desktop again.
+3. In PowerShell:
+```
+git clone https://github.com/Mo2mexen/Mizani.git
+cd Mizani
+docker compose up
+```
+The repository forces LF line endings (`.gitattributes`), so a Windows checkout builds the same Linux images.
+Then open **http://127.0.0.1:8090** once the log shows `Uvicorn running on http://0.0.0.0:8090`. The page has the intake, the agent's steps live, the proposal with the rule behind every number, approval, the waiting room and the audit log ([docs/systems/web.md](docs/systems/web.md)).
+
+`docker compose up` starts the model server (Ollama, pulling the model once), our MCP server at `http://127.0.0.1:8000/mcp` (try it by hand with `npx @modelcontextprotocol/inspector`), the API with the agent at `http://127.0.0.1:8090` (try it from `http://127.0.0.1:8090/docs`, or with curl as in [docs/systems/api.md](docs/systems/api.md)), wso2's FHIR MCP server at `http://127.0.0.1:8001/mcp/` and a local HAPI FHIR store at `http://127.0.0.1:18080/fhir`. The API waits until HAPI answers, so the first patient's FHIR record is written too.
+
+- **Stop:** Ctrl+C, or `docker compose down`. The waiting room, the audit log, the FHIR records and the model are kept in Docker volumes, so the next `docker compose up` starts where you left off; `docker compose down -v` deletes them for a clean start.
+- **A port is taken:** copy `.env.example` to `.env` and set `API_HOST_PORT`, `MCP_HOST_PORT`, `FHIR_MCP_HOST_PORT` or `HAPI_HOST_PORT` (the page is then at `http://127.0.0.1:<API_HOST_PORT>`). Every port listens on this machine only.
+- **Everything else you might install** (for running and for development) is listed in [packages.txt](packages.txt). How the parts fit: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Develop and test
 
@@ -120,27 +146,27 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 |---|---|
 | Design, rule-pack format, tool list | done |
 | Rules engine (SATS adult), every rule cited | done, tested |
-| MCP server `mizani-triage`: 9 tools, 5 resources, 2 prompts, approval gate, hash-chained audit | done, tested through an MCP client |
+| MCP server `mizani-triage`: 9 tools, 5 resources, 2 prompts, approval gate, hash-chained audit; a chart sign counts only with the complaint's own words behind it, never from text addressed to the software; a red colour from the complaint alone needs the nurse's confirmation | done, tested through an MCP client |
 | Agent (LangGraph): reads the entry, checks vitals, scores through the MCP tools, pauses for the nurse, commits with the nurse's token; retries and falls back when the model's tool calls are wrong; model, tokens and cost logged with every call | done, tested with a fake model and live with Qwen3.5 4B |
 | API (FastAPI): intake, live agent steps as server-sent events, nurse decision (approval token), re-measure, re-triage, handover draft and release, shadow-mode assessment and report, queue, colours, audit log with chain check | done, tested, run live |
-| Web page (React + Vite): intake, the agent's steps live, the proposal with a source on every number, nurse decision with name, re-measure, shadow mode, waiting room with re-check and handover, audit log with the chain check | done; served by the API at http://127.0.0.1:8090 |
+| Web page (React + Vite): intake, the agent's steps live, the proposal with a source on every number and the words behind every sign, nurse decision with name, re-measure, shadow mode, waiting room with re-check and handover, audit log with the chain check; desk, tablet and phone layouts, keyboard and screen-reader use | done; served by the API at http://127.0.0.1:8090; every scenario tested in a browser on the full stack |
 | FHIR output: the agent's commit step writes Patient, Encounter and Observations through wso2 fhir-mcp-server to a local HAPI FHIR | done, verified end to end and in a live run |
 | Re-triage watch: target-time timers; the agent raises a re-check flag every 30 s for patients past their target time; re-triage with fresh vitals as a new pending proposal that replaces the old entry once a nurse commits it | done, tested, run live |
-| Handover (the model drafts three lines of findings, a named nurse releases that exact draft) and shadow mode (nurse's own colour, agreement report) | done, tested, run live |
-| Evaluation suite: 38 tasks × 5 runs with pass rate, run-to-run variation, latency, tokens, cost | done on Qwen3.5 4B (82% of runs pass, failures documented) |
+| Handover (the model drafts two lines of findings, the waiting time comes from the record, every number is checked against the record, a named nurse releases that exact draft) and shadow mode (nurse's own colour, agreement report) | done, tested, run live |
+| Evaluation suite: 39 tasks × 5 runs with pass rate, run-to-run variation, latency, tokens, cost | done on Qwen3.5 4B (87% of runs pass, failures documented) |
 
-This table is updated as parts land.
 
 ## Known limitations
 
+- **A patient's own false report of a chart sign cannot be caught from the text.** A calm patient with a rash who says "I am having a fit right now" gets a red proposal (EVALS.md, `false-claim-01`). No model can fix this: the words are the patient's history, not an instruction, and as text a false report is identical to a true one; only the nurse examining the patient can tell. Mizani shows the sign with the patient's words, says the colour rests on them alone, blocks Approve until the nurse ticks that the sign was checked with the patient (the server refuses it too), and saves nothing until a named nurse approves or overrides.
+- The model picks the chart signs from the complaint. A sign counts only with the complaint's own words behind it, but the words can be real and still not mean the sign: on Qwen3.5 4B, "twisted my ankle" was quoted for a dislocation (orange instead of green), "with vomiting once" in Arabic for persistent vomiting, and a stroke described in Arabic got the wrong sign; 25 of 195 evaluation runs failed this way or on the false claim (EVALS.md). The vital-sign score comes from the rules alone, so the model can raise a colour through a sign but cannot lower the score the vitals give, and the nurse sees every sign with its words and source.
+- Instructions hidden in a complaint are recognised by a list of English and Arabic patterns and shown to the nurse; a sign they name, or quote from them, is ignored. An instruction phrased another way is not recognised as one, but any sign it asks for still needs the complaint's own words outside it, and a red colour from words alone still goes to the nurse to confirm.
 - Mizani is a prototype tested on synthetic patients only. It has not been validated in a clinic and is not a medical device.
 - Only the adult SATS chart is encoded. Children, pregnancy and the paediatric chart are out of scope for now.
-- The model picks the chart signs from the complaint, and on Qwen3.5 4B it got the signs wrong in 35 of 190 evaluation runs (EVALS.md). The vital-sign score comes from the rules alone, so the model can raise a colour through a sign but cannot lower the score the vitals give. Every sign the model named is shown with the source "matched from input: complaint" so the nurse can check it.
-- One failure is known and unfixed: a complaint that contains a hidden instruction naming a real chart sign can make the model name that sign, which raises the colour (a rash went red in testing). The sign is a real chart entry, so the server accepts it; the nurse sees it and can override.
-- There is no login. The nurse types a name, and the API trusts anyone who can reach it, so it listens on 127.0.0.1 only. A hospital deployment would need accounts behind the approval step.
+- There is no login. The nurse types a name, and the API trusts anyone who can reach it, so every port listens on 127.0.0.1 only. A hospital deployment would need accounts behind the approval step. The default approval secret is public: change `MIZANI_APPROVAL_SECRET` in `.env` on any shared machine.
 - One desk, one SQLite file. The page is in English; complaints can be typed in Arabic or English.
-- On a laptop without a strong GPU the model step takes about half a minute per patient. The first request after start also loads the model, which took about two minutes from a hard disk; the agent waits up to 5 minutes for a model reply, so the first patient can be slow. The first FHIR write after start can also time out while HAPI warms up; the triage is still saved and the `fhir_create` step shows the error.
-- The handover text is written by the model, so a nurse must read it before releasing it. In one live run the model took "20 minutes" from the complaint ("fell 20 minutes ago") as the waiting time.
+- Speed depends on the machine and the model (see [Running it](#running-it)). The first patient after a start also loads the model; the page says so while it waits.
+- The handover's two lines of findings are written by the model, so a nurse must read them before release. Every number in them is checked against the patient's record and the waiting time comes from the record, but a number written in words is not checked.
 
 ## Later
 

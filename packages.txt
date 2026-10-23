@@ -18,8 +18,10 @@ Then:
   cd Mizani
   docker compose up
 
-Machine: 16 GB RAM recommended (8 GB minimum), about 15 GB free disk.
-The first run downloads the model and container images, so it takes a while.
+Machine: give Docker at least 8 GB of memory (the stack peaked at 5.5 GB on a
+MacBook Air M4) and keep about 16 GB of disk free. The first run downloads the
+model and the container images, about 7 GB (41 minutes on a 27 Mbit/s line);
+later starts take about 25 seconds and need no internet.
 
 
 2. DEVELOPING IT (the team)
