@@ -86,6 +86,16 @@ Scoring is done by deterministic rules, so the language model only reads free te
 
 Triage scales are YAML files, and each rule records its source. To add a scale (paediatric SATS, the WHO/ICRC/MSF Integrated Interagency Triage Tool, Manchester), you add a YAML file. The engine code stays the same.
 
+The adult SATS pack encodes the 7 TEWS vitals with their scoring bands, the 4 colours with their target times, 39 chart signs (6 red, 23 orange, 10 yellow), the additional investigations and the plausible range of each vital, each with its source.
+
+### When a case is not covered
+
+- **The complaint matches no chart sign:** the colour comes from the vitals alone, and the proposal says so.
+- **The model names a sign that is not on the chart, or one the complaint's words do not show:** the server refuses it and the proposal shows the flag.
+- **A vital is missing or impossible:** Mizani asks for a re-measure and never fills it in.
+- **A child, or a case outside the adult chart:** not covered yet (see Later).
+- **In every case** the nurse decides and can override with a reason. Mizani never forces a colour.
+
 ## Evaluation
 
 [EVALS.md](EVALS.md) reports 39 synthetic tasks (23 written by hand, 16 messy variants), each run five times through the full agent. On Qwen3.5 4B on a MacBook Air M4, 170 of 195 runs passed (87%), with no run-to-run variation, about 10 s and 2,160 tokens per run, and $0 per run on the local model. The safety gates held in every run: no commit without a nurse's approval, impossible vitals never scored, missing vitals never made up, and hidden instructions in a complaint never set a sign. One failure is kept on purpose: a patient who falsely reports a fit gets a red proposal, because as text the report is identical to a true one; Mizani shows the sign with the patient's words, asks the nurse to confirm it and saves nothing until a named nurse decides. The other failures are the model naming the wrong chart sign while quoting real words from the complaint. The tasks cover correct colour and discriminator, recovery from missing or impossible vitals, re-triage timing, refusal to diagnose, instructions hidden in complaint text, attempts to commit without approval, a false claim and Arabic input. Run them with `uv run mizani-evals --runs 5`.
@@ -171,7 +181,12 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 
 ## Later
 
-Paediatric SATS and the WHO/ICRC/MSF triage tool as rule packs, voice input for complaints, WhatsApp check-in before arrival, Bluetooth pulse oximeters, daily counts to DHIS2, a training mode for new nurses, and a multi-hospital deployment on Postgres.
+- **A ward deployment.** Today one machine runs everything and only that machine can open the page. In a hospital, one server (a PC or small server in the department, with a GPU for a larger model) would run the stack, and nurses would open the page from any browser on the hospital network, at the desk or on a tablet. That needs nurse accounts and a login behind the approval step first, and the approval secret set per site.
+- **More desks and hospitals.** SQLite serves one desk. Several desks or hospitals need a shared database (Postgres) and accounts per facility.
+- **A larger model.** A bigger open-weights model on a GPU server is a configuration change (`LLM_MODEL`, `LLM_BASE_URL`); speed and chart-sign accuracy should improve, and EVALS.md would be re-run for it.
+- **More rule packs.** Paediatric SATS, the WHO/ICRC/MSF triage tool and Manchester, each as a YAML file.
+- **Arabic interface.** Complaints can already be typed in Arabic; the page itself is English.
+- **And:** voice input for complaints, WhatsApp check-in before arrival, Bluetooth pulse oximeters, daily counts to DHIS2, a training mode for new nurses built on shadow mode.
 
 ## Third-party components
 

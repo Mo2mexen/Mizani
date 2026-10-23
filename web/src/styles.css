@@ -51,12 +51,25 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem var(--gap);
   padding: 0.7rem 0; border-bottom: 2px solid var(--ink); margin-bottom: var(--gap);
 }
-.brand { display: flex; align-items: center; gap: 0.2rem 0.65rem; flex: 1 1 20rem; flex-wrap: wrap; min-width: 0; }
-.brand-logo { display: block; width: 30px; height: 30px; border-radius: 6px; flex: none; }
+/* Name and tagline share a baseline; the logo is centred on the name. */
+.brand { display: flex; align-items: baseline; gap: 0.2rem 0.65rem; flex: 1 1 20rem; flex-wrap: wrap; min-width: 0; }
+.brand-logo { display: block; width: 30px; height: 30px; border-radius: 6px; flex: none; align-self: center; }
 .brand-name { margin: 0; font-size: 1.6rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
-.brand-sub { color: var(--ink-soft); font-size: 0.9rem; padding-top: 0.15rem; }
+.brand-sub { color: var(--ink-soft); font-size: 0.9rem; }
 .toggle { display: flex; gap: 0.4rem; align-items: center; font-size: 0.9rem; cursor: pointer; }
 .toggle-note { color: var(--ink-soft); font-size: 0.8rem; }
+.toggle-wrap { display: flex; align-items: center; gap: 0.4rem; position: relative; }
+/* A small "?" that explains shadow mode on hover or keyboard focus. */
+.info {
+  display: inline-grid; place-items: center; width: 1.25rem; height: 1.25rem; border-radius: 50%;
+  border: 1px solid var(--ink-soft); color: var(--ink-soft); font-size: 0.75rem; font-weight: 700; cursor: help;
+}
+.info .tip {
+  display: none; position: absolute; right: 0; top: calc(100% + 0.45rem); z-index: 20; width: min(22rem, 80vw);
+  background: var(--ink); color: var(--panel); font-size: 0.85rem; font-weight: 400; line-height: 1.45;
+  padding: 0.6rem 0.75rem; border-radius: var(--radius); box-shadow: var(--shadow); text-align: left;
+}
+.info:hover .tip, .info:focus .tip, .info:focus-within .tip { display: block; }
 .banner {
   background: var(--danger-bg); border: 1px solid var(--danger); color: var(--danger);
   padding: 0.6rem 0.9rem; border-radius: var(--radius); margin: 0 0 var(--gap);

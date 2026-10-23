@@ -92,10 +92,24 @@ export function App() {
           <h1 className="brand-name">Mizani</h1>
           <span className="brand-sub">Triage co-pilot for the adult SATS chart. The nurse decides.</span>
         </div>
-        <label className="toggle" title="For training and audit: you choose a colour before Mizani's is shown, and the audit log counts how often you agree.">
-          <input type="checkbox" checked={isShadow} onChange={(e) => setIsShadow(e.target.checked)} />
-          Shadow mode <span className="toggle-note">(choose your colour first)</span>
-        </label>
+        <div className="toggle-wrap">
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={isShadow}
+              onChange={(e) => setIsShadow(e.target.checked)}
+              aria-describedby="shadow-help"
+            />
+            Shadow mode <span className="toggle-note">(your colour first)</span>
+          </label>
+          <span className="info" tabIndex={0} aria-label="What is shadow mode?">
+            ?
+            <span role="tooltip" id="shadow-help" className="tip">
+              For training and audit. You choose a colour for each patient before Mizani's is shown, so Mizani can't
+              sway you. Then you decide as usual. The audit log shows how often you and Mizani agreed.
+            </span>
+          </span>
+        </div>
         <button type="button" className="btn btn-small" onClick={() => setIsAuditOpen(true)} aria-expanded={isAuditOpen}>
           Audit log
         </button>
