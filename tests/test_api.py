@@ -129,11 +129,13 @@ def test_remeasured_vitals_stream_a_new_proposal():
         assert api.post(f"/api/triage/{run}/decision", json=fresh).json()["colour"] == "yellow"
 
 
-def test_a_model_failure_ends_the_stream_with_an_error():
+def test_when_the_model_does_not_answer_the_nurse_still_gets_the_score_from_the_vitals():
     with client() as api:  # the fake model has no replies left
         run = intake(api)
-        kind, data, _ = events(api, run, until="error")[-1]
-        assert kind == "error" and data["message"].startswith("The agent stopped")
+        stream = events(api, run, until="proposal")
+        steps = {data["name"]: data for kind, data, _ in stream if kind == "step"}
+        assert steps["fallback"]["output"]["warning"].startswith("The model did not answer")
+        assert stream[-1][1]["proposal"]["colour"] == "green"
 
 
 def test_unknown_runs_and_colours():
@@ -278,3 +280,47 @@ def test_an_overridden_handover_cites_the_nurse_not_the_rejected_proposal():
     assert _why(record).startswith("Nurse override by Nurse A: looks unwell")
     record["decision"] = {"action": "approve", "colour": None, "reason": None}
     assert _why(record) == "TEWS 1 -> green"
+
+
+def test_a_named_nurse_calls_a_patient_in_and_the_card_leaves_the_waiting_room():
+    with client(reply(ids=["chest_pain"])) as api:
+        triage_id = committed_patient(api, intake(api))
+        unnamed = api.post(f"/api/queue/{triage_id}/called-in", json={"nurse_name": ""})
+        assert unnamed.status_code == 422 and len(api.get("/api/queue").json()) == 1
+        done = api.post(f"/api/queue/{triage_id}/called-in", json={"nurse_name": "Nurse C"})
+        assert done.status_code == 200 and done.json()["approver"] == "Nurse C"
+        assert api.get("/api/queue").json() == []
+        again = api.post(f"/api/queue/{triage_id}/called-in", json={"nurse_name": "Nurse C"})
+        assert again.status_code == 409
+        assert api.get(f"/api/queue/{triage_id}").json()["triage"]["called_in_by"] == "Nurse C"
+        rows = api.get("/api/audit", params={"triage_id": triage_id}).json()
+    (logged,) = [r for r in rows if r["tool"] == "record_called_in" and not r["error"]]
+    assert logged["approver"] == "Nurse C" and logged["inputs"]["approval_token"] == "***"
+
+
+def test_a_handover_draft_says_so_when_the_model_does_not_answer():
+    with client(reply(ids=["chest_pain"])) as api:  # no reply left for the draft
+        triage_id = committed_patient(api, intake(api))
+        draft = api.post(f"/api/queue/{triage_id}/handover")
+    assert draft.status_code == 503 and "write the handover yourself" in draft.json()["detail"]
+
+
+def test_the_second_look_is_a_setting(monkeypatch):
+    monkeypatch.setenv("MIZANI_SECOND_LOOK", "1")
+    took_back = AIMessage(
+        "",
+        tool_calls=[
+            {
+                "name": "match_discriminators",
+                "args": {"discriminators": []},
+                "id": "r",
+                "type": "tool_call",
+            }
+        ],
+    )
+    with client(reply(ids=["chest_pain"]), took_back) as api:
+        stream = events(api, intake(api), until="proposal")
+    steps = [data["name"] for kind, data, _ in stream if kind == "step"]
+    assert "review" in steps
+    flags = [f["kind"] for f in stream[-1][1]["proposal"]["flags"]]
+    assert "sign_withdrawn" in flags and stream[-1][1]["proposal"]["colour"] == "green"

@@ -34,6 +34,13 @@ def test_the_thinking_setting_can_be_left_out_for_other_servers(monkeypatch):
     assert "reasoning_effort" not in payload
 
 
+def test_the_api_key_is_only_needed_for_a_server_that_checks_one(monkeypatch):
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    assert chat_model().openai_api_key.get_secret_value() == "local"
+    monkeypatch.setenv("LLM_API_KEY", "key-for-a-gpu-server")
+    assert chat_model().openai_api_key.get_secret_value() == "key-for-a-gpu-server"
+
+
 async def test_call_reports_model_tokens_and_latency():
     reply = AIMessage(
         "ok",

@@ -3,6 +3,7 @@
 // The real values come from the API (rule pack and engine); the UI never hard-codes them.
 import type {
   AuditRow,
+  CalledIn,
   Colour,
   Committed,
   Decision,
@@ -135,6 +136,10 @@ export const api = {
   releaseHandover: async (triageId: string, _draftId: number, nurse_name: string): Promise<HandoverReleased> => {
     void _draftId;
     return { triage_id: triageId, text: "FAKE mock handover", approver: nurse_name, released_at: now() };
+  },
+  calledIn: async (triageId: string, nurse_name: string): Promise<CalledIn> => {
+    queue = queue.filter((e) => e.triage_id !== triageId);
+    return { triage_id: triageId, approver: nurse_name, called_in_at: now(), waited_minutes: 0 };
   },
   audit: async () => audit,
   verify: async () => ({ intact: true, first_broken_row: null }),

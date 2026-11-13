@@ -314,21 +314,31 @@ def investigations(
 
 
 def _to_confirm(
-    tews_colour: str, matched: list[DiscriminatorRule], shown: list[Discriminator], pack: RulePack
+    tews: Tews,
+    tews_colour: str,
+    matched: list[DiscriminatorRule],
+    shown: list[Discriminator],
+    pack: RulePack,
+    doubted: frozenset[str] = frozenset(),
 ) -> list[Flag]:
     """An emergency (red) colour that rests on the complaint alone, with nothing measured behind
-    it, asks the nurse to confirm the sign with the patient: words can be false or planted."""
+    it, asks the nurse to confirm the sign with the patient: words can be false or planted.
+    `doubted` are the signs the model took back on its second look; the message says so."""
     red = pack.colours[0].colour
     signs = list(zip(matched, shown, strict=True))
     if tews_colour == red or any(r.colour == red and d.quote is None for r, d in signs):
         return []
+    measured = f"the vitals give {tews_colour}" if tews.components else "no vitals were measured"
+    doubt = (
+        " The model took this sign back on its second look; only a nurse drops an emergency sign."
+    )
     return [
         Flag(
             kind="confirm_sign",
             message=(
                 f"Nurse to confirm: '{r.name}' ({red}) comes from the complaint alone "
-                f'("{d.quote}"); the vitals give {tews_colour}. Check it with the patient '
-                "before approving."
+                f'("{d.quote}"); {measured}. Check it with the patient '
+                "before approving." + (doubt if r.id in doubted else "")
             ),
             source=d.source,
         )
@@ -337,14 +347,57 @@ def _to_confirm(
     ]
 
 
+def _withdrawn(
+    withdrawn: list[SignClaim],
+    requested: list[SignClaim],
+    vitals: Vitals,
+    pack: RulePack,
+    complaint: str,
+) -> list[Flag]:
+    """Signs the agent named and then took back on its second look. Each one that would have
+    counted (on the chart, in the complaint, not ruled out by a measurement) gets a flag, so the
+    nurse knows a sign was dropped and can check it. The others would not have counted anyway."""
+    by_id = {d.id: d for d in pack.discriminators}
+    still_named = {c.id for c in requested}
+    orders = instructions(complaint)
+    flags = []
+    for claim in withdrawn:
+        rule = by_id.get(claim.id)
+        if rule is None or claim.id in still_named or _from_vitals(rule, vitals, pack):
+            continue
+        if _contradicted(rule, vitals, pack) or _unsupported(rule, claim, complaint, orders, pack):
+            continue
+        flags.append(
+            Flag(
+                kind="sign_withdrawn",
+                message=(
+                    f"'{rule.name}' ({rule.colour}) was named from the complaint "
+                    f'("{claim.quote}") and then withdrawn by the model on its second look, so '
+                    "it was not applied. Check it with the patient."
+                ),
+                source=f"input: complaint; {pack.cite(rule.source)}",
+            )
+        )
+    return flags
+
+
 def propose(
     triage_id: str,
     vitals: Vitals,
     requested: list[SignClaim],
     pack: RulePack,
     complaint: str = "",
+    withdrawn: list[SignClaim] | None = None,
 ) -> Proposal:
-    """The pending proposal. Its `source` is a one-line, cited reason for the colour."""
+    """The pending proposal. Its `source` is a one-line, cited reason for the colour.
+    `withdrawn` are signs the agent named and then took back. They set nothing, with one
+    exception: the model cannot take back an emergency (red) sign. That one still counts, and
+    the nurse confirms or overrides it."""
+    red = pack.colours[0].colour
+    red_ids = {d.id for d in pack.discriminators if d.colour == red}
+    named = {c.id for c in requested}
+    kept = [c for c in withdrawn or [] if c.id in red_ids and c.id not in named]
+    requested = [*requested, *kept]
     flags = validate_vitals(vitals, pack)
     tews = compute_tews(vitals, pack)
     by_tews = tews_colour(tews.total, pack)
@@ -365,7 +418,9 @@ def propose(
             )
         )
 
-    flags += _to_confirm(by_tews.colour, matched, shown, pack)
+    doubted = frozenset(c.id for c in kept)
+    flags += _to_confirm(tews, by_tews.colour, matched, shown, pack, doubted)
+    flags += _withdrawn(withdrawn or [], requested, vitals, pack, complaint)
 
     colour = by_tews.colour
     reason = f"TEWS {tews.total} -> {colour} ({pack.cite(by_tews.source)})"

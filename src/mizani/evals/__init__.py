@@ -1,1 +1,1 @@
-"""Evals: synthetic messy patients (E1), hand-worked tasks in evals/cases (E2), the runner (E3)."""
+"""Evals: synthetic messy patients, hand-worked tasks in evals/cases, the runner."""

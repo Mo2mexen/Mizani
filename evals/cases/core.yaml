@@ -1,4 +1,4 @@
-# Mizani eval tasks (E2). Synthetic patients only: labels, complaints and numbers are made up.
+# Mizani eval tasks. Synthetic patients only: labels, complaints and numbers are made up.
 #
 # Every expected outcome is worked out by hand from the SATS adult chart, not by running Mizani:
 #   [S1] EMSSA adult SATS chart (2015 file): TEWS table, TEWS -> colour, discriminators,

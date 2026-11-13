@@ -22,11 +22,17 @@ The server runs with an 8k context window, flash attention and a q8_0 KV cache. 
 |---|---|---|---|
 | `LLM_MODEL` | Ollama model tag | model pulled and served | ~3.3 GB download on first run |
 | `LLM_BASE_URL` | OpenAI-compatible URL | where the agent sends model calls | none |
+| `LLM_API_KEY` | key, empty by default | sent to a model server that checks keys | none |
+| `MIZANI_SECOND_LOOK` | empty by default, `1` to turn on | the agent's second look at its chart signs (agent.md) | one more short model call per patient that has signs |
 | `ollama` service | HTTP on the compose network | model API at `http://ollama:11434` | stores models in `ollama-models` |
+| `mizani-mcp` service | MCP over streamable HTTP | our tools at `http://mizani-mcp:8000/mcp` (this machine: `127.0.0.1:8000`) | writes the database in `mizani-data` |
+| `app` service | HTTP | the page and the API at `127.0.0.1:8090` | reads the audit log and keeps checkpoints in `mizani-data` |
+| `hapi-fhir` service | FHIR REST | records at `127.0.0.1:18080/fhir` | stores them in `hapi-data` |
+| `fhir-mcp` service | MCP over streamable HTTP | wso2's tools at `http://fhir-mcp:8000/mcp/` (this machine: `127.0.0.1:8001`) | writes to HAPI |
 
 ## Depends on / used by
 - Depends on: Docker with Compose v2.
-- Used by: the agent in the `app` service (via `LLM_BASE_URL`).
+- Used by: everyone who runs Mizani; the agent in the `app` service reaches the model through `LLM_BASE_URL`.
 
 ## Safety rules this system enforces
 - Everything runs locally; the model server is not exposed outside the compose network.
@@ -46,4 +52,4 @@ To use an Ollama installed on the machine instead, set `LLM_BASE_URL=http://host
 - The GPU override needs the NVIDIA driver with WSL 2 (Windows) or the NVIDIA container toolkit (Linux).
 
 ## Extending it
-New services (`mizani-mcp` in M1, `app` in U1) go in `docker-compose.yml`, read `LLM_BASE_URL` and `LLM_MODEL` from the environment, and get their own Dockerfile. Any new setting goes in `.env.example` with a working default in the compose file.
+A new service goes in `docker-compose.yml`. The services built from this repo share one `Dockerfile` and differ by command: `mizani-mcp` is the image's default, and `app` runs `mizani-api`. Any new setting goes in `.env.example` with a working default in the compose file.

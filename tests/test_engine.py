@@ -31,7 +31,7 @@ def points(field, value):
     return next(c.points for c in tews.components if c.field == field)
 
 
-# Every band edge on the adult TEWS chart (NOTES §9 / chart: Adult TEWS)
+# Every band edge on the adult TEWS chart (chart: Adult TEWS; sources in docs/RESEARCH.md)
 @pytest.mark.parametrize(
     "field, value, expected",
     [
@@ -313,3 +313,41 @@ def test_a_quote_is_a_phrase_and_the_check_stays_fast():
     for _ in range(20):  # the most signs one call may name
         said(complaint, chest_pain="y" * 300)
     assert time.perf_counter() - started < 2
+
+
+def test_with_no_vitals_the_confirm_message_does_not_claim_a_colour_from_them():
+    claims = [SignClaim(id="seizure_current", quote="fitting now")]
+    p = propose("t1", Vitals(), claims, PACK, "He is fitting now, all limbs jerking.")
+    (confirm,) = [f for f in p.flags if f.kind == "confirm_sign"]
+    assert "no vitals were measured" in confirm.message
+    assert "the vitals give" not in confirm.message
+
+
+def test_a_sign_the_model_took_back_sets_nothing_and_the_nurse_is_told():
+    took_back = [
+        SignClaim(id="chest_pain", quote="chest pain"),  # would have counted
+        SignClaim(id="abdominal_pain", quote="belly ache"),  # words not in the complaint
+        SignClaim(id="fever", quote="chest pain"),  # not on the chart
+    ]
+    p = propose("t1", Vitals(**NORMAL), [], PACK, "chest pain since morning", took_back)
+    assert p.colour == "green" and p.discriminators == []
+    (flag,) = [f for f in p.flags if f.kind == "sign_withdrawn"]
+    assert "'Chest pain' (orange)" in flag.message and '"chest pain"' in flag.message
+    assert flag.source.startswith("input: complaint; sats_adult")
+
+
+def test_a_sign_still_named_or_proved_by_the_vitals_is_not_reported_as_withdrawn():
+    claim = SignClaim(id="chest_pain", quote="chest pain")
+    p = propose("t1", Vitals(**NORMAL), [claim], PACK, "chest pain since morning", [claim])
+    assert p.colour == "orange"
+    assert not [f for f in p.flags if f.kind == "sign_withdrawn"]
+
+
+def test_the_model_cannot_take_back_an_emergency_sign():
+    took_back = [SignClaim(id="seizure_current", quote="fitting now")]
+    complaint = "He is fitting now, all limbs jerking."
+    p = propose("t1", Vitals(**NORMAL), [], PACK, complaint, took_back)
+    assert p.colour == "red" and [d.name for d in p.discriminators] == ["Seizure - current"]
+    (confirm,) = [f for f in p.flags if f.kind == "confirm_sign"]
+    assert "only a nurse drops an emergency sign" in confirm.message
+    assert not [f for f in p.flags if f.kind == "sign_withdrawn"]

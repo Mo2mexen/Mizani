@@ -24,6 +24,7 @@ const NEXT_STEP: Record<string, string> = {
   validate_vitals: "Scoring the vitals (TEWS).",
   compute_tews: "Matching the complaint to chart signs.",
   match_discriminators: "Building the proposal.",
+  review: "Checking the signs against the chart again.",
   propose_priority: "Building the proposal.",
 }; // past this, say why the first patient after a start is slow
 

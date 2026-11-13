@@ -27,7 +27,7 @@ Before the UI shows Mizani's colour, the nurse picks her own. `record_nurse_asse
 
 ## Depends on / used by
 - Depends on: the store, the approval tokens, the rule pack's colour list.
-- Used by: John's agent (W2 handover step, W3 shadow flow) and API, the UI's handover view and agreement report.
+- Used by: the API (handover draft and release, shadow-mode assessment), and the page's handover view and agreement report.
 
 ## Safety rules this system enforces
 - Consequential release needs a named nurse: no handover reaches the doctor without a handover-purpose approval token.
@@ -40,6 +40,7 @@ uv run pytest tests/test_mcp_server.py -k "handover or shadow"
 ```
 
 ## Known limitations
+- A handover can be drafted only while the patient is on the waiting list. Once a nurse records that they were called in, `draft_handover` refuses.
 - The server can't tell a finding from a diagnosis in free text; that rests on the prompt, the evals and the nurse's review before release.
 - The number check reads digits only: a number written in words ("twenty minutes") is not checked.
 - The agreement report counts exact colour matches; it doesn't weigh how far apart the colours are.

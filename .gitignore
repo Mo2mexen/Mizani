@@ -23,7 +23,8 @@ node_modules/
 dist/
 build/
 
-# Local data
+# Local files: tool caches and the database of a run outside Docker
+.cache/
 data/
 *.db
 *.sqlite

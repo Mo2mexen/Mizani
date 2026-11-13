@@ -18,7 +18,7 @@ Mizani helps that nurse without taking the decision away. The nurse types the vi
 
 The colour is only a proposal. A named nurse approves it or overrides it with a reason, and the MCP server refuses to save anything without that nurse's signed, single-use approval token, whatever the model does. Saved triages go onto a waiting-room board grouped by colour and into a local FHIR server through wso2's fhir-mcp-server, so other hospital systems can read them. While patients wait, the agent compares each wait with the SATS target time for the colour and raises a re-check flag for the nurse; it never moves a patient. Every tool call goes into a hash-chained audit log with inputs, outputs, time, approver, model, tokens, latency and cost.
 
-Mizani never diagnoses or prescribes, treats patient text as data, and uses synthetic patients only. It runs offline on one machine with `docker compose up`. [EVALS.md](EVALS.md) runs each synthetic task five times and reports the pass rate, the run-to-run variation, the cost per run and the failures we have not fixed. Speed and chart-sign accuracy depend on the model; a larger model is a configuration change, and the scoring, approval gate and audit log stay the same.
+Mizani never diagnoses or prescribes, treats patient text as data, and uses synthetic patients only. It runs offline on one machine with `docker compose up`. [EVALS.md](docs/EVALS.md) runs each synthetic task five times and reports the pass rate, the run-to-run variation, the cost per run and the failures we have not fixed. Speed and chart-sign accuracy depend on the model; a larger model is a configuration change, and the scoring, approval gate and audit log stay the same.
 
 ## The problem
 
@@ -35,6 +35,7 @@ The chart is sound: after one Egyptian university hospital adopted SATS, average
 5. The confirmed triage goes to the queue, the audit log and a local FHIR record.
 6. While patients wait, Mizani compares their waiting time with the SATS target for their colour, raises a re-check flag when they are overdue, and re-scores with new vitals. Any change of colour goes back to the nurse.
 7. On request, it drafts a three-line handover for the doctor: findings, what set the colour, and time waited.
+8. When the patient goes in to be seen, the nurse records it under her name. The card leaves the waiting room and the record stays.
 
 In shadow mode the nurse records their own colour before seeing Mizani's, and an agreement report shows where the two differ.
 
@@ -70,6 +71,7 @@ Audit log (SQLite, hash-chained): every tool call with inputs, outputs, time, ap
 | `raise_recheck_flag` | action | Flags an overdue or deteriorating patient for the nurse |
 | `draft_handover` | action | Saves the doctor handover draft (findings only, up to 3 lines) |
 | `release_handover` | action, needs approval | Releases the draft to the doctor; requires a nurse's handover approval token |
+| `record_called_in` | action, needs approval | Records that a nurse called the patient in: the patient leaves the waiting list, the record stays |
 | `record_nurse_assessment` | action | Stores the nurse's own colour for shadow mode |
 
 Rule packs, target times, the live queue and each patient's timeline are exposed as MCP resources. The intake and handover instructions are MCP prompts.
@@ -98,7 +100,7 @@ The adult SATS pack encodes the 7 TEWS vitals with their scoring bands, the 4 co
 
 ## Evaluation
 
-[EVALS.md](EVALS.md) reports 39 synthetic tasks (23 written by hand, 16 messy variants), each run five times through the full agent. On Qwen3.5 4B on a MacBook Air M4, 170 of 195 runs passed (87%), with no run-to-run variation, about 10 s and 2,160 tokens per run, and $0 per run on the local model. The safety gates held in every run: no commit without a nurse's approval, impossible vitals never scored, missing vitals never made up, and hidden instructions in a complaint never set a sign. One failure is kept on purpose: a patient who falsely reports a fit gets a red proposal, because as text the report is identical to a true one; Mizani shows the sign with the patient's words, asks the nurse to confirm it and saves nothing until a named nurse decides. The other failures are the model naming the wrong chart sign while quoting real words from the complaint. The tasks cover correct colour and discriminator, recovery from missing or impossible vitals, re-triage timing, refusal to diagnose, instructions hidden in complaint text, attempts to commit without approval, a false claim and Arabic input. Run them with `uv run mizani-evals --runs 5`.
+[EVALS.md](docs/EVALS.md) reports 39 synthetic tasks (23 written by hand, 16 messy variants), each run five times through the full agent. On Qwen3.5 4B on a MacBook Air M4, 170 of 195 runs passed (87%), with no run-to-run variation, about 10 s and 2,160 tokens per run, and $0 per run on the local model. The safety gates held in every run: no commit without a nurse's approval, impossible vitals never scored, missing vitals never made up, and hidden instructions in a complaint never set a sign. One failure is kept on purpose: a patient who falsely reports a fit gets a red proposal, because as text the report is identical to a true one; Mizani shows the sign with the patient's words, asks the nurse to confirm it and saves nothing until a named nurse decides. The other failures are the model naming the wrong chart sign while quoting real words from the complaint. The tasks cover correct colour and discriminator, recovery from missing or impossible vitals, re-triage timing, refusal to diagnose, instructions hidden in complaint text, attempts to commit without approval, a false claim and Arabic input. Run them with `uv run mizani-evals --runs 5`. These numbers are from 23 Oct 2026; the agent has changed since (see [EVALS.md](docs/EVALS.md)) and the suite has not been re-run on the current code yet.
 
 ## Running it
 
@@ -149,23 +151,24 @@ cd web && npm ci && npm run dev                  # the page at http://localhost:
 VITE_USE_MOCK=true npm run dev                   # the page on fake data, no backend
 ```
 
+Plain `uv run pytest` reports one skipped test. It is `tests/test_stack.py`, the only test that needs real containers (our MCP server, wso2's server and HAPI FHIR), and it runs when `MIZANI_E2E=1` is set, as in the two lines above. CI does not start containers, so run it by hand after changing `docker-compose.yml` or `src/mizani/fhir.py`.
+
 On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` first. On a Mac, run Ollama natively rather than in Docker (Docker on macOS has no GPU, and the model runs 4 to 5 times slower there) and set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. How each part works is in [docs/systems/](docs/systems/).
 
 ## What works today
 
 | Part | State |
 |---|---|
-| Design, rule-pack format, tool list | done |
 | Rules engine (SATS adult), every rule cited | done, tested |
-| MCP server `mizani-triage`: 9 tools, 5 resources, 2 prompts, approval gate, hash-chained audit; a chart sign counts only with the complaint's own words behind it, never from text addressed to the software; a red colour from the complaint alone needs the nurse's confirmation | done, tested through an MCP client |
-| Agent (LangGraph): reads the entry, checks vitals, scores through the MCP tools, pauses for the nurse, commits with the nurse's token; retries and falls back when the model's tool calls are wrong; model, tokens and cost logged with every call | done, tested with a fake model and live with Qwen3.5 4B |
-| API (FastAPI): intake, live agent steps as server-sent events, nurse decision (approval token), re-measure, re-triage, handover draft and release, shadow-mode assessment and report, queue, colours, audit log with chain check | done, tested, run live |
-| Web page (React + Vite): intake, the proposal with a source on every number and the words behind every sign, nurse decision with name, re-measure, shadow mode, waiting room with re-check, handover and each patient's recorded details, the agent's steps live (a section the nurse can hide), audit log with the chain check, waiting-room search; desk, tablet and phone layouts, keyboard and screen-reader use | done; served by the API at http://127.0.0.1:8090; every scenario tested in a browser on the full stack |
+| MCP server `mizani-triage`: 10 tools, 5 resources, 2 prompts, approval gate, hash-chained audit; a chart sign counts only with the complaint's own words behind it, never from text addressed to the software; a red colour from the complaint alone needs the nurse's confirmation | done, tested through an MCP client |
+| Agent (LangGraph): reads the entry, checks vitals, scores through the MCP tools, pauses for the nurse, commits with the nurse's token; retries and falls back to the nurse's own vitals when the model's tool calls are wrong or the model server does not answer; model, tokens and cost logged with every call | done, tested with a fake model and live with Qwen3.5 4B |
+| Second look (optional, `MIZANI_SECOND_LOOK=1`): the model sees what the server made of its chart signs and corrects or withdraws them once; a withdrawn sign is flagged for the nurse, and an emergency (red) sign cannot be withdrawn | built, tested with a fake model; off by default until its evaluation is in docs/EVALS.md |
+| API (FastAPI): intake, live agent steps as server-sent events, nurse decision (approval token), re-measure, re-triage, handover draft and release, called in, shadow-mode assessment and report, queue, colours, audit log with chain check | done, tested, run live |
+| Web page (React + Vite): intake, the proposal with a source on every number and the words behind every sign, nurse decision with name, re-measure, shadow mode, waiting room with re-check, handover, called in and each patient's recorded details, the agent's steps live (a section the nurse can hide), audit log with the chain check, waiting-room search; desk, tablet and phone layouts, keyboard and screen-reader use | done; served by the API at http://127.0.0.1:8090; every scenario tested in a browser on the full stack |
 | FHIR output: the agent's commit step writes Patient, Encounter and Observations through wso2 fhir-mcp-server to a local HAPI FHIR | done, verified end to end and in a live run |
 | Re-triage watch: target-time timers; the agent raises a re-check flag every 30 s for patients past their target time; re-triage with fresh vitals as a new pending proposal that replaces the old entry once a nurse commits it | done, tested, run live |
 | Handover (the model drafts two lines of findings, the waiting time comes from the record, every number is checked against the record, a named nurse releases that exact draft) and shadow mode (nurse's own colour, agreement report) | done, tested, run live |
-| Evaluation suite: 39 tasks × 5 runs with pass rate, run-to-run variation, latency, tokens, cost | done on Qwen3.5 4B (87% of runs pass, failures documented) |
-
+| Evaluation suite: 39 tasks × 5 runs with pass rate, run-to-run variation, latency, tokens, cost | done on Qwen3.5 4B on 23 Oct (87% of runs pass, failures documented); a re-run on the current code is pending |
 
 ## Known limitations
 
@@ -176,6 +179,7 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 - Only the adult SATS chart is encoded. Children, pregnancy and the paediatric chart are out of scope for now.
 - There is no login. The nurse types a name, and the API trusts anyone who can reach it, so every port listens on 127.0.0.1 only. A hospital deployment would need accounts behind the approval step. The default approval secret is public: change `MIZANI_APPROVAL_SECRET` in `.env` on any shared machine.
 - One desk, one SQLite file. The page is in English; complaints can be typed in Arabic or English.
+- A patient leaves the waiting room when a nurse records that they were called in. After that there is no handover draft or re-check for them, and the FHIR Encounter is not updated yet.
 - Speed depends on the machine and the model (see [Running it](#running-it)). The first patient after a start also loads the model; the page says so while it waits.
 - The handover's two lines of findings are written by the model, so a nurse must read them before release. The API tidies the draft (two lines, no bullets, no waiting time of the model's own), every number in it is checked against the patient's record, and the waiting time comes from the record; a number written in words is not checked, and a weaker model writes clumsier sentences.
 
@@ -208,7 +212,7 @@ The South African Triage Scale is published by the Emergency Medicine Society of
 
 ## Team
 
-Built by a team of three students at the Arab Academy for Science, Technology and Maritime Transport (AAST), Egypt: [@Mo2mexen](https://github.com/Mo2mexen), [@i-am-Ali](https://github.com/i-am-Ali), [@JohnAtef907](https://github.com/JohnAtef907).
+Built by two students at the Arab Academy for Science, Technology and Maritime Transport (AAST), Egypt: [@Mo2mexen](https://github.com/Mo2mexen) and [@JohnAtef907](https://github.com/JohnAtef907).
 
 ## Licence
 

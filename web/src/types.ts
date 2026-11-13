@@ -17,7 +17,7 @@ export type Vitals = {
   trauma?: boolean; // any injury in the past 48 hours
 };
 
-export type Sourced = { source: string };
+type Sourced = { source: string };
 
 export type TraceStep = {
   time: string;
@@ -37,6 +37,7 @@ export type FlagKind =
   | "not_in_complaint"
   | "ignored_instruction"
   | "confirm_sign"
+  | "sign_withdrawn"
   | "retriage"
   | "recheck_due";
 
@@ -116,6 +117,7 @@ export type Decision = {
 
 export type HandoverDraft = { triage_id: string; draft_id: number; status: string; text: string };
 export type HandoverReleased = { triage_id: string; text: string; approver: string; released_at: string };
+export type CalledIn = { triage_id: string; approver: string; called_in_at: string; waited_minutes: number };
 
 export type Shadow = {
   assessed: number;

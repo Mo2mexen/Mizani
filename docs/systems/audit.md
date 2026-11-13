@@ -21,7 +21,7 @@ Model, tokens, cost and `run_id` come from the `_meta` the agent sends with a to
 
 ## Depends on / used by
 - Depends on: `schemas.AuditEntry`, SQLite.
-- Used by: the MCP server (every call), the `patient://{id}/timeline` resource, John's `/api/audit` and eval runner (tokens, latency, cost per run).
+- Used by: the MCP server (every call), the `patient://{id}/timeline` resource, the API's `/api/audit` and the eval runner (tokens, latency, cost per run).
 
 ## Safety rules this system enforces
 - Every tool call is logged with inputs, outputs, timestamp, approver, model, tokens, latency and cost, refused calls included.

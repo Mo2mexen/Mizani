@@ -3,8 +3,6 @@ MIZANI: WHAT TO INSTALL
 Kept up to date with every change to the project. If something here is
 missing or wrong, the project is broken. Please tell us.
 
-Versions marked (pin) get exact numbers once the code lands.
-
 
 1. JUST RUNNING IT (reviewers, judges)
 --------------------------------------
@@ -14,7 +12,7 @@ You need two things:
   Docker Desktop  4.x, with Compose v2   https://www.docker.com/products/docker-desktop/
 
 Then:
-  git clone <repo-url>
+  git clone https://github.com/Mo2mexen/Mizani.git
   cd Mizani
   docker compose up
 
@@ -77,4 +75,4 @@ Keep the big stuff on another drive (E: in our case):
   uv --version
   node --version            (v22.x)
   ollama --version
-  ollama list               (should show the qwen3 model)
+  ollama list               (should show qwen3.5:4b-q4_K_M)

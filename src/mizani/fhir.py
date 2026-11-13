@@ -1,4 +1,4 @@
-"""FHIR R4 records for a committed triage, written through wso2's fhir-mcp-server (H2).
+"""FHIR R4 records for a committed triage, written through wso2's fhir-mcp-server.
 
 Only committed triages are written. Each becomes a Patient (the synthetic label only), an
 Encounter with status "triaged" and the SATS colour as its priority, and Observations: the
@@ -163,7 +163,7 @@ def fhir_url() -> str | None:
 
 
 async def write_committed(triage_id: str, url: str, mizani_server: Any = None) -> dict:
-    """The agent's commit step (H2): write a committed triage to FHIR and log the call.
+    """The agent's commit step: write a committed triage to FHIR and log the call.
 
     The write goes to the borrowed MCP server, so our server's middleware never sees it; this
     function adds its audit row itself. A failure is reported, not raised: the triage is already

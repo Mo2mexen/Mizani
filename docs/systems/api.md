@@ -6,7 +6,7 @@ The HTTP API the nurse's web page talks to. It starts one agent run per patient,
 - Code: `src/mizani/api.py` (command `mizani-api`); re-check watch `src/mizani/agent/watch.py`
 - Tests: `tests/test_api.py` (the real flow and MCP server in memory, a fake model)
 - Container: service `app` in `docker-compose.yml`, `http://127.0.0.1:8090` (`MIZANI_API_PORT`, default 8090: 8080 is often taken)
-- Settings: `LLM_BASE_URL`, `LLM_MODEL`, `MIZANI_MCP_URL`, `MIZANI_APPROVAL_SECRET` (same value as the MCP server), `MIZANI_DB`, `MIZANI_API_HOST` (default `127.0.0.1`), `MIZANI_API_PORT` (default `8090`), `MIZANI_FHIR_MCP_URL` (wso2's server; unset means no FHIR output), `MIZANI_WEB_DIR` (the built web page served at `/`, default `web/dist`; skipped if the folder doesn't exist)
+- Settings: `LLM_BASE_URL`, `LLM_MODEL`, `LLM_REASONING_EFFORT`, `LLM_API_KEY`, `MIZANI_MCP_URL`, `MIZANI_APPROVAL_SECRET` (same value as the MCP server), `MIZANI_DB`, `MIZANI_API_HOST` (default `127.0.0.1`), `MIZANI_API_PORT` (default `8090`), `MIZANI_FHIR_MCP_URL` (wso2's server; unset means no FHIR output), `MIZANI_SECOND_LOOK` (`1` turns on the agent's second look, agent.md), `MIZANI_WEB_DIR` (the built web page served at `/`, default `web/dist`; skipped if the folder doesn't exist)
 
 ## How it works
 1. At start-up the API connects to `mizani-triage` (retrying while it starts), loads its tools, the rule pack and the colours, and builds the agent (agent.md) with LangGraph's SQLite checkpointer in `checkpoints.db` next to the database.
@@ -16,8 +16,9 @@ The HTTP API the nurse's web page talks to. It starts one agent run per patient,
 5. `POST /api/triage/{id}/vitals` sends re-measured vitals; the agent re-scores without another model call and a new `proposal` event follows on the stream.
 6. Re-triage watch. A background task (`agent/watch.py`) reads `queue://current` every 30 s and calls `raise_recheck_flag` for each patient past their target time and not flagged yet; the queue then shows `recheck_raised`. `POST /api/queue/{triage_id}/retriage` takes the nurse's fresh vitals and starts a re-check run (no model call; the patient's chart signs are kept), streamed and decided like any run. The committed re-triage replaces the old queue entry. A second request while a re-check run is still open returns that same run.
 7. FHIR. With `MIZANI_FHIR_MCP_URL` set, the agent's commit step writes the committed triage to HAPI through wso2's server (fhir.md); the stream shows it as a `fhir_create` step and the audit log records it.
-8. Handover (W2). `POST /api/queue/{triage_id}/handover` asks the model for the first two lines of a findings-only handover (the server's `handover_summary` prompt plus the stored record), adds the third line, the waiting time, from the queue record, and saves it with `draft_handover`, which refuses numbers that are not in the record. Before that the API tidies the model's text: at most two lines, bullets stripped, any sentence about the wait dropped (the real wait is added from the queue), and the record goes to the model with real characters, not JSON escapes. A refused draft goes back to the model once with the reason; after that the nurse sees a plain message to draft again or write the handover herself. `POST /api/queue/{triage_id}/handover/{draft_id}/release` turns a named nurse's release into a handover token for that exact draft and calls `release_handover`. When the nurse overrode the proposal, the handover's "why this colour" gives her colour and reason, never the colour she rejected.
-9. Shadow mode (W3). While the run waits for the nurse, `POST /api/triage/{id}/assessment` records her own colour with `record_nurse_assessment`; the page should send it before it shows Mizani's colour. `GET /api/shadow` returns the agreement report.
+8. Handover. `POST /api/queue/{triage_id}/handover` asks the model for the first two lines of a findings-only handover (the server's `handover_summary` prompt plus the stored record), adds the third line, the waiting time, from the queue record, and saves it with `draft_handover`, which refuses numbers that are not in the record. Before that the API tidies the model's text: at most two lines, bullets stripped, any sentence about the wait dropped (the real wait is added from the queue), and the record goes to the model with real characters, not JSON escapes. A refused draft goes back to the model once with the reason; after that the nurse sees a plain message to draft again or write the handover herself. `POST /api/queue/{triage_id}/handover/{draft_id}/release` turns a named nurse's release into a handover token for that exact draft and calls `release_handover`. When the nurse overrode the proposal, the handover's "why this colour" gives her colour and reason, never the colour she rejected.
+9. Shadow mode. While the run waits for the nurse, `POST /api/triage/{id}/assessment` records her own colour with `record_nurse_assessment`; the page should send it before it shows Mizani's colour. `GET /api/shadow` returns the agreement report.
+10. Called in. `POST /api/queue/{triage_id}/called-in` takes the nurse's name, issues a `called_in` token and calls `record_called_in`. The patient leaves the queue; the record, the audit rows and the FHIR resources stay. The agent has no part in it.
 
 ## Interfaces
 | Name | Input | Output | Side effects |
@@ -28,8 +29,9 @@ The HTTP API the nurse's web page talks to. It starts one agent run per patient,
 | `POST /api/triage/{id}/vitals` | `{vitals}` | 202 | re-scores, new pending triage |
 | `POST /api/queue/{triage_id}/retriage` | `{vitals}` (fresh) | 202 `{triage_id}` (new run id); 404 unknown; 409 not a committed patient still in the queue | re-check run, new pending triage with a `retriage` flag |
 | `GET /api/queue/{triage_id}` | | `{triage, handovers}`: the stored record and its handover drafts | none |
-| `POST /api/queue/{triage_id}/handover` | | 201 `{triage_id, draft_id, status: awaiting_release, text}` (third line: "Waited N min since arrival (target for <colour>: T min)."); 409 with the reason | one or two model calls, stored draft |
+| `POST /api/queue/{triage_id}/handover` | | 201 `{triage_id, draft_id, status: awaiting_release, text}` (third line: "Waited N min since arrival (target for <colour>: T min)."); 409 with the reason | one or two model calls, stored draft; 503 when the model does not answer |
 | `POST /api/queue/{triage_id}/handover/{draft_id}/release` | `{nurse_name}` | released `{text, approver, released_at}`; 409 (other draft, used, replaced triage) | handover token, release |
+| `POST /api/queue/{triage_id}/called-in` | `{nurse_name}` | 200 `{triage_id, approver, called_in_at, waited_minutes}`; 409 not on the waiting list; 422 no name | called-in token; the patient leaves the queue |
 | `POST /api/triage/{id}/assessment` | `{nurse_name, colour, reason?}` | 201 `{triage_id, approver, colour}`; 409 already recorded or not waiting | stored assessment |
 | `GET /api/shadow` | | `{assessed, agreed, agreement_rate, disagreements[]}` | none |
 | `GET /api/colours` | | `[{colour, label, target_minutes, source}]` from the rule pack | none |
@@ -61,7 +63,7 @@ curl -X POST localhost:8090/api/triage/<id>/decision -H 'content-type: applicati
 Or open `http://127.0.0.1:8090/docs`. Both processes must use the same `MIZANI_DB` and `MIZANI_APPROVAL_SECRET`.
 
 ### Full walk-through on the compose stack
-After `docker compose up` (add `-f docker-compose.gpu.yml` on an NVIDIA machine), one patient from intake to a released handover. Bash shown; on Windows use Git Bash, or the same calls from the `/docs` page.
+After `docker compose up` (add `-f docker-compose.gpu.yml` on an NVIDIA machine), one patient from intake to being called in. Bash shown; on Windows use Git Bash, or the same calls from the `/docs` page.
 ```
 # 1. Intake: returns the run id
 curl -s -X POST localhost:8090/api/intake -H 'content-type: application/json' -d '{"patient_label":"Test Patient 01","complaint":"Fell from the roof of a two-storey house 20 minutes ago, back pain.","vitals":{"respiratory_rate":18,"heart_rate":100,"systolic_bp":135,"temperature":36.6,"avpu":"alert","mobility":"stretcher","trauma":true}}'
@@ -78,6 +80,8 @@ curl -s -X POST localhost:8090/api/queue/<triage_id>/handover/<draft_id>/release
 curl -s localhost:8090/api/queue/<triage_id>
 curl -s localhost:8090/api/queue
 curl -s localhost:8090/api/audit/verify     # {"intact":true,"first_broken_row":null}
+# 7. The patient goes in to be seen: a named nurse records it, and the queue is empty again
+curl -s -X POST localhost:8090/api/queue/<triage_id>/called-in -H 'content-type: application/json' -d '{"nurse_name":"Nurse A"}'
 ```
 The FHIR records can be read back from HAPI at `http://127.0.0.1:18080/fhir/Encounter`.
 
@@ -88,4 +92,4 @@ The FHIR records can be read back from HAPI at `http://127.0.0.1:18080/fhir/Enco
 - One process: runs started on one API instance are not shared with another.
 
 ## Extending it
-A new endpoint goes in `create_app()` with a test through `TestClient`. If it changes a shape the UI uses, update the API contract and its "Contract changes" list in the team notes in the same change.
+A new endpoint goes in `create_app()` with a test through `TestClient`. If it changes a shape the page uses, update `web/src/types.ts`, `web/src/mock/` and this file in the same change.

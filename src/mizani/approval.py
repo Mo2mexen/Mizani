@@ -2,7 +2,8 @@
 
 The API calls `issue_approval` when the nurse presses Approve or Override. `commit_triage`
 accepts only a token that is signed, unexpired, for that triage, and not used before. The
-model never sees the secret, so it cannot make a token.
+model never sees the secret, so it cannot make a token. Releasing a handover and recording
+that a patient was called in work the same way, each with a token for that purpose only.
 """
 
 import base64
@@ -15,7 +16,8 @@ import uuid
 
 from mizani.schemas import NurseDecision
 
-TOKEN_TTL_SECONDS = 15 * 60
+# A token is used about a second after the nurse clicks; two minutes covers a slow machine.
+TOKEN_TTL_SECONDS = 2 * 60
 
 
 class ApprovalError(Exception):
@@ -36,9 +38,10 @@ def _sign(body: str) -> str:
 def issue_approval(
     triage_id: str, decision: NurseDecision, purpose: str = "commit", draft_id: int | None = None
 ) -> str:
-    """Token for one nurse decision on one triage. Valid for 15 minutes, usable once.
-    `purpose` is what it may unlock: "commit" (the triage) or "handover" (releasing the draft).
-    A handover token names the exact draft the nurse read (`draft_id`)."""
+    """Token for one nurse decision on one triage. Valid for 2 minutes, usable once.
+    `purpose` is what it may unlock: "commit" (the triage), "handover" (releasing the draft) or
+    "called_in" (taking the patient off the waiting list). A handover token names the exact
+    draft the nurse read (`draft_id`)."""
     if purpose == "handover" and draft_id is None:
         raise ValueError("a handover approval must name the draft the nurse read")
     payload = {

@@ -20,8 +20,8 @@ Every model extends `Contract`, which rejects unknown fields (a typo like `pulse
 - `Discriminator`, `Flag`: a matched chart entry or a warning, each with its source. A `Discriminator` named from the complaint carries `quote`, the complaint's words behind it.
 - `SignClaim`: a chart sign the agent names, `{id, quote}`; the engine applies it only if the quote is in the complaint outside text addressed to the software.
 - `Proposal`: the suggested colour. Its `source` is a one-line, cited reason for the colour (the TEWS total or the discriminator that set it). `status` can only be `"pending"`; committing happens elsewhere, after a nurse decision.
-- `NurseDecision`: needs a nurse name. An override needs a colour and a reason; an approval cannot carry a colour.
-- `AuditEntry`: one logged tool call (inputs, outputs, time, approver, model, tokens, latency, cost). The audit store adds the hash chain.
+- `NurseDecision`: needs a nurse name. An override needs a colour and a reason; an approval cannot carry a colour. `confirmed` records that the nurse checked a sign with the patient; `commit_triage` asks for it before approving a red colour that rests on the complaint's words alone.
+- `AuditEntry`: one logged tool call (inputs, outputs, time, approver, model, tokens, latency, cost). `error` marks a call that failed or was refused, with the reason in the outputs. The audit store adds the hash chain.
 
 ## Interfaces
 | Name | Input | Output | Side effects |
@@ -46,8 +46,8 @@ uv run pytest tests/test_schemas.py
 ```
 
 ## Known limitations
-- Colours are free strings until the rule pack exists; the engine and server must check them against it.
+- Colours are plain strings here. The rule pack defines the valid ones, so a colour is checked where it is used, in the engine and the server.
 - No range checks on vitals by design; that is the engine's job.
 
 ## Extending it
-Add the field to the model, add a test, update the API contract the UI uses, and tell the team, since every layer imports these models.
+Add the field to the model and add a test. Every layer imports these models, so when the page uses the field, update `web/src/types.ts` and api.md in the same change.

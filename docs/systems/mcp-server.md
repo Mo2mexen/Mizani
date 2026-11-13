@@ -7,7 +7,7 @@ Our own MCP server. It gives the agent the SATS tools, stores triages, refuses t
 - Triage records: `src/mizani/store.py`; database: `src/mizani/db.py`
 - Tests: `tests/test_mcp_server.py` (a real MCP client, in memory)
 - Container: `Dockerfile`, service `mizani-mcp` in `docker-compose.yml`
-- Settings: `MIZANI_DB` (default `data/mizani.db`, `/data/mizani.db` in Docker), `MIZANI_APPROVAL_SECRET`, `MIZANI_MCP_HOST`, `MIZANI_MCP_PORT`
+- Settings: `MIZANI_DB` (default `.cache/data/mizani.db`, `/data/mizani.db` in Docker), `MIZANI_APPROVAL_SECRET`, `MIZANI_MCP_HOST`, `MIZANI_MCP_PORT`
 
 ## How it works
 The agent reads the rules (`rules://sats/adult`), checks vitals, names chart discriminators, each with the words of the complaint that show it, and calls `propose_priority`, which runs the rules engine and stores a pending triage. The nurse approves or overrides in the UI; the API turns that into an approval token (approval.md). The agent then calls `commit_triage` with the token. A middleware (`audit_calls`) writes every tool call to the hash-chained audit log (audit.md), including refused calls.
@@ -18,10 +18,11 @@ The agent reads the rules (`rules://sats/adult`), checks vitals, names chart dis
 | `validate_vitals` | tool, read | `vitals` | re-measure flags | audit row |
 | `compute_tews` | tool, read | `vitals` | TEWS with a source per point | audit row |
 | `match_discriminators` | tool, read | `discriminators` (`[{id, quote}]`), `vitals`, `complaint` | chart signs with their quotes, and a flag for each refused sign (`not_on_chart`, `conflicts_with_vitals`, `not_in_complaint`, `ignored_instruction`; rules-engine.md) | audit row |
-| `propose_priority` | tool, action | `patient_label`, `complaint`, `vitals`, `discriminators` (`[{id, quote}]`), optional `retriage_of` | pending `Proposal` (a `confirm_sign` flag when red rests on the complaint alone; a `retriage` flag when re-scoring) | new triage row, audit row |
+| `propose_priority` | tool, action | `patient_label`, `complaint`, `vitals`, `discriminators` (`[{id, quote}]`), optional `retriage_of`, optional `withdrawn` (`[{id, quote}]`: signs the agent named and then took back) | pending `Proposal` (a `confirm_sign` flag when red rests on the complaint alone; a `retriage` flag when re-scoring; a `sign_withdrawn` flag for a withdrawn sign that would have counted; a withdrawn emergency sign still counts) | new triage row, audit row |
 | `commit_triage` | tool, action, gated | `triage_id`, `approval_token` | committed colour, approver; refused to approve a proposal with a `confirm_sign` flag unless the nurse confirmed it (an override needs no confirmation) | triage committed (a re-triage replaces the old entry), token used, audit row |
 | `draft_handover` | tool, action | `triage_id`, `text` (1 to 3 lines) | unreleased draft; refused if a number is not in the record or the stated waiting time is wrong | stores it; audit row (handover-and-shadow.md) |
 | `release_handover` | tool, action, gated | `triage_id`, `draft_id`, `approval_token` (purpose handover, naming that draft) | released text, approver | marks it released, token used; audit row |
+| `record_called_in` | tool, action, gated | `triage_id`, `approval_token` (purpose `called_in`) | `{triage_id, approver, called_in_at, waited_minutes}` | the patient leaves the waiting queue and the re-check timer stops; the record stays; token used; audit row |
 | `record_nurse_assessment` | tool, action | `triage_id`, `nurse_name`, `colour`, `reason` | stored assessment | one per triage; audit row |
 | `raise_recheck_flag` | tool, action | `triage_id` | `recheck_due` flag citing the target time | refused unless the timer ran out; records the flag; audit row |
 | `rules://sats/adult` | resource | | the rule pack (JSON) | none |
@@ -36,17 +37,17 @@ Optional `_meta` on a tool call is copied into the audit row: `run_id` (one per 
 
 ## Depends on / used by
 - Depends on: the rules engine, `schemas.py`, `approval.py`, `audit.py`, SQLite, `mcp`.
-- Used by: John's LangGraph agent (MCP Python SDK client, see agent.md), and MCP Inspector for manual testing.
+- Used by: the LangGraph agent (MCP Python SDK client, see agent.md), and MCP Inspector for manual testing.
 
 ## Safety rules this system enforces
-- No commit without a named nurse: `commit_triage` refuses a missing, forged, expired, other-triage or reused token, and a token without an approver name. Tests prove each refusal.
+- No commit, handover release or called-in record without a named nurse, each with a token for that purpose only. `commit_triage` refuses a missing, forged, expired, other-triage or reused token, and a token without an approver name. Tests prove each refusal.
 - No unsourced output: every tool result carries sources (the schemas reject output without them).
 - Only chart entries: unknown discriminators are refused with a flag.
 - Words behind every sign: a sign needs a quote that is in the complaint and outside text addressed to the software; a red colour from the complaint alone carries a `confirm_sign` flag for the nurse.
 - Handover numbers from the record: `draft_handover` refuses a number that is not in the patient's record, and a waiting time that is not the real one.
 - Patient text is data: the complaint is stored as-is, and the intake prompt escapes it inside its tags (so it can't close them) and tells the model to ignore instructions inside it. Patient label (≤ 80), complaint (≤ 2,000 characters) and discriminator list (≤ 20) are capped.
 - The container runs as an unprivileged user.
-- Read-only queue: the order comes from committed colours and arrival times; no tool reorders it.
+- Read-only queue: the order comes from committed colours and arrival times; no tool reorders it. A patient leaves it only when a named nurse records, with her own token, that she called them in (`record_called_in`). The agent never calls that tool.
 - Every call logged: inputs, outputs, time, approver, model, tokens, latency, cost.
 
 ## Running and testing it alone
@@ -59,7 +60,8 @@ docker compose up mizani-mcp                            # same server in Docker
 
 ## Known limitations
 - One SQLite file; fine for one desk, not for many hospitals (Postgres later).
+- Once a patient is recorded as called in, they can no longer get a handover draft or a re-check, so draft the handover first. The FHIR Encounter is not updated at that point.
 - The compose default approval secret is for local demos; set your own for any shared machine.
 
 ## Extending it
-A new tool is one decorated function in `mcp_server.py` that calls the engine or the store, plus a test through the in-memory client. It is audited automatically. If it changes what the agent or UI builds on, follow CLAUDE.md rule 6 (contract docs).
+A new tool is one decorated function in `mcp_server.py` that calls the engine or the store, plus a test through the in-memory client. It is audited automatically. If it changes what the agent or the page builds on, update agent.md, api.md and `web/src/types.ts` in the same change.

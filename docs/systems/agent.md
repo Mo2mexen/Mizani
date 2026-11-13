@@ -6,9 +6,9 @@ The part of Mizani that talks to the language model and to our MCP server, and r
 - Triage flow (LangGraph): `src/mizani/agent/graph.py`
 - Model client: `src/mizani/agent/model.py`
 - MCP tools: `src/mizani/agent/mcp_tools.py`
-- Re-check watch (W1): `src/mizani/agent/watch.py`
+- Re-check watch: `src/mizani/agent/watch.py`
 - Tests: `tests/test_agent_graph.py`, `tests/test_agent_model.py`, `tests/test_agent_tools.py`, `tests/test_agent_watch.py`
-- Settings: `LLM_BASE_URL`, `LLM_MODEL` (model), `MIZANI_MCP_URL` (our MCP server)
+- Settings: `LLM_BASE_URL`, `LLM_MODEL`, `LLM_REASONING_EFFORT`, `LLM_API_KEY` (model), `MIZANI_MCP_URL` (our MCP server), `MIZANI_SECOND_LOOK` (`1` turns the second look on)
 
 ## The triage flow
 One LangGraph run per patient, keyed by a `thread_id`, with a checkpointer so a run survives the wait for the nurse (the API uses LangGraph's SQLite checkpointer).
@@ -22,7 +22,8 @@ extract (model) ─► validate ─► score ─► discriminators ─► propos
 ```
 
 1. `extract`: one model call with two tools bound, `validate_vitals` and `match_discriminators`. The model sees only the arguments it fills in: the vitals for the first, and for the second the chart signs as `{id, quote}`; the graph adds the vitals and the complaint itself, so the model never copies them. The prompt gives the nurse-entered vitals, the chart signs from `rules://sats/adult` (id, name, colour and, where the SATS manual defines it, its meaning) and the complaint inside `<complaint>` tags, and tells the model to ignore instructions in it. It asks for a quote per sign (the complaint's words, in its own language), never to infer a diagnosis (a twisted limb is not a fracture), and to name high-energy transfer only for a mechanism as violent as the manual's examples. The model answers with both tool calls: the vitals (the nurse's values plus any written in the complaint that the nurse left empty) and the signs with their quotes. The nurse's own values always override the model's.
-2. `validate`, `score`, `discriminators`: the server's tools check the vitals, compute TEWS and match the chart ids. If the model skipped a tool or the server rejects its arguments, the flow asks the model again with the reason, up to three model calls. After that it falls back to the nurse's vitals with no discriminators, and the trace says so.
+2. `validate`, `score`, `discriminators`: the server's tools check the vitals, compute TEWS and match the chart ids. If the model skipped a tool or the server rejects its arguments, the flow asks the model again with the reason, up to three model calls. After that it falls back to the nurse's vitals with no discriminators, and the trace says so. A model server that does not answer at all (down, timed out) is not asked again: the flow goes straight to that fallback, so the nurse still gets the score from the vitals.
+   - `review` (the second look, only with `MIZANI_SECOND_LOOK=1` and only when the model named a sign): a second model call with one tool bound, `match_discriminators`. The model sees the complaint, the signs it named with the chart's definitions, which signs the server applied, and the server's notes on the ones it dropped. It answers with its final list: it can keep a sign, correct an id or a quote, or leave a sign out. The list goes through `discriminators` again, so the same server checks apply. A sign it leaves out sets nothing, and `propose_priority` gets it as `withdrawn`, which the server turns into a `sign_withdrawn` flag for the nurse. An emergency (red) sign cannot be taken back: the server still counts it, and the nurse confirms or overrides it. The review happens once per run and never on a re-check. It is advisory: if the model gives no usable answer, or a list the server refuses outright, the first list stands and the model is not asked again. Everything the model sees on its second look sits inside data tags, like the complaint.
 3. `propose`: `propose_priority` stores a pending triage. The rules engine sets the colour. A sign that is not on the chart, that the vitals rule out, or whose quote is not in the complaint or sits in text addressed to the software comes back as a flag and sets nothing; a red colour that rests on the complaint alone carries a `confirm_sign` flag for the nurse (rules-engine.md).
 4. `nurse`: the run pauses (LangGraph `interrupt`) with the proposal. The nurse answers with re-measured vitals, which re-run validate to propose without another model call, or with an approval token issued by the API.
 5. `commit`: `commit_triage` with the token. A refusal (expired, forged, reused) goes back to the nurse with the server's reason. After a successful commit, when `write_fhir` is set (the API sets it from `MIZANI_FHIR_MCP_URL`), the run writes the record to FHIR through wso2's server and adds a `fhir_create` step (fhir.md).
@@ -31,10 +32,10 @@ If the server refuses even the fallback (the nurse's own vitals with no chart si
 
 Every step adds a trace row (`time`, `kind`, `name`, `input`, `output`, `latency_ms`; the UI's `TraceStep`). The approval token is shown as `(hidden)` in the trace and never enters the model's messages.
 
-Re-check runs (W1): `watch()` asks the server every 30 s to flag patients past their SATS target time (`raise_recheck_flag`; the server checks the timer). It never changes a colour. When the nurse re-measures a flagged patient, the API starts a run with `retriage_of`, the fresh vitals and the patient's current chart signs with their quotes. That run starts at validate and never calls the model, so only the vitals can change the colour; `propose_priority(retriage_of=...)` adds a `retriage` flag saying whether it changed, and the nurse approves it like any proposal.
+Re-check runs: `watch()` asks the server every 30 s to flag patients past their SATS target time (`raise_recheck_flag`; the server checks the timer). It never changes a colour. When the nurse re-measures a flagged patient, the API starts a run with `retriage_of`, the fresh vitals and the patient's current chart signs with their quotes. That run starts at validate and never calls the model, so only the vitals can change the colour; `propose_priority(retriage_of=...)` adds a `retriage` flag saying whether it changed, and the nurse approves it like any proposal.
 
 ## Model client and MCP tools
-1. `chat_model()` builds one OpenAI-compatible chat model from `LLM_BASE_URL` and `LLM_MODEL`. Every request has thinking off (`reasoning_effort: "none"`; set `LLM_REASONING_EFFORT` empty for a server that rejects the field) and temperature 0. Without settings it uses Ollama on the same machine with `qwen3.5:4b-q4_K_M`.
+1. `chat_model()` builds one OpenAI-compatible chat model from `LLM_BASE_URL` and `LLM_MODEL`. Every request has thinking off (`reasoning_effort: "none"`; set `LLM_REASONING_EFFORT` empty for a server that rejects the field) and temperature 0. A model server that checks keys gets its key from `LLM_API_KEY`; Ollama needs none. Without settings it uses Ollama on the same machine with `qwen3.5:4b-q4_K_M`.
 2. `call_model(llm, messages)` runs one model call and returns the reply with the model name, total tokens, latency in ms and cost (0 for a local model).
 3. `load_tools()` connects to `mizani-triage` with the MCP Python SDK client, lists its tools and wraps each one as a LangChain tool with the server's own argument schema. The agent binds the two it needs to the model, each cut down to the arguments the model fills in (`MODEL_TOOLS`, `_model_view`).
 4. Tools run with `tool.ainvoke(call, with_meta(meta))`. The wrapper opens a connection, calls the tool with `_meta: {model, tokens, cost, run_id}` and returns the tool's text plus its structured result. The server's audit log copies model, tokens and cost into the row, so every logged call shows which model the run used and what it cost.
@@ -45,10 +46,10 @@ We use the MCP SDK client directly because `langchain-mcp-adapters` only support
 ## Interfaces
 | Name | Input | Output | Side effects |
 |---|---|---|---|
-| `build_graph(llm, tools, chart, checkpointer, write_fhir)` | chat model, MCP tools, chart signs (full entries or ids), optional FHIR writer | compiled flow | none |
+| `build_graph(llm, tools, chart, checkpointer, write_fhir, second_look)` | chat model, MCP tools, chart signs (full entries or ids), optional FHIR writer, the second-look switch | compiled flow | none |
 | run: `ainvoke({patient_label, complaint, nurse_vitals}, thread)` | the nurse's entry | state paused at the nurse: `__interrupt__` with `{proposal, error}`, `trace` | model call, tool calls, pending triage |
 | resume: `ainvoke(Command(resume=answer), thread)` | `{"action": "remeasure", "vitals": {...}}` or `{"action": "approve" \| "override", "approval_token": ...}` | paused again, or `committed` | tool calls, commit |
-| `chat_model()` | `LLM_BASE_URL`, `LLM_MODEL` | chat model, thinking off, temperature 0 | none |
+| `chat_model()` | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_REASONING_EFFORT`, `LLM_API_KEY` | chat model, thinking off, temperature 0 | none |
 | `call_model(llm, messages)` | bound model, messages | `ModelCall`: reply, model, tokens, latency_ms, cost | one model request |
 | `ModelCall.meta()` | | `{model, tokens, cost}` for `_meta` | none |
 | `load_tools(server)` | URL (default `MIZANI_MCP_URL`) or in-process server | one LangChain tool per MCP tool | lists tools on the server |
@@ -59,13 +60,13 @@ We use the MCP SDK client directly because `langchain-mcp-adapters` only support
 
 ## Depends on / used by
 - Depends on: `langgraph` and `langgraph-checkpoint-sqlite`, `langchain-openai` (OpenAI-compatible client), `langchain-core`, the MCP Python SDK client, the `mizani-triage` server.
-- Used by: the API (U1), which starts runs, streams their trace and resumes them with the nurse's answer, and the eval runner (E3).
+- Used by: the API, which starts runs, streams their trace and resumes them with the nurse's answer, and the eval runner.
 
 ## Safety rules this system enforces
 - The model never sets a colour: it only names vitals and chart signs with the complaint's words behind them, the rules engine scores, and a sign that is not on the chart, not in the complaint or asked for by text addressed to the software is flagged and ignored (the rules win).
 - Nothing is committed without a named nurse: the flow always pauses before `commit_triage`, and only a token from the nurse's decision gets past the server.
 - Patient text is data: the complaint is fenced in tags with a closing tag in the text neutralised, and the prompt says to ignore instructions inside it.
-- Every tool call is logged with the run's model, and each model call's tokens and cost are on exactly one audit row: the first tool call after it. That includes model answers the flow rejected and retried, so adding up a run's rows gives what the model really used (fixed 22 Oct; before, two rows carried the same model call). Each call also sends `_meta.run_id` (the run's `thread_id`), which the MCP server stores, so a patient's timeline (`patient://{id}/timeline`, `/api/audit?triage_id=`) includes the checks made before the triage existed.
+- Every tool call is logged with the run's model, and each model call's tokens and cost are on exactly one audit row: the first tool call after it. That includes model answers the flow rejected and retried, so adding up a run's rows gives what the model really used. Each call also sends `_meta.run_id` (the run's `thread_id`), which the MCP server stores, so a patient's timeline (`patient://{id}/timeline`, `/api/audit?triage_id=`) includes the checks made before the triage existed.
 - The model can only call what the server offers, with the server's schemas. The server, not the agent, refuses unsafe calls such as a commit without a nurse's approval, and the agent sees the refusal.
 - Nothing leaves the machine by default: the model endpoint is local Ollama, and LangSmith tracing stays off unless someone sets its environment variables.
 
@@ -79,10 +80,11 @@ uv run python -c "import asyncio; from mizani.agent.mcp_tools import load_tools;
 ## Known limitations
 - The model can still name the wrong sign with real words behind it ("twisted my ankle" for a dislocation): the quote check proves the words are there, not what they mean. EVALS.md measures how often, and the nurse sees every sign with its quote.
 - Each re-measure creates a new pending triage with a new id; the earlier pending one stays in the database, uncommitted and out of the queue.
-- The approval token passes through the run's checkpoint (it is single-use and expires after 15 minutes).
+- The approval token passes through the run's checkpoint (it is single-use and expires after 2 minutes).
+- The second look is off by default. It is tested with a fake model, and its effect on the real model is not in EVALS.md yet; on a small model it could also withdraw a correct sign, which is why a withdrawn sign is always shown to the nurse.
 - `qwen3.5:4b` sometimes sends a nested argument such as `vitals` as a JSON string; the MCP server parses it, but code that reads tool calls must not assume a dict.
-- A model call is about 2,100 tokens (the chart signs with their definitions). Ollama's default context on some machines is 4,096, so set 8,192 on the server (compose already does).
+- A model call is about 2,100 tokens (the chart signs with their definitions); the prompt also tells the model the server's limit of 20 signs per list, read from the tool's schema. Ollama's default context on some machines is 4,096, so set 8,192 on the server (compose already does).
 - Each tool call opens its own connection to the server. That costs a few milliseconds locally and keeps the wrapper simple.
 
 ## Extending it
-A new tool on the MCP server needs no change here: `load_tools()` picks it up with its schema. A second MCP server (wso2 `fhir-mcp-server`, H2) is another `load_tools(url)` call with its own URL setting.
+`load_tools()` picks up a new tool on the MCP server with its schema. To use it in the flow, give it a node in `graph.py`, and add it to `MODEL_TOOLS` only if the model should fill in its arguments. The second MCP server, wso2 `fhir-mcp-server`, is not offered to the model: writing the FHIR record is a fixed step after the nurse's commit, so the commit step calls it through the MCP client in `fhir.py` (fhir.md).

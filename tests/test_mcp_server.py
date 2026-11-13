@@ -72,6 +72,7 @@ async def test_tools_listed_with_read_and_action_hints():
         "raise_recheck_flag",
         "draft_handover",
         "release_handover",
+        "record_called_in",
         "record_nurse_assessment",
     }
     assert tools["compute_tews"].annotations.read_only_hint is True
@@ -624,3 +625,74 @@ async def test_an_override_needs_no_confirmation():
             await client.call_tool("commit_triage", {"triage_id": tid, "approval_token": override})
         )
     assert done["colour"] == "green"
+
+
+def called_in_token(triage_id, nurse="Nurse C"):
+    decision = NurseDecision(nurse_name=nurse, action="approve")
+    return approval.issue_approval(triage_id, decision, purpose="called_in")
+
+
+async def test_only_a_named_nurse_takes_a_patient_off_the_waiting_list():
+    async with Client(mcp) as client:
+        p = await propose(client, ["chest_pain"])
+        tid = p["triage_id"]
+        call = {"triage_id": tid, "approval_token": called_in_token(tid)}
+        pending = await client.call_tool("record_called_in", call)
+        assert "not a committed patient" in error_text(pending)
+        await commit(client, tid)
+        call["approval_token"] = ""
+        assert "no approval token" in error_text(await client.call_tool("record_called_in", call))
+        call["approval_token"] = token(tid)  # a commit token
+        assert "not called_in" in error_text(await client.call_tool("record_called_in", call))
+        call["approval_token"] = called_in_token(tid)
+        done = data(await client.call_tool("record_called_in", call))
+        again = await client.call_tool("record_called_in", call)
+        retriage = await client.call_tool(
+            "propose_priority",
+            dict(
+                patient_label="Test Patient 01",
+                complaint="chest pain since morning",
+                vitals=VITALS,
+                discriminators=[],
+                retriage_of=tid,
+            ),
+        )
+        recheck = await client.call_tool("raise_recheck_flag", {"triage_id": tid})
+    assert done["approver"] == "Nurse C" and done["waited_minutes"] >= 0
+    assert "not a committed patient" in error_text(again)
+    assert "still in the queue" in error_text(retriage)
+    assert "not a committed patient in the waiting queue" in error_text(recheck)
+    assert json.loads(await _read("queue://current")) == []
+    timeline = json.loads(await _read(f"patient://{tid}/timeline"))
+    assert timeline["triage"]["called_in_by"] == "Nurse C"  # the record stays
+    logged = [e for e in timeline["audit"] if e["tool"] == "record_called_in" and not e["error"]]
+    assert logged[0]["approver"] == "Nurse C"
+    assert logged[0]["inputs"]["approval_token"] == "***"
+
+
+async def test_a_called_in_token_cannot_commit_or_release():
+    async with Client(mcp) as client:
+        p = await propose(client)
+        r = await client.call_tool(
+            "commit_triage",
+            {"triage_id": p["triage_id"], "approval_token": called_in_token(p["triage_id"])},
+        )
+    assert "not commit" in error_text(r)
+
+
+async def test_a_sign_the_agent_took_back_is_flagged_by_the_server():
+    async with Client(mcp) as client:
+        args = dict(
+            patient_label="Test Patient 01",
+            complaint="chest pain since morning",
+            vitals=VITALS,
+            discriminators=[],
+            withdrawn=[{"id": "chest_pain", "quote": "chest pain"}],
+        )
+        p = data(await client.call_tool("propose_priority", args))
+    assert p["colour"] == "green"
+    assert [f["kind"] for f in p["flags"]].count("sign_withdrawn") == 1
+
+
+def test_an_approval_lives_two_minutes():
+    assert approval.TOKEN_TTL_SECONDS == 120
