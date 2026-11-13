@@ -67,12 +67,27 @@ export function ProposalPanel({
     return <ShadowFirst runId={run.runId} colours={colours} onDone={() => onAssessed(proposal.triage_id)} />;
   }
   const toConfirm = proposal.flags.filter((f) => f.kind === "confirm_sign");
+  // The model gave no chart signs (it did not answer): said next to the colour, not only in the steps.
+  const unchecked = proposal.flags.filter((f) => f.kind === "signs_not_checked");
   // After a reload the intake text is gone from the page; the propose step still carries it.
   const proposed = run.steps.find((s) => s.name === "propose_priority")?.input as { complaint?: string } | undefined;
   const shownComplaint = complaint ?? proposed?.complaint ?? null;
   return (
     <Shell pending>
       <ColourBand proposal={proposal} colours={colours} />
+      {unchecked.length > 0 && (
+        <div className="confirm" role="alert" aria-label="Chart signs not checked">
+          <p className="confirm-title">Chart signs were not checked</p>
+          <ul>
+            {unchecked.map((f, i) => (
+              <li key={i}>
+                {f.message}
+                <span className="src">{f.source}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {toConfirm.length > 0 && (
         <div className="confirm" role="note" aria-label="Nurse to confirm">
           <p className="confirm-title">Nurse to confirm before approving</p>
@@ -183,7 +198,11 @@ function setBy(proposal: Proposal): string {
 }
 
 function Breakdown({ proposal }: { proposal: Proposal }) {
-  const flags = groupRemeasure(proposal.flags.filter((f) => f.kind !== "confirm_sign"));
+  // The two kinds with their own box above the breakdown are not repeated in the list.
+  const isUnchecked = proposal.flags.some((f) => f.kind === "signs_not_checked");
+  const flags = groupRemeasure(
+    proposal.flags.filter((f) => f.kind !== "confirm_sign" && f.kind !== "signs_not_checked"),
+  );
   const hasVitals = proposal.tews.components.length > 0;
   return (
     <div className="breakdown">
@@ -226,7 +245,13 @@ function Breakdown({ proposal }: { proposal: Proposal }) {
       )}
       <div>
         <h3 className="sub-title">Chart signs</h3>
-        {proposal.discriminators.length === 0 && <p className="empty">None applies. The vitals set the colour.</p>}
+        {proposal.discriminators.length === 0 && (
+          <p className="empty">
+            {isUnchecked
+              ? "Not checked: the model gave no answer for this complaint. The colour comes from the vitals alone."
+              : "None applies. The vitals set the colour."}
+          </p>
+        )}
         <ul className="signs">
           {proposal.discriminators.map((d) => (
             <li key={d.name}>

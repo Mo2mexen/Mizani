@@ -351,3 +351,12 @@ def test_the_model_cannot_take_back_an_emergency_sign():
     (confirm,) = [f for f in p.flags if f.kind == "confirm_sign"]
     assert "only a nurse drops an emergency sign" in confirm.message
     assert not [f for f in p.flags if f.kind == "sign_withdrawn"]
+
+
+def test_a_proposal_made_without_chart_signs_from_the_model_says_so():
+    complaint = "Fell from the roof of a two-storey house, back pain."
+    p = propose("t1", Vitals(**NORMAL), [], PACK, complaint, signs_checked=False)
+    (flag,) = [f for f in p.flags if f.kind == "signs_not_checked"]
+    assert "Check the complaint against the chart by hand" in flag.message
+    assert flag.source == "input: complaint"
+    assert not [f for f in said(complaint).flags if f.kind == "signs_not_checked"]

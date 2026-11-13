@@ -135,7 +135,9 @@ def test_when_the_model_does_not_answer_the_nurse_still_gets_the_score_from_the_
         stream = events(api, run, until="proposal")
         steps = {data["name"]: data for kind, data, _ in stream if kind == "step"}
         assert steps["fallback"]["output"]["warning"].startswith("The model did not answer")
-        assert stream[-1][1]["proposal"]["colour"] == "green"
+        proposal = stream[-1][1]["proposal"]
+        assert proposal["colour"] == "green"
+        assert "signs_not_checked" in [f["kind"] for f in proposal["flags"]]
 
 
 def test_unknown_runs_and_colours():

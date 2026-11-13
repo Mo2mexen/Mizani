@@ -38,6 +38,7 @@ export type FlagKind =
   | "ignored_instruction"
   | "confirm_sign"
   | "sign_withdrawn"
+  | "signs_not_checked"
   | "retriage"
   | "recheck_due";
 

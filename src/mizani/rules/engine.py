@@ -388,8 +388,11 @@ def propose(
     pack: RulePack,
     complaint: str = "",
     withdrawn: list[SignClaim] | None = None,
+    signs_checked: bool = True,
 ) -> Proposal:
     """The pending proposal. Its `source` is a one-line, cited reason for the colour.
+    `signs_checked=False` means the agent got no chart signs from the model (it did not answer,
+    or gave no usable answer): the proposal then tells the nurse the complaint was not checked.
     `withdrawn` are signs the agent named and then took back. They set nothing, with one
     exception: the model cannot take back an emergency (red) sign. That one still counts, and
     the nurse confirms or overrides it."""
@@ -418,6 +421,18 @@ def propose(
             )
         )
 
+    if not signs_checked:
+        flags.append(
+            Flag(
+                kind="signs_not_checked",
+                message=(
+                    "The model gave no usable answer for this complaint, so no chart sign was "
+                    "looked for and the colour comes from the measurements alone. Check the "
+                    "complaint against the chart by hand: a sign can raise the colour."
+                ),
+                source="input: complaint",
+            )
+        )
     doubted = frozenset(c.id for c in kept)
     flags += _to_confirm(tews, by_tews.colour, matched, shown, pack, doubted)
     flags += _withdrawn(withdrawn or [], requested, vitals, pack, complaint)

@@ -314,7 +314,10 @@ td.src { display: table-cell; }
 .card-panel .vitals-grid { grid-template-columns: minmax(0, 1fr); }
 /* Inside a narrow card the name and the release button stack, each the full width. */
 .card-panel .decision-row { flex-direction: column; }
-.card-panel .decision-row > * { width: 100%; }
+/* Not the hidden label: at full width it would stick out of the page and add a sideways scrollbar. */
+.card-panel .decision-row > :not(.visually-hidden) { width: 100%; }
+/* Stacked, the field keeps its own height: its row-direction basis (10rem) would become a height. */
+.card-panel .decision-row input { flex: 0 0 auto; }
 .handover-text { white-space: pre-wrap; background: #f6f3ea; padding: 0.5rem; border-radius: var(--radius); font-size: 0.85rem; overflow-wrap: anywhere; }
 
 /* Audit drawer */
