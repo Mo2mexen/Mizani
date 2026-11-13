@@ -40,7 +40,7 @@ Text colours meet WCAG AA (4.5:1) on `--paper` and `--panel`. On orange and yell
 
 ## Components
 - **Panel:** `--panel` background, 1 px `--line` border, soft shadow; title row with the step number in a black circle.
-- **Buttons:** `.btn` (outlined), `.btn-primary` (ink fill, the one main action of a panel), `.btn-warn` (override), `.btn-small` (inside cards). A button beside a field is as tall as the field. Disabled buttons fade to 45 %. A card's toggle button (Details, Re-check, Handover) stays pressed (grey, inset) while its panel is open; clicking it again closes it.
+- **Buttons:** `.btn` (outlined), `.btn-primary` (ink fill, the one main action of a panel), `.btn-warn` (override), `.btn-small` (inside cards). A button beside a field is as tall as the field. Disabled buttons fade to 45 %. A card's toggle button (Details, Re-check, Handover, Called in) stays pressed (grey, inset) while its panel is open; clicking it again closes it.
 - **Fields:** label above, unit in `--ink-soft` after the label, note under the field. Required fields say "required"; the vitals hint says they are optional. Selects use one drawn arrow with room on the right.
 - **Colour band:** the proposal's colour as a left bar, the name in display size, the label, "Set by …" in plain words, then the rule in small monospace.
 - **Flags:** left border in the flag's meaning (orange: re-measure; red: refused or ignored; blue: re-check), bold kind, plain message, source under it.
@@ -49,7 +49,7 @@ Text colours meet WCAG AA (4.5:1) on `--paper` and `--panel`. On orange and yell
 - **Working state:** a green dot that breathes next to "The agent is working · 6 s", the current step on the line below. Still when the system asks for reduced motion.
 
 ## Words
-- Name things by what the nurse does: "Start triage", "Approve ORANGE", "Draft handover with AI", "Release to doctor", "Next patient".
+- Name things by what the nurse does: "Start triage", "Approve ORANGE", "Draft handover with AI", "Release to doctor", "Record called in", "Next patient".
 - Errors say what happened and what to do, in the page's voice: "Mizani could not write a usable draft (…). Click Draft handover again, or write the handover yourself."
 - Empty states invite the next action: "No patient yet. Fill in the intake…".
 - Patient text is shown as typed, right-to-left when it is Arabic (`dir="auto"`), and never as HTML.

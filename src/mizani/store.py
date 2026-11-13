@@ -111,8 +111,9 @@ def _minutes_since(iso: str) -> float:
 
 
 def queue(con: sqlite3.Connection, pack: RulePack, triage_id: str | None = None) -> list[dict]:
-    """Committed patients still waiting, most urgent colour first, then by arrival. Read only:
-    the order comes from the nurses' committed colours, never from the agent.
+    """Committed patients still waiting (not yet called in), most urgent colour first, then by
+    arrival. Read only: the order comes from the nurses' committed colours, never from the
+    agent.
 
     A re-check is due once the time since the patient's last triage passes the target time to
     be seen for their colour (manual p6, Table 3)."""
@@ -120,6 +121,7 @@ def queue(con: sqlite3.Connection, pack: RulePack, triage_id: str | None = None)
     sql = (
         "SELECT id, patient_label, colour, arrived_at, committed_at, recheck_raised_at"
         " FROM triage WHERE status = 'committed' AND superseded_by IS NULL"
+        " AND called_in_at IS NULL"
     )
     args: tuple = ()
     if triage_id is not None:
@@ -161,6 +163,40 @@ def raise_recheck(con: sqlite3.Connection, triage_id: str, pack: RulePack) -> di
         "UPDATE triage SET recheck_raised_at = ? WHERE id = ?", (now().isoformat(), triage_id)
     )
     return entry
+
+
+def call_in(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
+    """A named nurse records that she called a waiting patient in to be seen. The patient leaves
+    the waiting list; the record, its audit rows and its FHIR resources stay. Each token works
+    once."""
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        row = con.execute(
+            "SELECT arrived_at FROM triage WHERE id = ? AND status = 'committed'"
+            " AND superseded_by IS NULL AND called_in_at IS NULL",
+            (triage_id,),
+        ).fetchone()
+        if row is None:
+            raise ApprovalError("not a committed patient on the waiting list")
+        try:
+            con.execute("INSERT INTO used_token (nonce) VALUES (?)", (approval["nonce"],))
+        except sqlite3.IntegrityError:
+            raise ApprovalError("this approval token was already used") from None
+        called_in_at = now().isoformat()
+        con.execute(
+            "UPDATE triage SET called_in_at = ?, called_in_by = ? WHERE id = ?",
+            (called_in_at, approval["nurse_name"], triage_id),
+        )
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    return {
+        "triage_id": triage_id,
+        "approver": approval["nurse_name"],
+        "called_in_at": called_in_at,
+        "waited_minutes": round(_minutes_since(row["arrived_at"]), 1),
+    }
 
 
 HANDOVER_MAX_LINES, HANDOVER_MAX_CHARS = 3, 600

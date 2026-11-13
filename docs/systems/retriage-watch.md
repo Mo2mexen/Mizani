@@ -5,7 +5,7 @@ Watches the waiting queue against the SATS target times and tells the nurse when
 ## Where it lives
 - Timers and flags: `queue`, `raise_recheck` in `src/mizani/store.py`
 - Tools: `raise_recheck_flag`, and `propose_priority(..., retriage_of=...)` in `src/mizani/mcp_server.py`
-- Tests: `tests/test_mcp_server.py` (`recheck`, `retriage`)
+- Tests: `tests/test_mcp_server.py` (`recheck`, `retriage`), `tests/test_agent_watch.py`
 
 ## How it works
 1. Timer: for every committed patient still waiting, the queue (`queue://current`) reports `minutes_since_triage` and `recheck_due`, which turns true once that time passes the target time to be seen for their colour: orange 10 min, yellow 60, green 240, red immediately (SATS training manual p6, Table 3, read from the rule pack).
@@ -35,7 +35,7 @@ uv run pytest tests/test_mcp_server.py -k "recheck or retriage"
 ```
 
 ## Known limitations
-- The timer measures time since the last triage. It doesn't know when a doctor actually saw the patient; a "seen" step would close that gap.
+- The timer measures time since the last triage and stops when a nurse records that the patient was called in (`record_called_in`). Red has a target of 0 minutes, so a red patient counts as due until then.
 - Polling is the agent's job; the server has no background timer of its own.
 
 ## Extending it

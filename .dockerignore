@@ -1,6 +1,7 @@
 .git
 .claude
 .venv
+.cache
 .pytest_cache
 .ruff_cache
 __pycache__

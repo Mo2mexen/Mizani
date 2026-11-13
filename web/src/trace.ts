@@ -91,13 +91,23 @@ const LINES: Record<string, (input: any, output: any) => Line> = {
   nurse: (input) => ({ input: `proposal ${input?.triage_id}`, output: "waiting for a named nurse to decide" }),
   remeasure: (input) => ({ input: vitals(input), output: "re-scoring the new vitals, no model call" }),
   fallback: (_input, output) => ({ input: "", output: output?.warning ?? "" }),
+  review: (input, output) => ({
+    input: `second look at ${claims(input?.signs)}, with the server's checks`,
+    output:
+      output?.usable === false
+        ? "no usable answer; the first list stands"
+        : `final list: ${claims(output?.signs)}` +
+          (output?.withdrawn?.length ? ` · withdrawn: ${output.withdrawn.join(", ")}` : ""),
+  }),
 };
 
 /** A one-line input and output for a step; the raw JSON when the tool is not known here. */
 export function traceLine(step: TraceStep): Line {
   const output = step.output as { error?: string } | null;
   if (output && typeof output === "object" && "error" in output && output.error) {
-    return { input: short(step.input, 160), output: `refused: ${output.error}` };
+    // A tool refuses; a model call fails (server down, timed out) and the run goes on without it.
+    const what = step.kind === "model" ? "the model did not answer" : "refused";
+    return { input: short(step.input, 160), output: `${what}: ${output.error}` };
   }
   const line = LINES[step.name];
   try {

@@ -1,6 +1,6 @@
 """Shared data contract between the rules engine, the MCP server, the agent and the API.
 
-Matches the API contract in the team's UI/UX plan. Any change here is announced to the team.
+The page mirrors these shapes in `web/src/types.ts`, so a change here changes that file too.
 Colours stay plain strings: the colour list and target times come from the rule pack.
 """
 
@@ -115,7 +115,7 @@ class NurseDecision(Contract):
 
 
 class AuditEntry(Contract):
-    """One logged tool call. The hash chain is added by the audit store (M4)."""
+    """One logged tool call. The hash chain is added by the audit store."""
 
     time: datetime
     tool: str = Field(min_length=1)

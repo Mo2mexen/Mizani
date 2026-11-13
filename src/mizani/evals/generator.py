@@ -1,4 +1,4 @@
-"""Synthetic messy patients (E1): deterministic variants of the hand-written eval tasks.
+"""Synthetic messy patients: deterministic variants of the hand-written eval tasks.
 
 Each variant adds one kind of mess a busy desk produces and adjusts the expected outcome by the
 SATS rule involved, so the expectation is still worked out by hand, never by running Mizani:
@@ -111,6 +111,6 @@ def messy_variants(cases: list[dict], seed: int = 22) -> list[dict]:
         case.pop("complaint_ar", None)
         case["id"] = f"{base['id']}~{mess}"
         case["category"] = f"messy input ({mess})"
-        case["source"] = f"E1 variant of {base['id']}: {WHY[mess]}. Base: {base['source']}"
+        case["source"] = f"Messy variant of {base['id']}: {WHY[mess]}. Base: {base['source']}"
         variants.append(case)
     return variants

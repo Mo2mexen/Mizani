@@ -138,6 +138,13 @@ class Assessment(BaseModel):
     colour: str
 
 
+class CalledIn(BaseModel):
+    triage_id: str
+    approver: str
+    called_in_at: str
+    waited_minutes: float
+
+
 class Committed(BaseModel):
     triage_id: str
     colour: str
@@ -180,6 +187,7 @@ def propose_priority(
     vitals: Vitals,
     discriminators: Signs,
     retriage_of: str | None = None,
+    withdrawn: Signs | None = None,
 ) -> Proposal:
     """Score the patient and create a PENDING triage for the nurse to approve or override.
     The colour is the higher of the TEWS colour and the colour of any chart discriminator that
@@ -187,14 +195,24 @@ def propose_priority(
     alone carries a `confirm_sign` flag for the nurse.
     To re-score a waiting patient with fresh vitals, pass their current triage id as
     `retriage_of`: the new proposal is pending too, and replaces the old entry only once a nurse
-    commits it."""
+    commits it.
+    `withdrawn` lists signs the agent named and then took back after seeing the checks. They
+    set nothing; one that would have counted is shown to the nurse as a `sign_withdrawn` flag.
+    An emergency (red) sign cannot be taken back: it still counts, for the nurse to confirm or
+    override."""
     previous = None
     if retriage_of is not None:
         previous = store.get(db(), retriage_of)
-        if previous is None or previous["status"] != "committed" or previous["superseded_by"]:
+        waiting = (
+            previous is not None
+            and previous["status"] == "committed"
+            and not previous["superseded_by"]
+            and not previous["called_in_at"]
+        )
+        if not waiting:
             raise ToolError("retriage_of must be a committed triage still in the queue")
     triage_id = uuid.uuid4().hex[:12]
-    proposal = engine.propose(triage_id, vitals, discriminators, PACK, complaint)
+    proposal = engine.propose(triage_id, vitals, discriminators, PACK, complaint, withdrawn)
     if previous is not None:
         change = (
             f"colour changed from {previous['colour']} to {proposal.colour}"
@@ -270,6 +288,19 @@ def release_handover(triage_id: str, draft_id: int, approval_token: str) -> Hand
         return HandoverReleased(**store.release_handover(db(), triage_id, draft_id, approval))
     except ApprovalError as exc:
         raise ToolError(f"release refused: {exc}") from None
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
+def record_called_in(triage_id: str, approval_token: str) -> CalledIn:
+    """Record that a nurse called a waiting patient in to be seen. The patient leaves the waiting
+    queue and its re-check timer stops; the record stays. Refused unless a named nurse issued a
+    called-in approval token for this triage. Only a nurse does this: the agent never moves a
+    patient."""
+    try:
+        approval = verify_approval(approval_token, triage_id, purpose="called_in")
+        return CalledIn(**store.call_in(db(), triage_id, approval))
+    except ApprovalError as exc:
+        raise ToolError(f"not recorded: {exc}") from None
 
 
 @mcp.tool(annotations=ACTION)

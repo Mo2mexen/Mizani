@@ -2,6 +2,8 @@
 
 On Qwen3.5 4B (`qwen3.5:4b-q4_K_M`) running locally on a MacBook Air M4, 170 of 195 runs passed (87%): 39 tasks, five runs each. 34 tasks passed all five runs and 5 failed all five; no task changed its answer from one run to the next. One of the five is a failure we keep on purpose: a patient who falsely reports a fit. As text, that report is identical to a true one, so no model can catch it. Mizani proposes red, shows the sign with the patient's words, asks the nurse to confirm it, and saves nothing until a named nurse decides. The other four are the model naming the wrong chart sign while quoting real words from the complaint. The safety gates held in every run: no commit went through without a valid nurse approval, impossible vitals were never scored, missing vitals were never made up, hidden instructions in a complaint never set a sign, and the re-check timer fired only after the target time. The previous run, before the changes described below, passed 155 of 190 (82%). We evaluated only the 4B model, the one the project ships with.
 
+These results are from 23 Oct 2026 (commit `e536b07`). The agent has changed since: the prompt now states the server's limit of 20 signs, a model server that does not answer no longer stops the run, and an optional second look lets the model review its signs against the server's checks. The suite has not been re-run on the current code yet, so the numbers below describe the 23 Oct version.
+
 ## How we tested
 - **Tasks.** 23 synthetic patients written by hand (`evals/cases/core.yaml`) in thirteen categories, plus 16 messy variants made from them by a seeded generator: typos, vitals given only in the complaint as nurse shorthand, a temperature typed in °F, a blank vital, the complaint in Arabic. All patients, labels and numbers are made up.
 - **Expected outcomes.** Each task states its expected colour, TEWS total and chart signs, worked out by hand from the SATS adult chart [1], the SATS training manual [2] and the TEWS colour bands in [3], with the rule behind each value. A unit test computes the hand-worked colour and TEWS with the rules engine for the 22 tasks whose vitals are on the form; all 22 agree. A variant's expectation changes only by the rule its mess touches (a temperature typed in °F scored 0 before, so TEWS stays the same and a re-measure flag is added).
@@ -11,7 +13,7 @@ On Qwen3.5 4B (`qwen3.5:4b-q4_K_M`) running locally on a MacBook Air M4, 170 of 
 - **Setup.** `qwen3.5:4b-q4_K_M` through Ollama 0.40.0 (native, Metal GPU), 8,192-token context, thinking off, temperature 0. MacBook Air M4, 16 GB, nothing else running. Code at commit `e536b07`, 23 Oct 2026. Raw results: `evals/results/2026-10-22-2258-qwen3.5-4b-q4_K_M.json` (file times are UTC). The previous run: `evals/results/2026-10-22-1652-qwen3.5-4b-q4_K_M.json`.
 - **A bug in our own check.** A first run of these changes (`evals/results/2026-10-22-2017-qwen3.5-4b-q4_K_M.json`, 165/195) failed `missing-vitals-01` on "temperature not made up". The model had sent the missing temperature as `null`, which means not measured, and the check counted any key as a made-up value. The check now tests the value, the agent drops nulls, and the run above repeats the whole suite.
 
-Reproduce with `uv run mizani-evals --runs 5 --machine "<your machine>"` (details in [docs/systems/evals.md](docs/systems/evals.md)).
+Reproduce with `uv run mizani-evals --runs 5 --machine "<your machine>"` (details in [docs/systems/evals.md](systems/evals.md)).
 
 ## Results by category
 
@@ -30,7 +32,7 @@ Reproduce with `uv run mizani-evals --runs 5 --machine "<your machine>"` (detail
 | Re-triage timing | 1 | 1 | 5/5 |
 | Re-measure loop | 1 | 1 | 5/5 |
 | False claim of a chart sign (kept as a failure) | 1 | 0 | 0/5 |
-| Messy variants (E1) | 16 | 13 | 65/80 |
+| Messy variants | 16 | 13 | 65/80 |
 | **All** | **39** | **34** | **170/195 (87%)** |
 
 ## Results by task ("Before" is the previous run, 155/190)

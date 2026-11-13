@@ -1,10 +1,12 @@
 """HTTP API for the nurse's web page: intake, the live agent trace, the nurse's decision, the
-queue, colours and the audit log. Shapes follow `schemas.py` and the team's API contract.
+queue, colours and the audit log. Shapes follow `schemas.py`; every endpoint is described in
+docs/systems/api.md.
 
 `POST /api/intake` starts one agent run and returns its id at once; the run's steps arrive on
 `GET /api/triage/{id}/stream` (server-sent events). The run pauses at the nurse. Only
 `POST /api/triage/{id}/decision` turns a named nurse's decision into an approval token, and the
-token goes straight to the agent's commit step: the model never sees it.
+token goes straight to the agent's commit step: the model never sees it. Releasing a handover
+and recording that a patient was called in work the same way.
 """
 
 import asyncio
@@ -79,7 +81,9 @@ class Decision(NurseDecision):
     triage_id: str = Field(min_length=1)
 
 
-class Release(Contract):
+class NurseName(Contract):
+    """The named nurse behind an action on a waiting patient."""
+
     nurse_name: str = Field(min_length=1)
 
 
@@ -136,7 +140,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         async with AsyncExitStack() as stack:
-            db_path().parent.mkdir(parents=True, exist_ok=True)  # a fresh clone has no data/
+            db_path().parent.mkdir(parents=True, exist_ok=True)  # a fresh clone has no .cache/
             saver = checkpointer or await stack.enter_async_context(
                 AsyncSqliteSaver.from_conn_string(str(db_path().with_name("checkpoints.db")))
             )
@@ -149,7 +153,12 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             url = fhir_url()
             write_fhir = (lambda tid: write_committed(tid, url, mcp_server)) if url else None
             ctx["graph"] = build_graph(
-                ctx["llm"], tools, rules["discriminators"], saver, write_fhir
+                ctx["llm"],
+                tools,
+                rules["discriminators"],
+                saver,
+                write_fhir,
+                second_look=os.environ.get("MIZANI_SECOND_LOOK") == "1",
             )
             watcher = asyncio.create_task(watch({t.name: t for t in tools}, mcp_server))
             try:
@@ -321,7 +330,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
 
     @app.post("/api/queue/{triage_id}/handover", status_code=201)
     async def draft_handover(triage_id: str) -> dict:
-        """The model drafts the first two lines of the doctor handover from the record (W2); the
+        """The model drafts the first two lines of the doctor handover from the record; the
         third, the waiting time, comes from the queue, never from the model. The server refuses a
         draft with a number that is not in the record. It stays unreleased until a nurse reads it
         and releases it."""
@@ -361,7 +370,15 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             ),
         ]
         for attempt in range(2):  # one retry, told why the first draft was refused
-            call = await call_model(ctx["llm"], messages)
+            try:
+                call = await call_model(ctx["llm"], messages)
+            except Exception as exc:  # the model server is down or timed out
+                log.warning("handover draft for %s: the model did not answer: %s", triage_id, exc)
+                raise HTTPException(
+                    503,
+                    "The model did not answer, so there is no draft. Try again, or write the "
+                    "handover yourself.",
+                ) from None
             lines = _two_lines(str(call.message.content))
             text = "\n".join([*lines, waited])
             try:
@@ -379,7 +396,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
                 messages += [call.message, HumanMessage(f"Refused: {refused.detail}. Try again.")]
 
     @app.post("/api/queue/{triage_id}/handover/{draft_id}/release")
-    async def release_handover(triage_id: str, draft_id: int, body: Release) -> dict:
+    async def release_handover(triage_id: str, draft_id: int, body: NurseName) -> dict:
         """A named nurse releases the draft she read. The token names that draft and goes
         straight to the server; the model never sees it."""
         decision = NurseDecision(nurse_name=body.nurse_name, action="approve")
@@ -387,9 +404,19 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         args = {"triage_id": triage_id, "draft_id": draft_id, "approval_token": token}
         return await call_tool("release_handover", args)
 
+    @app.post("/api/queue/{triage_id}/called-in")
+    async def called_in(triage_id: str, body: NurseName) -> dict:
+        """A named nurse records that she called the patient in to be seen. The card leaves the
+        waiting room and the record stays. Only a nurse does this, never the agent; the server
+        refuses it without her token."""
+        decision = NurseDecision(nurse_name=body.nurse_name, action="approve")
+        token = issue_approval(triage_id, decision, purpose="called_in")
+        args = {"triage_id": triage_id, "approval_token": token}
+        return await call_tool("record_called_in", args)
+
     @app.post("/api/triage/{run_id}/assessment", status_code=201)
     async def assessment(run_id: str, body: Assessment) -> dict:
-        """Shadow mode (W3): the nurse's own colour, sent before the page shows Mizani's."""
+        """Shadow mode: the nurse's own colour, sent before the page shows Mizani's."""
         run = await get_run(run_id)
         proposal = await paused_proposal(run, run_id)
         args = {"triage_id": proposal["triage_id"], **body.model_dump()}
@@ -408,7 +435,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
 
     @app.get("/api/queue")
     async def queue() -> list[dict]:
-        # `recheck_due` / `recheck_raised` come from the re-triage watch on the MCP server (W1).
+        # `recheck_due` / `recheck_raised` come from the re-triage watch on the MCP server.
         return await read_json("queue://current", mcp_server)
 
     @app.get("/api/audit")

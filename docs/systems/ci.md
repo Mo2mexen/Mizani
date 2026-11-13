@@ -21,7 +21,7 @@ cd web && npm ci && npm run build
 
 ## Known limitations
 - Tests never call the language model; model behaviour is covered by the eval runner, not CI.
-- CI checks the compose file but does not start the containers.
+- CI checks the compose file but does not start the containers, so the live-stack test (`tests/test_stack.py`) skips itself there. Run it by hand with the containers up after changing `docker-compose.yml` or `src/mizani/fhir.py` (README, "Develop and test"). A CI job that starts the three containers would add 5 to 10 minutes to every push.
 
 ## Extending it
 Add a step to `ci.yml` and the same command to the list above.

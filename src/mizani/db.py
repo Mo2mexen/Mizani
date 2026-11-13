@@ -19,9 +19,11 @@ CREATE TABLE IF NOT EXISTS triage (
     decision TEXT,                    -- JSON: action, colour, reason
     committed_at TEXT,
     run_id TEXT,                      -- the agent run that proposed it (_meta.run_id)
-    retriage_of TEXT,                 -- re-score of this earlier triage (W1)
+    retriage_of TEXT,                 -- re-score of this earlier triage
     superseded_by TEXT,               -- set when a committed re-triage replaces this one
-    recheck_raised_at TEXT            -- last raise_recheck_flag for this triage
+    recheck_raised_at TEXT,           -- last raise_recheck_flag for this triage
+    called_in_at TEXT,                -- a nurse called the patient in: off the waiting list
+    called_in_by TEXT
 );
 CREATE TABLE IF NOT EXISTS used_token (nonce TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS handover (
@@ -57,11 +59,13 @@ ADDED_COLUMNS = [
     ("triage", "retriage_of"),
     ("triage", "superseded_by"),
     ("triage", "recheck_raised_at"),
+    ("triage", "called_in_at"),
+    ("triage", "called_in_by"),
 ]
 
 
 def db_path() -> Path:
-    return Path(os.environ.get("MIZANI_DB", "data/mizani.db"))
+    return Path(os.environ.get("MIZANI_DB", ".cache/data/mizani.db"))
 
 
 _schema_lock = threading.Lock()
@@ -86,9 +90,9 @@ def _connect(path: str) -> sqlite3.Connection:
 
 
 def db() -> sqlite3.Connection:
-    """This thread's connection to the configured file (`MIZANI_DB`, default `data/mizani.db`).
-    The server runs tools in worker threads; one connection per thread keeps each
-    transaction to itself, and SQLite's locking orders the writers."""
+    """This thread's connection to the configured file (`MIZANI_DB`; outside Docker the default
+    is `.cache/data/mizani.db`). The server runs tools in worker threads; one connection per
+    thread keeps each transaction to itself, and SQLite's locking orders the writers."""
     key = (threading.get_ident(), str(db_path()))
     con = _connections.get(key)
     if con is None:

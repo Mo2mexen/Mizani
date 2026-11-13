@@ -12,7 +12,7 @@ Mizani is a triage co-pilot for a hospital front desk. A nurse enters vitals and
    │            tools: validate_vitals · compute_tews · match_discriminators
    │                   propose_priority · commit_triage (needs approval token)
    │                   raise_recheck_flag · draft_handover · release_handover (needs token)
-   │                   record_nurse_assessment
+   │                   record_called_in (needs token) · record_nurse_assessment
    │            resources: rules://sats/adult · rules://sats/targets · queue://current
    │                       patient://{id}/timeline · report://shadow-agreement
    │            prompts: triage_intake · handover_summary
@@ -25,9 +25,9 @@ Mizani is a triage co-pilot for a hospital front desk. A nurse enters vitals and
 Diagram as an image: [architecture.png](architecture.png).
 
 ## Agent shape
-One agent, built as a LangGraph state graph. It extracts the inputs from the nurse's entry, validates the vitals (asking for a re-measure when one is missing or impossible), scores the patient, matches chart discriminators and proposes a colour. Then it stops and waits for the nurse. After her decision it commits and writes the FHIR record. LangGraph's SQLite checkpointer keeps each patient's run, so it resumes after the nurse decides. The agent is the MCP client for both servers over streamable HTTP, using the MCP Python SDK's own client wrapped as LangChain tools (`langchain-mcp-adapters` only supports MCP SDK 1.x); it tags every call with a run id so the audit log can show a patient's whole run, including the checks made before the triage existed. The model reads free text and plans tool calls. The colour comes from the rules engine. When the model and the rules disagree, the rules win and the case is flagged.
+One agent, built as a LangGraph state graph. It extracts the inputs from the nurse's entry, validates the vitals (asking for a re-measure when one is missing or impossible), scores the patient, matches chart discriminators and proposes a colour. Then it stops and waits for the nurse. After her decision it commits and writes the FHIR record. LangGraph's SQLite checkpointer keeps each patient's run, so it resumes after the nurse decides. The model reads free text and plans tool calls. The colour comes from the rules engine. When the model and the rules disagree, the rules win and the case is flagged. If the model server does not answer, the run goes on with the nurse's own vitals and says so. An optional second look (`MIZANI_SECOND_LOOK=1`, off by default until it is evaluated) shows the model what the server made of its signs and lets it correct or withdraw them once; a withdrawn sign is shown to the nurse, and an emergency sign cannot be withdrawn.
 
-The agent is the MCP client for both servers. It connects with the MCP Python SDK client, turns each server tool into a LangChain tool with the server's own schema, and sends the model name, tokens and cost of the model call that asked for a tool with that call, so the audit log records them. Details: [docs/systems/agent.md](systems/agent.md).
+The agent is the MCP client for both servers over streamable HTTP, using the MCP Python SDK's own client (`langchain-mcp-adapters` only supports MCP SDK 1.x). The tools of `mizani-triage` become LangChain tools with the server's own schemas, and the model fills in the arguments of two of them. Every call carries a run id, so the audit log can show a patient's whole run, including the checks made before the triage existed, and the model name, tokens and cost of the model call behind it. wso2's server is not offered to the model: writing the FHIR record is a fixed step after the nurse's commit, so the commit step calls it directly. Details: [docs/systems/agent.md](systems/agent.md).
 
 ## The MCP server we built: `mizani-triage`
 No existing MCP server encodes SATS, and we wanted the safety rules enforced by the server itself, so they hold whatever the agent or model does:
@@ -38,6 +38,7 @@ No existing MCP server encodes SATS, and we wanted the safety rules enforced by 
 - Complaints are stored as patient data. The intake prompt escapes them inside their own tags and tells the model to ignore any instructions they contain; text addressed to the software is shown to the nurse and never counts.
 - The agent only drafts the doctor handover, and `draft_handover` refuses a number that is not in the patient's record; the waiting time is written from the record, not by the model. The draft reaches the doctor when a nurse releases it with a token issued for that draft; a commit token can't release it, and a handover token can't commit.
 - The queue reports when a patient's SATS target time has passed. `raise_recheck_flag` alerts the nurse and is refused before the timer runs out. A re-score with fresh vitals is another pending proposal for the nurse to approve.
+- A patient leaves the waiting list only when a named nurse records that she called them in (`record_called_in`, with a token for that purpose). The agent never calls it, and the record stays.
 - The intake prompt lists every chart sign with the EMSSA manual's definition where it has one, asks for the complaint's words behind each sign, and forbids inferring a diagnosis (a twisted ankle is not a fracture).
 
 Details: [docs/systems/mcp-server.md](systems/mcp-server.md), [retriage-watch.md](systems/retriage-watch.md), [handover-and-shadow.md](systems/handover-and-shadow.md), [rules-engine.md](systems/rules-engine.md), [approval.md](systems/approval.md), [audit.md](systems/audit.md).
@@ -46,7 +47,7 @@ Details: [docs/systems/mcp-server.md](systems/mcp-server.md), [retriage-watch.md
 After a triage is committed, the agent writes Patient, Encounter and Observation resources to a local HAPI FHIR server through wso2's MCP server (pinned release 0.10.0): the Encounter has status `triaged` and the SATS colour as its priority, and the vital signs use the FHIR R4 LOINC codes. FHIR is how hospital record systems exchange data, and a maintained, tested FHIR MCP server (Apache-2.0) saves us writing and securing our own FHIR client. Only nurse-committed triages are written. Details: [docs/systems/fhir.md](systems/fhir.md).
 
 ## Models
-Default `qwen3.5:4b-q4_K_M` (fits a 4 GB GPU or a 16 GB Apple Silicon laptop). A larger Qwen3.5 model can be swapped in on a machine with more memory (not evaluated); speed and chart-sign accuracy depend on the model, while the rules, approval gate and audit do not. Any OpenAI-compatible endpoint works through `LLM_BASE_URL` and `LLM_MODEL`. Ollama runs with an 8k context and cloud features off.
+Default `qwen3.5:4b-q4_K_M` (fits a 4 GB GPU or a 16 GB Apple Silicon laptop). A larger Qwen3.5 model can be swapped in on a machine with more memory (not evaluated); speed and chart-sign accuracy depend on the model, while the rules, approval gate and audit do not. Any OpenAI-compatible endpoint works through `LLM_BASE_URL` and `LLM_MODEL`, with `LLM_API_KEY` for a server that checks keys. Ollama runs with an 8k context and cloud features off.
 
 ## Data
 Synthetic patients only. One local SQLite file holds triages, used tokens and the audit log; LangGraph checkpoints and FHIR data stay on the same machine. Nothing is sent to an outside service.
@@ -58,7 +59,7 @@ Synthetic patients only. One local SQLite file holds triages, used tokens and th
 | Part | State |
 |---|---|
 | SATS adult rule pack and engine | built, tested |
-| `mizani-triage` MCP server: 9 tools, 5 resources, 2 prompts, approval gate, audit chain; quoted chart signs, nurse-to-confirm for red from words alone, handover numbers checked against the record | built, tested through an MCP client |
+| `mizani-triage` MCP server: 10 tools, 5 resources, 2 prompts, approval gate, audit chain; quoted chart signs, nurse-to-confirm for red from words alone, handover numbers checked against the record | built, tested through an MCP client |
 | Model server in compose | built, tested with GPU |
 | LangGraph agent: extract, validate, score, discriminators, propose, wait for the nurse, commit; with retries, fallback and the re-measure loop | built, tested with a fake model and live with Qwen3.5 4B against `mizani-triage` |
 | FastAPI: intake, live agent steps (server-sent events), nurse decision to approval token, re-measure, re-triage, handover draft and release, shadow-mode assessment and report, queue, colours, audit | built, tested, run live |
@@ -66,4 +67,4 @@ Synthetic patients only. One local SQLite file holds triages, used tokens and th
 | wso2 fhir-mcp-server + HAPI FHIR: the agent's commit step turns a committed triage into a Patient, an Encounter and Observations | built, verified end to end, including a live run with a real model |
 | Re-triage watch (timers on the server; the agent's watch raises re-check flags every 30 s; re-triage endpoint re-scores fresh vitals for the nurse to approve) | built, tested, run live |
 | Handover (the model drafts, a nurse releases that exact draft), shadow mode (nurse's own colour, agreement report) | built, tested, run live |
-| Evaluations: 39 tasks × 5 runs, pass rate, run-to-run variation, latency, tokens, cost, and the failure kept on purpose (a patient's false claim of a sign) ([EVALS.md](../EVALS.md)) | run on Qwen3.5 4B: 170/195 runs pass (87%) |
+| Evaluations: 39 tasks × 5 runs, pass rate, run-to-run variation, latency, tokens, cost, and the failure kept on purpose (a patient's false claim of a sign) ([EVALS.md](EVALS.md)) | run on Qwen3.5 4B on 23 Oct: 170/195 runs pass (87%); a re-run on the current code is pending |

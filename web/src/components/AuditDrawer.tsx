@@ -18,20 +18,24 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
   const [shown, setShown] = useState(PAGE); // newest rows first, a page at a time
   const closeRef = useRef<HTMLButtonElement>(null);
 
-  async function load() {
+  function load() {
+    return Promise.all([api.audit(), api.verify(), api.shadow()])
+      .then(
+        ([audit, verify, agreement]) => {
+          setRows(audit);
+          setIsIntact(verify.intact);
+          setShadow(agreement);
+          setError(null);
+          setLoadedAt(new Date());
+        },
+        (err: unknown) => setError(err instanceof Error ? err.message : "Audit not loaded"),
+      )
+      .finally(() => setIsLoading(false));
+  }
+
+  function refresh() {
     setIsLoading(true);
-    try {
-      const [audit, verify, agreement] = await Promise.all([api.audit(), api.verify(), api.shadow()]);
-      setRows(audit);
-      setIsIntact(verify.intact);
-      setShadow(agreement);
-      setError(null);
-      setLoadedAt(new Date());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Audit not loaded");
-    } finally {
-      setIsLoading(false);
-    }
+    void load();
   }
 
   useEffect(() => {
@@ -65,7 +69,7 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
           </span>
         )}
         {loadedAt && <span className="count">updated {clock(loadedAt)}</span>}
-        <button type="button" className="btn btn-small" onClick={() => void load()} disabled={isLoading}>
+        <button type="button" className="btn btn-small" onClick={refresh} disabled={isLoading}>
           {isLoading ? "Refreshing…" : "Refresh"}
         </button>
         <button ref={closeRef} type="button" className="btn btn-small" onClick={onClose}>

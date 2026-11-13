@@ -1,4 +1,4 @@
-"""Eval runner (E3): every task N times against the real model, with pass rate, run-to-run
+"""Eval runner: every task N times against the real model, with pass rate, run-to-run
 variation, latency, tokens and cost per task.
 
 Each run gets a fresh database and uses the real `mizani-triage` server in-process (the same code
@@ -58,7 +58,9 @@ def proposal_of(result: dict) -> dict:
 
 
 def model_steps(result: dict) -> list[dict]:
-    return [s for s in result["trace"] if s["kind"] == "model" and s["name"] == "extract"]
+    """Every model call of the run: the first answer, its retries and the second look."""
+    asked = ("extract", "review")
+    return [s for s in result["trace"] if s["kind"] == "model" and s["name"] in asked]
 
 
 def triage_checks(expected: dict, result: dict, names: dict[str, str]) -> list[tuple[str, bool]]:
@@ -274,11 +276,15 @@ def summarise(case: dict, runs: list[dict]) -> dict:
     }
 
 
-async def run_suite(llm, cases: list[dict], runs: int, log=print) -> list[dict]:
+async def run_suite(
+    llm, cases: list[dict], runs: int, log=print, second_look: bool = False
+) -> list[dict]:
     tools = {t.name: t for t in await load_tools(mcp)}
     rules = await read_json("rules://sats/adult", mcp)
     names = {d["id"]: d["name"] for d in rules["discriminators"]}
-    graph = build_graph(llm, list(tools.values()), rules["discriminators"], InMemorySaver())
+    graph = build_graph(
+        llm, list(tools.values()), rules["discriminators"], InMemorySaver(), second_look=second_look
+    )
     summaries = []
     with tempfile.TemporaryDirectory() as folder:
         for case in cases:
@@ -314,8 +320,13 @@ def main() -> None:
     parser.add_argument("--cases", type=Path, default=Path("evals/cases"))
     parser.add_argument("--out", type=Path, default=Path("evals/results"))
     parser.add_argument("--only", nargs="*", help="task ids to run")
-    parser.add_argument("--no-messy", action="store_true", help="skip the E1 messy variants")
+    parser.add_argument("--no-messy", action="store_true", help="skip the messy variants")
     parser.add_argument("--machine", default=platform.platform())
+    parser.add_argument(
+        "--second-look",
+        action="store_true",
+        help="let the model review its signs against the server's checks (MIZANI_SECOND_LOOK)",
+    )
     args = parser.parse_args()
 
     os.environ.setdefault("MIZANI_APPROVAL_SECRET", uuid.uuid4().hex)  # this process only
@@ -326,24 +337,27 @@ def main() -> None:
         cases = [c for c in cases if c["id"] in args.only]
     llm = chat_model()
     started = datetime.now(UTC)
-    summaries = asyncio.run(run_suite(llm, cases, args.runs))
+    summaries = asyncio.run(run_suite(llm, cases, args.runs, second_look=args.second_look))
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
     report = {
         "model": llm.model_name,
         "endpoint": llm.openai_api_base,
         "machine": args.machine,
+        "second_look": args.second_look,
         "commit": commit.stdout.strip(),
         "started": started.isoformat(),
         "runs_per_task": args.runs,
         "tasks": summaries,
     }
     args.out.mkdir(parents=True, exist_ok=True)
-    name = f"{started:%Y-%m-%d-%H%M}-{llm.model_name.replace(':', '-')}.json"
+    look = "-second-look" if args.second_look else ""
+    name = f"{started:%Y-%m-%d-%H%M}-{llm.model_name.replace(':', '-')}{look}.json"
     (args.out / name).write_text(
         json.dumps(report, indent=1, ensure_ascii=False, default=str), encoding="utf-8"
     )
     print(markdown(summaries))
-    print(f"\nModel {llm.model_name} on {args.machine}; results in {args.out / name}")
+    setting = "second look on" if args.second_look else "second look off"
+    print(f"\nModel {llm.model_name} on {args.machine}, {setting}; results in {args.out / name}")
 
 
 if __name__ == "__main__":

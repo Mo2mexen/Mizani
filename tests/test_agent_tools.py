@@ -61,7 +61,7 @@ async def test_call_returns_the_structured_result_and_logs_meta():
 
 
 async def test_vitals_sent_as_a_json_string_still_work():
-    # qwen3.5:4b sends nested arguments as a JSON string (NOTES §6b); the server parses them.
+    # qwen3.5:4b sends nested arguments as a JSON string; the server parses them.
     message = await (await tools())["validate_vitals"].ainvoke(
         tool_call("validate_vitals", {"vitals": json.dumps(VITALS)})
     )

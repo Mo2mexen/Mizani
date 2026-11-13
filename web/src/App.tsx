@@ -60,13 +60,14 @@ export function App() {
     requestAnimationFrame(() => document.getElementById("patient-label")?.focus());
   }
 
-  async function refreshQueue() {
-    try {
-      setQueue(await api.queue());
-      setOffline(null);
-    } catch (err) {
-      setOffline(err instanceof Error ? err.message : "API not reachable");
-    }
+  function refreshQueue() {
+    return api.queue().then(
+      (rows) => {
+        setQueue(rows);
+        setOffline(null);
+      },
+      (err: unknown) => setOffline(err instanceof Error ? err.message : "API not reachable"),
+    );
   }
 
   // Colours come once, but keep asking until the API answers (it may still be starting).
@@ -141,6 +142,7 @@ export function App() {
         colours={colours}
         queue={queue}
         onRetriage={(id) => openRun(id, null)}
+        onCalledIn={() => void refreshQueue()}
       />
       <TracePanel run={run} isMasked={isMasked} />
       <AuditDrawer isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />

@@ -1,4 +1,5 @@
-"""Model client: any OpenAI-compatible endpoint, chosen by `LLM_BASE_URL` and `LLM_MODEL`.
+"""Model client: any OpenAI-compatible endpoint, chosen by `LLM_BASE_URL` and `LLM_MODEL`
+(and `LLM_API_KEY` when the server checks keys).
 
 Thinking is off on every request and temperature is 0, so calls are fast and repeatable. Each
 call reports the model, tokens and latency; they go into the audit log with the tool calls the
@@ -24,7 +25,9 @@ def chat_model() -> ChatOpenAI:
     return ChatOpenAI(
         base_url=os.environ.get("LLM_BASE_URL", DEFAULT_BASE_URL),
         model=os.environ.get("LLM_MODEL", DEFAULT_MODEL),
-        api_key="local",  # Ollama ignores it; the client refuses to start without one
+        # Ollama ignores the key, but the client refuses to start without one. A model server
+        # that checks keys (vLLM, llama.cpp with --api-key) gets it from LLM_API_KEY.
+        api_key=os.environ.get("LLM_API_KEY") or "local",
         temperature=0,
         # Thinking off (checked on Ollama's /v1). Servers that reject the field: set it empty.
         reasoning_effort=os.environ.get("LLM_REASONING_EFFORT", "none") or None,

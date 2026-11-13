@@ -10,10 +10,12 @@ type Props = {
   /** null until the API has answered once */
   queue: QueueEntry[] | null;
   onRetriage: (runId: string) => void;
+  /** a nurse recorded that a patient was called in: reload the queue */
+  onCalledIn: () => void;
 };
 
 /** One column per colour, cards in the order the API sends. The UI never reorders anything. */
-export function QueueBoard({ colours, queue, onRetriage }: Props) {
+export function QueueBoard({ colours, queue, onRetriage, onCalledIn }: Props) {
   const [search, setSearch] = useState("");
   const isLoading = queue === null || colours.length === 0;
   // Search only hides cards that don't match the label; the order is still the API's.
@@ -65,7 +67,7 @@ export function QueueBoard({ colours, queue, onRetriage }: Props) {
                 </p>
                 <div className="queue-cards">
                   {entries.map((e) => (
-                    <Card key={e.triage_id} entry={e} onRetriage={onRetriage} />
+                    <Card key={e.triage_id} entry={e} onRetriage={onRetriage} onCalledIn={onCalledIn} />
                   ))}
                 </div>
               </div>
@@ -77,10 +79,13 @@ export function QueueBoard({ colours, queue, onRetriage }: Props) {
   );
 }
 
-function Card({ entry, onRetriage }: { entry: QueueEntry; onRetriage: (runId: string) => void }) {
-  const [panel, setPanel] = useState<"none" | "details" | "recheck" | "handover">("none");
+type Panel = "details" | "recheck" | "handover" | "calledin";
+type CardProps = { entry: QueueEntry; onRetriage: (runId: string) => void; onCalledIn: () => void };
+
+function Card({ entry, onRetriage, onCalledIn }: CardProps) {
+  const [panel, setPanel] = useState<Panel | "none">("none");
   const isOver = entry.minutes_since_triage > entry.target_minutes;
-  const toggle = (next: "details" | "recheck" | "handover") => setPanel(panel === next ? "none" : next);
+  const toggle = (next: Panel) => setPanel(panel === next ? "none" : next);
   return (
     <article className={`card${entry.recheck_due ? " card-due" : ""}`} aria-label={entry.patient_label}>
       <header className="card-head">
@@ -103,10 +108,14 @@ function Card({ entry, onRetriage }: { entry: QueueEntry; onRetriage: (runId: st
         <button type="button" className="btn btn-small" aria-expanded={panel === "handover"} onClick={() => toggle("handover")}>
           Handover
         </button>
+        <button type="button" className="btn btn-small" aria-expanded={panel === "calledin"} onClick={() => toggle("calledin")}>
+          Called in
+        </button>
       </div>
       {panel === "details" && <Details entry={entry} />}
       {panel === "recheck" && <Recheck entry={entry} onRetriage={onRetriage} />}
       {panel === "handover" && <Handover entry={entry} />}
+      {panel === "calledin" && <CalledIn entry={entry} onDone={onCalledIn} />}
     </article>
   );
 }
@@ -328,5 +337,60 @@ function Handover({ entry }: { entry: QueueEntry }) {
         </p>
       )}
     </div>
+  );
+}
+
+/** The nurse records that she called the patient in. Only a named nurse does this; the server
+ *  refuses it otherwise. The card leaves the waiting room when the queue reloads. */
+function CalledIn({ entry, onDone }: { entry: QueueEntry; onDone: () => void }) {
+  const [nurse, setNurse] = useState("");
+  const [savedBy, setSavedBy] = useState<string | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const nameId = `called-in-name-${entry.triage_id}`;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!nurse.trim() || isBusy) return;
+    setIsBusy(true);
+    setError(null);
+    try {
+      const saved = await api.calledIn(entry.triage_id, nurse.trim());
+      setSavedBy(saved.approver);
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Not saved");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  if (savedBy) {
+    return (
+      <div className="card-panel" aria-live="polite">
+        <p className="ok">Called in, recorded by {savedBy}</p>
+      </div>
+    );
+  }
+  return (
+    <form className="card-panel" onSubmit={handleSubmit} aria-label={`Called in: ${entry.patient_label}`}>
+      <p className="hint">
+        The patient has gone in to be seen. The card leaves the waiting room; the record and the audit log stay.
+      </p>
+      <div className="decision-row">
+        <label className="visually-hidden" htmlFor={nameId}>
+          Your name
+        </label>
+        <input id={nameId} dir="auto" placeholder="your name" value={nurse} onChange={(e) => setNurse(e.target.value)} />
+        <button type="submit" className="btn btn-primary" disabled={!nurse.trim() || isBusy}>
+          {isBusy ? "Saving…" : "Record called in"}
+        </button>
+      </div>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+    </form>
   );
 }
