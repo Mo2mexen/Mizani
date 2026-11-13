@@ -106,8 +106,14 @@ export function traceLine(step: TraceStep): Line {
   const output = step.output as { error?: string } | null;
   if (output && typeof output === "object" && "error" in output && output.error) {
     // A tool refuses; a model call fails (server down, timed out) and the run goes on without it.
-    const what = step.kind === "model" ? "the model did not answer" : "refused";
-    return { input: short(step.input, 160), output: `${what}: ${output.error}` };
+    if (step.kind !== "model") return { input: short(step.input, 160), output: `refused: ${output.error}` };
+    let input = short(step.input, 160);
+    try {
+      input = LINES[step.name]?.(step.input, null).input ?? input;
+    } catch {
+      // an unexpected shape keeps the raw input
+    }
+    return { input, output: `the model did not answer: ${output.error}` };
   }
   const line = LINES[step.name];
   try {

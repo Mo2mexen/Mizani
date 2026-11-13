@@ -186,6 +186,7 @@ async def test_after_three_failed_tries_the_nurse_vitals_are_used_and_the_trace_
     assert result["vitals"] == NORMAL
     assert any(s["name"] == "fallback" for s in result["trace"])
     assert waiting(result)["proposal"]["colour"] == "green"
+    assert "signs_not_checked" in [f["kind"] for f in waiting(result)["proposal"]["flags"]]
     # The three rejected answers still cost tokens; the audit log keeps all of them.
     assert sum(r["tokens"] for r in audit.entries(db())) == MAX_ATTEMPTS * USAGE["total_tokens"]
 
@@ -333,11 +334,14 @@ async def test_a_model_that_does_not_answer_falls_back_to_the_nurse_vitals_at_on
     assert "error" in failed["output"]
     assert fallback["output"]["warning"].startswith("The model did not answer")
     assert result["signs"] == [] and waiting(result)["proposal"]["colour"] == "green"
+    # The proposal itself tells the nurse the complaint was never checked against the chart.
+    assert "signs_not_checked" in [f["kind"] for f in waiting(result)["proposal"]["flags"]]
 
 
 async def test_the_second_look_is_off_unless_asked_for():
     _, _, result = await start([reply(ids=["chest_pain"])])
     assert model_calls(result) == ["extract"]
+    assert "signs_not_checked" not in [f["kind"] for f in waiting(result)["proposal"]["flags"]]
     assert waiting(result)["proposal"]["colour"] == "orange"
 
 

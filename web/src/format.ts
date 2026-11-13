@@ -24,6 +24,7 @@ export const FLAG_LABELS: Record<FlagKind, string> = {
   ignored_instruction: "Instruction in the complaint, ignored",
   confirm_sign: "Nurse to confirm",
   sign_withdrawn: "Withdrawn by the model, not applied",
+  signs_not_checked: "Chart signs not checked",
   retriage: "Re-triage",
   recheck_due: "Re-check due",
 };

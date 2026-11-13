@@ -199,7 +199,13 @@ function Details({ entry }: { entry: QueueEntry }) {
         <p className="hint">Not measured: {missing.map((k) => FIELD_LABELS[k] ?? k).join(", ")}.</p>
       )}
       <h4 className="details-title">Chart signs</h4>
-      {record.proposal.discriminators.length === 0 && <p className="empty">None; the vitals set the colour.</p>}
+      {record.proposal.discriminators.length === 0 && (
+        <p className="empty">
+          {record.proposal.flags.some((f) => f.kind === "signs_not_checked")
+            ? "Not checked by the model; the colour came from the vitals alone."
+            : "None; the vitals set the colour."}
+        </p>
+      )}
       <ul className="signs">
         {record.proposal.discriminators.map((d) => (
           <li key={d.name}>

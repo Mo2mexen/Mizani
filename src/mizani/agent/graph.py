@@ -405,6 +405,8 @@ def build_graph(
             args["retriage_of"] = state["retriage_of"]
         if state.get("withdrawn"):
             args["withdrawn"] = state["withdrawn"]
+        if state.get("fell_back"):  # the nurse must know the complaint was never checked
+            args["signs_checked"] = False
         proposal, error, update = await run_tool("propose_priority", args, state, config)
         if error:  # e.g. the patient was re-triaged meanwhile; the run stops with the reason
             raise RuntimeError(f"propose_priority refused: {error}")

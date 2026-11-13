@@ -19,7 +19,7 @@ The five SATS steps (training manual p6), minus the ones a person does:
    - its quote sits in, or the sign is named in, text addressed to the software (`ignored_instruction`): a sentence with a note to the AI or system, "ignore the rules", an order to mark a colour or priority, or a chart or tool id in snake_case. Such text also gets one `ignored_instruction` flag that quotes it, so the nurse sees the attempt.
 4. `investigations`: the chart's additional investigations as reminders (check SpO2 when RR scores, glucose when not alert, ketones when glucose ≥ 11, ECG for chest pain). They never add points.
 5. `propose`: colour = the higher of the TEWS colour (0 to 2 green, 3 to 4 yellow, 5 to 6 orange, 7 or more red) and any discriminator colour. Missing vitals add an `incomplete` flag, since the colour can only go up once they are measured. When the colour is red only because of a sign taken from the complaint (the TEWS colour is lower and no measured input proves a red sign), a `confirm_sign` flag asks the nurse to check that sign with the patient before approving: words can be false or planted, and no rule can tell. The proposal is always `pending`.
-   A sign the agent named and then took back on its second look (`withdrawn`) sets nothing. If it would have counted (on the chart, in the complaint, not ruled out by a measurement), the proposal carries a `sign_withdrawn` flag so the nurse can check it. The exception is an emergency (red) sign: the model cannot take that back, so it still counts and its `confirm_sign` message says the model doubted it. When no vital was measured, the `confirm_sign` message says so instead of naming a colour from the vitals.
+   A sign the agent named and then took back on its second look (`withdrawn`) sets nothing. If it would have counted (on the chart, in the complaint, not ruled out by a measurement), the proposal carries a `sign_withdrawn` flag so the nurse can check it. The exception is an emergency (red) sign: the model cannot take that back, so it still counts and its `confirm_sign` message says the model doubted it. When no vital was measured, the `confirm_sign` message says so instead of naming a colour from the vitals. With `signs_checked=False` (the agent got no chart signs from the model) the proposal carries a `signs_not_checked` flag asking the nurse to check the complaint against the chart by hand.
 
 ## Interfaces
 | Name | Input | Output | Side effects |
@@ -29,7 +29,7 @@ The five SATS steps (training manual p6), minus the ones a person does:
 | `compute_tews` | `Vitals`, pack | `Tews` | none |
 | `match_discriminators` | `SignClaim`s (`{id, quote}`), `Vitals`, pack, complaint | matched rules, `Discriminator`s (with `quote` when from the complaint), flags | none |
 | `instructions` | complaint | the sentences addressed to the software | none |
-| `propose` | triage id, `Vitals`, `SignClaim`s, pack, complaint, optional withdrawn `SignClaim`s | pending `Proposal` with a sourced reason in `source` | none |
+| `propose` | triage id, `Vitals`, `SignClaim`s, pack, complaint, optional withdrawn `SignClaim`s, `signs_checked` | pending `Proposal` with a sourced reason in `source` | none |
 
 ## Depends on / used by
 - Depends on: `schemas.py`, `pydantic`, `pyyaml`.

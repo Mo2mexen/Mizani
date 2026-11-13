@@ -188,6 +188,7 @@ def propose_priority(
     discriminators: Signs,
     retriage_of: str | None = None,
     withdrawn: Signs | None = None,
+    signs_checked: bool = True,
 ) -> Proposal:
     """Score the patient and create a PENDING triage for the nurse to approve or override.
     The colour is the higher of the TEWS colour and the colour of any chart discriminator that
@@ -199,7 +200,10 @@ def propose_priority(
     `withdrawn` lists signs the agent named and then took back after seeing the checks. They
     set nothing; one that would have counted is shown to the nurse as a `sign_withdrawn` flag.
     An emergency (red) sign cannot be taken back: it still counts, for the nurse to confirm or
-    override."""
+    override.
+    Pass `signs_checked=False` when no chart signs could be read from the complaint (the model
+    did not answer, or gave no usable answer): the proposal then carries a `signs_not_checked`
+    flag telling the nurse to check the complaint against the chart by hand."""
     previous = None
     if retriage_of is not None:
         previous = store.get(db(), retriage_of)
@@ -212,7 +216,9 @@ def propose_priority(
         if not waiting:
             raise ToolError("retriage_of must be a committed triage still in the queue")
     triage_id = uuid.uuid4().hex[:12]
-    proposal = engine.propose(triage_id, vitals, discriminators, PACK, complaint, withdrawn)
+    proposal = engine.propose(
+        triage_id, vitals, discriminators, PACK, complaint, withdrawn, signs_checked
+    )
     if previous is not None:
         change = (
             f"colour changed from {previous['colour']} to {proposal.colour}"
