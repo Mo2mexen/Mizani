@@ -63,7 +63,7 @@ curl -X POST localhost:8090/api/triage/<id>/decision -H 'content-type: applicati
 Or open `http://127.0.0.1:8090/docs`. Both processes must use the same `MIZANI_DB` and `MIZANI_APPROVAL_SECRET`.
 
 ### Full walk-through on the compose stack
-After `docker compose up` (add `-f docker-compose.gpu.yml` on an NVIDIA machine), one patient from intake to being called in. Bash shown; on Windows use Git Bash, or the same calls from the `/docs` page.
+After `docker compose up` (with the GPU file on an NVIDIA machine, see compose.md), one patient from intake to being called in. Bash shown; on Windows use Git Bash, or the same calls from the `/docs` page.
 ```
 # 1. Intake: returns the run id
 curl -s -X POST localhost:8090/api/intake -H 'content-type: application/json' -d '{"patient_label":"Test Patient 01","complaint":"Fell from the roof of a two-storey house 20 minutes ago, back pain.","vitals":{"respiratory_rate":18,"heart_rate":100,"systolic_bp":135,"temperature":36.6,"avpu":"alert","mobility":"stretcher","trauma":true}}'

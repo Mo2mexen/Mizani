@@ -2,6 +2,8 @@
 # pinned to an exact version, so a clone builds the same image later.
 # Used by the mizani-mcp service and, with `command: ["mizani-api"]`, by the app service,
 # which also serves the nurse's page built in the first stage.
+# Built from the repo root (`context: .` in docker-compose.yml), so every COPY path starts there.
+# Dockerfile.dockerignore, next to this file, lists what is left out of the build.
 
 # 1. The nurse's page (web/): a static build, served by the API.
 FROM node:22.23.4-slim AS web

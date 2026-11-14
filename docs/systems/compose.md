@@ -4,7 +4,8 @@
 
 ## Where it lives
 - `docker-compose.yml`: the services.
-- `docker-compose.gpu.yml`: optional NVIDIA GPU override.
+- `docker/docker-compose.gpu.yml`: optional NVIDIA GPU override.
+- `docker/Dockerfile`: the one image built from this repo, and `docker/Dockerfile.dockerignore`, the list of what is left out of the build. The build context is still the repo root.
 - `.env.example`: settings you can change by copying it to `.env`.
 
 ## How it works
@@ -42,14 +43,15 @@ Data survives `docker compose down` and `up`: the waiting room, audit log and ch
 
 ## Running and testing it alone
 ```
-docker compose up                                                   # CPU, any machine
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up   # NVIDIA GPU
+docker compose up                                                          # CPU, any machine
+docker compose -f docker-compose.yml -f docker/docker-compose.gpu.yml up   # NVIDIA GPU
 ```
 To use an Ollama installed on the machine instead, set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`.
 
 ## Known limitations
 - Docker on macOS has no GPU access, so on a Mac the model runs on CPU inside Docker, measured at 4 to 5 times slower than native Ollama on an M4. On a Mac, run Ollama natively and set `LLM_BASE_URL=http://host.docker.internal:11434/v1`.
 - The GPU override needs the NVIDIA driver with WSL 2 (Windows) or the NVIDIA container toolkit (Linux).
+- `docker-compose.yml` and `.env.example` stay in the repo root, because `docker compose up` looks for them there. The ignore file sits next to the Dockerfile as `Dockerfile.dockerignore`, which needs BuildKit (the default builder in Docker Desktop and in Docker Engine 23 or newer).
 
 ## Extending it
-A new service goes in `docker-compose.yml`. The services built from this repo share one `Dockerfile` and differ by command: `mizani-mcp` is the image's default, and `app` runs `mizani-api`. Any new setting goes in `.env.example` with a working default in the compose file.
+A new service goes in `docker-compose.yml`. The services built from this repo share one image (`docker/Dockerfile`) and differ by command: `mizani-mcp` is the image's default, and `app` runs `mizani-api`. Any new setting goes in `.env.example` with a working default in the compose file.

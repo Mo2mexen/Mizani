@@ -106,7 +106,7 @@ The adult SATS pack encodes the 7 TEWS vitals with their scoring bands, the 4 co
 
 **What you need.** Docker: Docker Desktop on Windows (with WSL 2) or macOS, Docker Engine with the Compose plugin on Linux. Give Docker at least 8 GB of memory: on our test machine the whole stack peaked at 5.5 GB while the model answered. About 16 GB of free disk for the images, the model and the data. Internet for the first start only. Ports 8090, 8000, 8001 and 18080 on 127.0.0.1 (each can be changed, see below).
 
-**Speed.** The rules, MCP tools and audit log take a few seconds per patient; the rest is the model. Measured on a MacBook Air M4 (16 GB): 1 to 2 minutes per patient with the model inside Docker (Docker on macOS has no GPU access), 10 to 25 seconds with Ollama installed on the Mac, and about 10 seconds in the evaluation runs. The first patient after a start also loads the model; the page says so while it waits. On a Mac, for speed, install Ollama, run `ollama pull qwen3.5:4b-q4_K_M`, and put `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. On Windows or Linux with an NVIDIA GPU, add the GPU file: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up`. For better chart-sign choices, use a larger model on a stronger machine: set `LLM_MODEL` (and `LLM_BASE_URL` if it runs elsewhere) in `.env`; [docs/REMOTE_MODEL.md](docs/REMOTE_MODEL.md) shows how to use a GPU machine on your network. We evaluated only the 4B model; the safety checks do not depend on which model runs.
+**Speed.** The rules, MCP tools and audit log take a few seconds per patient; the rest is the model. Measured on a MacBook Air M4 (16 GB): 1 to 2 minutes per patient with the model inside Docker (Docker on macOS has no GPU access), 10 to 25 seconds with Ollama installed on the Mac, and about 10 seconds in the evaluation runs. The first patient after a start also loads the model; the page says so while it waits. On a Mac, for speed, install Ollama, run `ollama pull qwen3.5:4b-q4_K_M`, and put `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. On Windows or Linux with an NVIDIA GPU, add the GPU file: `docker compose -f docker-compose.yml -f docker/docker-compose.gpu.yml up`. For better chart-sign choices, use a larger model on a stronger machine: set `LLM_MODEL` (and `LLM_BASE_URL` if it runs elsewhere) in `.env`; [docs/REMOTE_MODEL.md](docs/REMOTE_MODEL.md) shows how to use a GPU machine on your network. We evaluated only the 4B model; the safety checks do not depend on which model runs.
 
 **macOS or Linux**
 ```
@@ -133,6 +133,19 @@ Then open **http://127.0.0.1:8090** once the log shows `Uvicorn running on http:
 - **A port is taken:** copy `.env.example` to `.env` and set `API_HOST_PORT`, `MCP_HOST_PORT`, `FHIR_MCP_HOST_PORT` or `HAPI_HOST_PORT` (the page is then at `http://127.0.0.1:<API_HOST_PORT>`). Every port listens on this machine only.
 - **Everything else you might install** (for running and for development) is listed in [packages.txt](packages.txt). How the parts fit: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Connect your own agent or system
+
+The MCP server works without our agent, so another agent can use the triage tools as they are. With the stack running (or only `docker compose up mizani-mcp`), point any MCP client at `http://127.0.0.1:8000/mcp`:
+
+```
+npx @modelcontextprotocol/inspector                                        # call the tools by hand: Streamable HTTP, that address
+claude mcp add --transport http mizani-triage http://127.0.0.1:8000/mcp    # or add it to an MCP client, here Claude Code
+```
+
+An agent can check vitals, compute the TEWS with a source for every point and propose a priority. It cannot save one: `commit_triage` refuses any call without an approval token signed for a named nurse, and that refusal is logged too.
+
+[docs/INTEGRATION.md](docs/INTEGRATION.md) has a Python example with its output, the approval step for a front end of your own, the HTTP calls that send a patient through Mizani's agent, and how a record system reads the FHIR records.
+
 ## Develop and test
 
 You need Python 3.12, [uv](https://docs.astral.sh/uv/) and Docker (see [packages.txt](packages.txt)).
@@ -151,7 +164,7 @@ cd web && npm ci && npm run dev                  # the page at http://localhost:
 VITE_USE_MOCK=true npm run dev                   # the page on fake data, no backend
 ```
 
-Plain `uv run pytest` reports one skipped test. It is `tests/test_stack.py`, the only test that needs real containers (our MCP server, wso2's server and HAPI FHIR), and it runs when `MIZANI_E2E=1` is set, as in the two lines above. CI does not start containers, so run it by hand after changing `docker-compose.yml` or `src/mizani/fhir.py`.
+Plain `uv run pytest` reports one skipped test. It is `tests/test_stack.py`, the only test that needs real containers (our MCP server, wso2's server and HAPI FHIR), and it runs when `MIZANI_E2E=1` is set, as in the two lines above. CI does not start containers, so run it by hand after changing `docker-compose.yml`, `docker/Dockerfile` or `src/mizani/fhir.py`. The test signs its approval with the same secret compose gives the server: the shell's `MIZANI_APPROVAL_SECRET`, else the one in `.env`, else the compose default.
 
 On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` first. On a Mac, run Ollama natively rather than in Docker (Docker on macOS has no GPU, and the model runs 4 to 5 times slower there) and set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. How each part works is in [docs/systems/](docs/systems/).
 
