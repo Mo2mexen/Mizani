@@ -53,7 +53,7 @@ Default `qwen3.5:4b-q4_K_M` (fits a 4 GB GPU or a 16 GB Apple Silicon laptop). A
 Synthetic patients only. One local SQLite file holds triages, used tokens and the audit log; LangGraph checkpoints and FHIR data stay on the same machine. Nothing is sent to an outside service.
 
 ## Running
-`docker compose up` starts the model server (Ollama, pulling the model once), `mizani-triage`, the API with the agent (`http://127.0.0.1:8090`), wso2's FHIR MCP server and HAPI FHIR; the API waits until HAPI answers, so the first FHIR write after a cold start succeeds. The API also serves the nurse's web page at `http://127.0.0.1:8090` (built from `web/` in the image). `MIZANI_E2E=1 uv run pytest tests/test_stack.py` checks the whole chain from proposal to FHIR record without a model.
+`docker compose up` starts the model server (Ollama, pulling the model once and loading it into memory), `mizani-triage`, the API with the agent (`http://127.0.0.1:8090`), wso2's FHIR MCP server and HAPI FHIR; the API waits until HAPI answers, so the first FHIR write after a cold start succeeds. The API also serves the nurse's web page at `http://127.0.0.1:8090` (built from `web/` in the image). `MIZANI_E2E=1 uv run pytest tests/test_stack.py` checks the whole chain from proposal to FHIR record without a model.
 
 ## Status
 | Part | State |

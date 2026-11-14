@@ -48,6 +48,29 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # Loads the model into memory once it is pulled, then exits. Nothing waits for it: the page
+  # starts meanwhile, and the first patient does not pay for reading the model from disk
+  # (minutes on a hard disk). Skipped when another server has the model.
+  ollama-warm:
+    image: ollama/ollama:0.40.8
+    environment:
+      OLLAMA_HOST: ollama:11434
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434/v1}
+      LLM_MODEL: ${LLM_MODEL:-qwen3.5:4b-q4_K_M}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        case "$$LLM_BASE_URL" in
+          *//ollama:11434*)
+            if ollama run "$$LLM_MODEL" "" >/dev/null 2>&1; then echo "$$LLM_MODEL is loaded"
+            else echo "$$LLM_MODEL was not loaded now; the first patient will load it"; fi ;;
+          *) echo "LLM_BASE_URL is $$LLM_BASE_URL: the model is served there, nothing to load" ;;
+        esac
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+    restart: "no"
+
   # Our MCP server: SATS tools, approval-gated commit, hash-chained audit log.
   # Reachable from other services at http://mizani-mcp:8000/mcp, and from this machine only
   # at http://127.0.0.1:8000/mcp (for MCP Inspector).
