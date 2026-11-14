@@ -38,7 +38,7 @@ Addresses: `http://fhir-mcp:8000/mcp/` inside compose, `http://127.0.0.1:8001/mc
 docker compose up -d mizani-mcp fhir-mcp hapi-fhir      # HAPI needs about a minute to boot
 MIZANI_E2E=1 uv run pytest tests/test_stack.py          # propose, approve, commit, write, read back
 ```
-Browse the records at `http://127.0.0.1:18080/fhir/Encounter`.
+Browse the records at `http://127.0.0.1:18080/fhir/Encounter`. The test reads `MIZANI_APPROVAL_SECRET` from the shell or from `.env`, as compose does, so it signs with the secret the server has.
 
 ## Known limitations
 - wso2's server uses MCP SDK 1.x; a 2.x client must connect with `mode="legacy"` and the trailing-slash URL, or wso2's server errors on the first request and needs a restart. `write_triage` itself doesn't care which client is used.

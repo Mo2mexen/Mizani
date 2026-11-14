@@ -153,6 +153,7 @@ In every failing run the proposal names each sign with the complaint's words and
 
 ## Not measured yet
 - Larger models, and spread at temperature above 0.
+- Spoken Arabic. The six Arabic tasks are written in formal Arabic (Modern Standard Arabic); Egyptian or any other colloquial Arabic is not tested.
 - How often the second look's "withdrawn" flag would reach a nurse: the result files do not record it.
 - Whether a triage nurse agrees with our expected outcomes. The tasks follow the chart as written; no nurse has reviewed the cases.
 - The diagnosis check is a word screen in English; a diagnosis phrased differently, or in Arabic, would pass it.

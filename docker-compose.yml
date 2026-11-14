@@ -1,7 +1,7 @@
 # Mizani: one command runs everything, on Windows, Linux and Apple Silicon.
 #   docker compose up
 # NVIDIA GPU (Windows/Linux):
-#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+#   docker compose -f docker-compose.yml -f docker/docker-compose.gpu.yml up
 # Then open http://127.0.0.1:8090 for the nurse's page (API and docs: /api, /docs).
 # Every port listens on this machine only (127.0.0.1). If one is taken, set API_HOST_PORT,
 # MCP_HOST_PORT, FHIR_MCP_HOST_PORT or HAPI_HOST_PORT in .env (see .env.example).
@@ -39,7 +39,9 @@ services:
   # Reachable from other services at http://mizani-mcp:8000/mcp, and from this machine only
   # at http://127.0.0.1:8000/mcp (for MCP Inspector).
   mizani-mcp:
-    build: .
+    build:  # built from the repo root; the Dockerfile and its ignore file live in docker/
+      context: .
+      dockerfile: docker/Dockerfile
     environment:
       MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-local-demo-secret-change-me}
     volumes:
@@ -87,7 +89,9 @@ services:
   # The nurse's page, the API and the agent. Shares mizani-data with the MCP server to read
   # the audit log; agent checkpoints go to /data/checkpoints.db. Reachable from this machine only.
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     command: ["mizani-api"]
     environment:
       LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434/v1}

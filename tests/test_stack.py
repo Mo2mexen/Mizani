@@ -3,11 +3,13 @@ propose -> nurse approval -> commit -> wso2 fhir-mcp-server -> HAPI FHIR, read b
 
     docker compose up -d mizani-mcp fhir-mcp hapi-fhir
     MIZANI_E2E=1 uv run pytest tests/test_stack.py
+
 """
 
 import json
 import os
 import urllib.request
+from pathlib import Path
 
 import pytest
 from mcp.client import Client
@@ -45,12 +47,22 @@ def fhir_get(path):
         return json.load(response)
 
 
+def compose_secret():
+    """The approval secret compose gave the MCP server: the shell's value, else the one in
+    `.env`, else the compose default."""
+    if os.environ.get("MIZANI_APPROVAL_SECRET"):
+        return os.environ["MIZANI_APPROVAL_SECRET"]
+    env_file = Path(__file__).parent.parent / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() == "MIZANI_APPROVAL_SECRET" and value.strip():
+                return value.strip().strip("\"'")
+    return "local-demo-secret-change-me"
+
+
 async def test_committed_triage_lands_in_hapi_through_wso2(monkeypatch):
-    # the compose default; the MCP server in Docker must share it
-    monkeypatch.setenv(
-        "MIZANI_APPROVAL_SECRET",
-        os.environ.get("MIZANI_APPROVAL_SECRET", "local-demo-secret-change-me"),
-    )
+    monkeypatch.setenv("MIZANI_APPROVAL_SECRET", compose_secret())
     async with Client(MIZANI) as mizani:
         args = dict(
             patient_label="Test Patient E2E",

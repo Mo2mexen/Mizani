@@ -6,7 +6,7 @@ Our own MCP server. It gives the agent the SATS tools, stores triages, refuses t
 - Server: `src/mizani/mcp_server.py` (command `mizani-mcp`)
 - Triage records: `src/mizani/store.py`; database: `src/mizani/db.py`
 - Tests: `tests/test_mcp_server.py` (a real MCP client, in memory)
-- Container: `Dockerfile`, service `mizani-mcp` in `docker-compose.yml`
+- Container: `docker/Dockerfile`, service `mizani-mcp` in `docker-compose.yml`
 - Settings: `MIZANI_DB` (default `.cache/data/mizani.db`, `/data/mizani.db` in Docker), `MIZANI_APPROVAL_SECRET`, `MIZANI_MCP_HOST`, `MIZANI_MCP_PORT`
 
 ## How it works
