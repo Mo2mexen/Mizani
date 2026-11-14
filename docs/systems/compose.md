@@ -10,19 +10,19 @@
 
 ## How it works
 1. `ollama` starts the model server (image `ollama/ollama:0.40.8`, multi-arch). Its port is not published, so it never clashes with an Ollama already installed on the machine; other services reach it as `http://ollama:11434`.
-2. Once `ollama list` answers, `ollama-pull` downloads `LLM_MODEL` into the `ollama-models` volume and exits. The first run downloads 3.3 GB for the default model; later runs reuse the volume.
+2. Once `ollama list` answers, `ollama-pull` downloads `LLM_MODEL` into the `ollama-models` volume and exits. The first run downloads 3.3 GB for the default model; later runs reuse the volume. When `LLM_BASE_URL` points at another model server (Ollama installed on the machine, a GPU machine on the network), `ollama-pull` downloads nothing and says so in its log, because that server already has the model.
 3. `mizani-mcp` (our MCP server, built from this repo) listens at `http://mizani-mcp:8000/mcp`, and at `127.0.0.1:8000` from this machine.
 4. `app` (command `mizani-api`) starts after the model is pulled and `fhir-mcp` is healthy: the API and the agent at `http://127.0.0.1:8090/api` (api.md; 8090 because 8080 is often taken). It shares the `mizani-data` volume with `mizani-mcp` so it can read the audit log, and keeps agent checkpoints in `/data/checkpoints.db`. It also serves the nurse's web page at `http://127.0.0.1:8090`, built from `web/` in the image's first stage (web.md).
 5. `hapi-fhir` (HAPI FHIR v8.12.0-2, R4) is the local FHIR store, at `127.0.0.1:18080/fhir` from this machine (18080 because 8080 is often taken). Its H2 database lives in the `hapi-data` volume (mounted at the image user's home, `/home/nonroot`, so the volume gets that user as owner).
 6. `fhir-mcp` (wso2 fhir-mcp-server, built from the pinned 0.10.0 commit) is the borrowed MCP server in front of HAPI, at `http://fhir-mcp:8000/mcp/` and `127.0.0.1:8001`. Auth is off because HAPI is local only. HAPI's image has no shell, so `fhir-mcp` carries the readiness check: it turns healthy once a FHIR search on HAPI answers, which also warms HAPI's database up, so the first patient's FHIR write after a cold start does not time out. Its request timeout is raised from 30 s to 120 s for slow disks.
 
-The server runs with an 8k context window, flash attention and a q8_0 KV cache. The context size is set here because the OpenAI-compatible `/v1` API cannot set it per request, and at Ollama's 4k default a prompt with all tool definitions gets cut off without an error.
+The server runs with an 8k context window, flash attention and a q8_0 KV cache, and `OLLAMA_KEEP_ALIVE=-1` keeps the model in memory for as long as the stack runs. Ollama's default unloads a model after 5 idle minutes, and the next patient then waits for it to load again (about two minutes on a laptop with a 4 GB GPU and a hard disk). The context size is set here because the OpenAI-compatible `/v1` API cannot set it per request, and at Ollama's 4k default a prompt with all tool definitions gets cut off without an error.
 
 ## Interfaces
 | Name | Input | Output | Side effects |
 |---|---|---|---|
 | `LLM_MODEL` | Ollama model tag | model pulled and served | ~3.3 GB download on first run |
-| `LLM_BASE_URL` | OpenAI-compatible URL | where the agent sends model calls | none |
+| `LLM_BASE_URL` | OpenAI-compatible URL | where the agent sends model calls | when it is not the compose `ollama` service, `ollama-pull` skips the download |
 | `LLM_API_KEY` | key, empty by default | sent to a model server that checks keys | none |
 | `MIZANI_SECOND_LOOK` | empty by default, `1` to turn on | the agent's second look at its chart signs (agent.md) | one more short model call per patient that has signs |
 | `ollama` service | HTTP on the compose network | model API at `http://ollama:11434` | stores models in `ollama-models` |
@@ -46,7 +46,9 @@ Data survives `docker compose down` and `up`: the waiting room, audit log and ch
 docker compose up                                                          # CPU, any machine
 docker compose -f docker-compose.yml -f docker/docker-compose.gpu.yml up   # NVIDIA GPU
 ```
-To use an Ollama installed on the machine instead, set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`.
+To use an Ollama installed on the machine instead, set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. The compose `ollama` service still starts, idle and with no model in it. That Ollama is yours to configure: set `OLLAMA_KEEP_ALIVE=-1` in its environment if it should keep the model loaded too.
+
+To empty the waiting room, the audit log and the FHIR records and keep the downloaded model: `docker compose down`, then `docker volume rm mizani_mizani-data mizani_hapi-data` (the names begin with the folder's name in lower case).
 
 ## Known limitations
 - Docker on macOS has no GPU access, so on a Mac the model runs on CPU inside Docker, measured at 4 to 5 times slower than native Ollama on an M4. On a Mac, run Ollama natively and set `LLM_BASE_URL=http://host.docker.internal:11434/v1`.

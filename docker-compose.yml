@@ -16,6 +16,9 @@ services:
       OLLAMA_KV_CACHE_TYPE: q8_0
       # Local only: no cloud models or web search, so no patient data can leave the machine.
       OLLAMA_NO_CLOUD: "1"
+      # Keep the model in memory. Ollama's default unloads it after 5 idle minutes, and the next
+      # patient then waits for it to load again.
+      OLLAMA_KEEP_ALIVE: "-1"
     volumes:
       - ollama-models:/root/.ollama
     healthcheck:
@@ -25,11 +28,21 @@ services:
       retries: 30
 
   # Pulls the model once (3.3 GB for the default), then exits. Later starts are instant.
+  # When LLM_BASE_URL points at another model server (Ollama installed on this machine, a GPU
+  # machine on the network), that server already has the model, so nothing is pulled here.
   ollama-pull:
     image: ollama/ollama:0.40.8
     environment:
       OLLAMA_HOST: ollama:11434
-    entrypoint: ["ollama", "pull", "${LLM_MODEL:-qwen3.5:4b-q4_K_M}"]
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434/v1}
+      LLM_MODEL: ${LLM_MODEL:-qwen3.5:4b-q4_K_M}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        case "$$LLM_BASE_URL" in
+          *//ollama:11434*) exec ollama pull "$$LLM_MODEL" ;;
+          *) echo "LLM_BASE_URL is $$LLM_BASE_URL: the model is served there, nothing to pull" ;;
+        esac
     depends_on:
       ollama:
         condition: service_healthy
