@@ -205,6 +205,14 @@ input[type="checkbox"] { width: 1.1rem; height: 1.1rem; margin: 0; accent-color:
   display: flex; align-items: center; flex-wrap: wrap; gap: 0.2rem 0.6rem; line-height: 1.1;
 }
 .colour-label { font-size: 1.05rem; font-weight: 600; color: var(--ink-soft); }
+/* A colour that rests on the complaint's words alone: dashed and hatched until the nurse confirms the sign. */
+.colour-band.unconfirmed { border-style: dashed; }
+.colour-band.unconfirmed::before { background: repeating-linear-gradient(135deg, var(--c) 0 6px, transparent 6px 12px); }
+.if-confirmed {
+  font-size: 1.05rem; font-weight: 800; letter-spacing: 0; color: var(--danger);
+  border: 2px solid var(--danger); border-radius: 2px; padding: 0.05rem 0.4rem;
+}
+.colour-unconfirmed { margin: 0.35rem 0 0; font-size: 0.92rem; font-weight: 600; color: var(--danger); }
 .colour-set { margin: 0.45rem 0 0; font-size: 1.05rem; font-weight: 600; overflow-wrap: anywhere; }
 .colour-why { margin: 0.35rem 0 0; font-size: 0.85rem; overflow-wrap: anywhere; }
 .colour-why.src { display: block; }

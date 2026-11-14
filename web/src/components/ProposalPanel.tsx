@@ -39,6 +39,8 @@ export function ProposalPanel({
   onCommitted,
   onNextPatient,
 }: Props) {
+  // The proposal (triage id) whose "nurse to confirm" sign she has ticked as checked with the patient.
+  const [confirmedFor, setConfirmedFor] = useState<string | null>(null);
   if (!run) {
     return (
       <Shell>
@@ -67,6 +69,9 @@ export function ProposalPanel({
     return <ShadowFirst runId={run.runId} colours={colours} onDone={() => onAssessed(proposal.triage_id)} />;
   }
   const toConfirm = proposal.flags.filter((f) => f.kind === "confirm_sign");
+  // A colour that rests on the complaint's words alone reads as unconfirmed until she ticks.
+  const isConfirmed = confirmedFor === proposal.triage_id;
+  const isUnconfirmed = toConfirm.length > 0 && !isConfirmed;
   // The model gave no chart signs (it did not answer): said next to the colour, not only in the steps.
   const unchecked = proposal.flags.filter((f) => f.kind === "signs_not_checked");
   // After a reload the intake text is gone from the page; the propose step still carries it.
@@ -74,7 +79,7 @@ export function ProposalPanel({
   const shownComplaint = complaint ?? proposed?.complaint ?? null;
   return (
     <Shell pending>
-      <ColourBand proposal={proposal} colours={colours} />
+      <ColourBand proposal={proposal} colours={colours} isUnconfirmed={isUnconfirmed} />
       {unchecked.length > 0 && (
         <div className="confirm" role="alert" aria-label="Chart signs not checked">
           <p className="confirm-title">Chart signs were not checked</p>
@@ -119,6 +124,8 @@ export function ProposalPanel({
         proposal={proposal}
         colours={colours}
         needsConfirm={toConfirm.length > 0}
+        isConfirmed={isConfirmed}
+        onConfirm={(yes) => setConfirmedFor(yes ? proposal.triage_id : null)}
         onCommitted={onCommitted}
       />
     </Shell>
@@ -175,14 +182,30 @@ function AgentWorking({ run }: { run: RunState }) {
   );
 }
 
-function ColourBand({ proposal, colours }: { proposal: Proposal; colours: Colour[] }) {
+function ColourBand({
+  proposal,
+  colours,
+  isUnconfirmed,
+}: {
+  proposal: Proposal;
+  colours: Colour[];
+  isUnconfirmed: boolean;
+}) {
+  const hasVitals = proposal.tews.components.length > 0;
   return (
-    <div className={`colour-band c-${proposal.colour}`}>
+    <div className={`colour-band c-${proposal.colour}${isUnconfirmed ? " unconfirmed" : ""}`}>
       <p className="colour-name">
         <span className="swatch" aria-hidden="true" />
         {proposal.colour.toUpperCase()} <span className="colour-label">{colourLabel(colours, proposal.colour)}</span>
+        {isUnconfirmed && <span className="if-confirmed">if confirmed</span>}
       </p>
       <p className="colour-set">{setBy(proposal)}</p>
+      {isUnconfirmed && (
+        <p className="colour-unconfirmed">
+          Not confirmed yet: this colour rests on the complaint's words alone.{" "}
+          {hasVitals ? `Without the sign, the vitals score TEWS ${proposal.tews.total}.` : "No vitals were measured."}
+        </p>
+      )}
       <p className="colour-why src">
         <span className="src-tag">rule</span> {proposal.source}
       </p>

@@ -10,15 +10,17 @@ type Props = {
   colours: Colour[];
   /** The proposal has an emergency sign from the complaint alone: approving needs a tick (the server checks it too). */
   needsConfirm: boolean;
+  /** Her tick that she checked that sign with the patient; kept by the panel, which shows the colour as unconfirmed until then. */
+  isConfirmed: boolean;
+  onConfirm: (isConfirmed: boolean) => void;
   onCommitted: () => void;
 };
 
 type Busy = "approve" | "override" | "remeasure" | null;
 
 /** Approve, override or re-measure. Nothing is saved without the nurse's name. */
-export function DecisionForm({ run, proposal, colours, needsConfirm, onCommitted }: Props) {
+export function DecisionForm({ run, proposal, colours, needsConfirm, isConfirmed, onConfirm, onCommitted }: Props) {
   const [nurse, setNurse] = useState("");
-  const [isConfirmed, setIsConfirmed] = useState(false);
   const [overrideColour, setOverrideColour] = useState("");
   const [reason, setReason] = useState("");
   const [isRemeasuring, setIsRemeasuring] = useState(false);
@@ -91,7 +93,7 @@ export function DecisionForm({ run, proposal, colours, needsConfirm, onCommitted
         </label>
         {needsConfirm && (
           <label className="check">
-            <input type="checkbox" checked={isConfirmed} onChange={(e) => setIsConfirmed(e.target.checked)} />
+            <input type="checkbox" checked={isConfirmed} onChange={(e) => onConfirm(e.target.checked)} />
             I checked the sign marked "nurse to confirm" with the patient
           </label>
         )}
