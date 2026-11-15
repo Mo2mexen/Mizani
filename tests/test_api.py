@@ -1,8 +1,10 @@
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
+from langchain_core.tools import StructuredTool
 from langgraph.checkpoint.memory import InMemorySaver
 from test_agent_graph import NORMAL, FakeModel, reply
 
@@ -19,7 +21,7 @@ def fresh_db(tmp_path, monkeypatch):
 
 def client(*replies):
     app = create_app(FakeModel(messages=iter(replies)), mcp, InMemorySaver())
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")  # a name the API answers to
 
 
 def events(api, run_id, until, last_event_id=None):
@@ -326,3 +328,88 @@ def test_the_second_look_is_a_setting(monkeypatch):
     assert "review" in steps
     flags = [f["kind"] for f in stream[-1][1]["proposal"]["flags"]]
     assert "sign_withdrawn" in flags and stream[-1][1]["proposal"]["colour"] == "green"
+
+
+def test_a_slow_handover_draft_states_the_wait_at_the_time_it_is_saved(monkeypatch):
+    clock = [datetime.now(UTC)]
+    monkeypatch.setattr("mizani.store.now", lambda: clock[0])
+
+    def model():
+        yield reply(ids=["chest_pain"])
+        clock[0] += timedelta(minutes=20)  # the model takes its time over the draft
+        yield AIMessage(content="RR 12, HR 80, alert; chest pain\nOrange: chest pain (SATS chart)")
+
+    app = create_app(FakeModel(messages=model()), mcp, InMemorySaver())
+    with TestClient(app, base_url="http://127.0.0.1") as api:
+        triage_id = committed_patient(api, intake(api))
+        draft = api.post(f"/api/queue/{triage_id}/handover")
+    assert draft.status_code == 201
+    assert draft.json()["text"].splitlines()[2].startswith("Waited 20 min since arrival")
+
+
+def test_a_recheck_after_the_model_failed_still_says_the_signs_were_not_checked():
+    with client() as api:  # no model replies: the intake falls back to the vitals alone
+        triage_id = committed_patient(api, intake(api))
+        response = api.post(
+            f"/api/queue/{triage_id}/retriage", json={"vitals": {"heart_rate": 135}}
+        )
+        proposal = events(api, response.json()["triage_id"], until="proposal")[-1][1]["proposal"]
+    kinds = [f["kind"] for f in proposal["flags"]]
+    assert "signs_not_checked" in kinds and "retriage" in kinds
+
+
+def test_a_recheck_on_a_stale_card_of_a_called_in_patient_is_refused_at_once():
+    with client(reply(ids=["chest_pain"])) as api:
+        triage_id = committed_patient(api, intake(api))
+        api.post(f"/api/queue/{triage_id}/called-in", json={"nurse_name": "Nurse C"})
+        stale = api.post(f"/api/queue/{triage_id}/retriage", json={"vitals": NORMAL})
+    assert stale.status_code == 409 and "still in the queue" in stale.json()["detail"]
+
+
+def test_a_commit_that_cannot_reach_the_server_goes_back_to_the_nurse(monkeypatch):
+    original, down = StructuredTool.ainvoke, [True]
+
+    async def restarting(self, input, config=None, **kwargs):
+        if self.name == "commit_triage" and down:
+            down.clear()
+            raise ConnectionError("mizani-mcp is restarting")
+        return await original(self, input, config, **kwargs)
+
+    monkeypatch.setattr(StructuredTool, "ainvoke", restarting)
+    with client(reply(ids=["chest_pain"])) as api:
+        run = intake(api)
+        shown = events(api, run, until="proposal")[-1][1]["proposal"]["triage_id"]
+        approve = {"nurse_name": "Nurse A", "action": "approve", "triage_id": shown}
+        refused = api.post(f"/api/triage/{run}/decision", json=approve)
+        assert refused.status_code == 409 and "did not answer" in refused.json()["detail"]
+        done = api.post(f"/api/triage/{run}/decision", json=approve)  # still waiting for her
+    assert (done.status_code, done.json()["colour"]) == (200, "orange")
+
+
+def test_after_an_api_restart_a_reconnecting_page_resumes_at_the_right_event():
+    partial = {k: v for k, v in NORMAL.items() if k != "heart_rate"}
+    saver = InMemorySaver()
+    before = create_app(FakeModel(messages=iter([reply()])), mcp, saver)
+    with TestClient(before, base_url="http://127.0.0.1") as api:
+        run = intake(api, vitals=partial)
+        first = events(api, run, until="proposal")
+        api.post(f"/api/triage/{run}/vitals", json={"vitals": {"heart_rate": 135}})
+        second = events(api, run, until="proposal", last_event_id=first[-1][2])
+    # The API restarts and rebuilds the run from its checkpoint; the page reconnects with the
+    # id of the last event it got before the re-measure.
+    after = create_app(FakeModel(messages=iter([])), mcp, saver)
+    with TestClient(after, base_url="http://127.0.0.1") as api:
+        resumed = events(api, run, until="proposal", last_event_id=first[-1][2])
+    assert [(kind, i) for kind, _, i in resumed] == [(kind, i) for kind, _, i in second]
+    assert resumed[-1][1]["proposal"] == second[-1][1]["proposal"]
+
+
+def test_the_api_answers_only_to_this_machines_names(monkeypatch):
+    with client() as api:
+        assert api.get("/api/colours").status_code == 200
+        rebound = api.get("/api/queue", headers={"host": "evil.example"})
+    assert rebound.status_code == 400  # DNS rebinding: a page elsewhere cannot reach it
+    monkeypatch.setenv("MIZANI_ALLOWED_HOSTS", "127.0.0.1,triage.ward.local")
+    app = create_app(FakeModel(messages=iter([])), mcp, InMemorySaver())
+    with TestClient(app, base_url="http://triage.ward.local") as api:
+        assert api.get("/api/colours").status_code == 200  # a ward server adds its own name

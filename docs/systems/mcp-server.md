@@ -7,7 +7,7 @@ Our own MCP server. It gives the agent the SATS tools, stores triages, refuses t
 - Triage records: `src/mizani/store.py`; database: `src/mizani/db.py`
 - Tests: `tests/test_mcp_server.py` (a real MCP client, in memory)
 - Container: `docker/Dockerfile`, service `mizani-mcp` in `docker-compose.yml`
-- Settings: `MIZANI_DB` (default `.cache/data/mizani.db`, `/data/mizani.db` in Docker), `MIZANI_APPROVAL_SECRET`, `MIZANI_MCP_HOST`, `MIZANI_MCP_PORT`
+- Settings: `MIZANI_DB` (default `.cache/data/mizani.db`, `/data/mizani.db` in Docker), `MIZANI_APPROVAL_SECRET`, `MIZANI_MCP_HOST`, `MIZANI_MCP_PORT`, `MIZANI_ALLOWED_HOSTS` (the names it answers to, comma-separated, default `127.0.0.1,localhost`; compose adds `mizani-mcp`, the name the app uses)
 
 ## How it works
 The agent reads the rules (`rules://sats/adult`), checks vitals, names chart discriminators, each with the words of the complaint that show it, and calls `propose_priority`, which runs the rules engine and stores a pending triage. The nurse approves or overrides in the UI; the API turns that into an approval token (approval.md). The agent then calls `commit_triage` with the token. A middleware (`audit_calls`) writes every tool call to the hash-chained audit log (audit.md), including refused calls.
@@ -30,7 +30,7 @@ The agent reads the rules (`rules://sats/adult`), checks vitals, names chart dis
 | `queue://current` | resource | | waiting patients by colour, then arrival, with time waited, `recheck_due` and `recheck_raised` (retriage-watch.md) | none |
 | `patient://{triage_id}/timeline` | resource | | the triage, its handover drafts and its audit rows | none |
 | `report://shadow-agreement` | resource | | nurse-vs-Mizani agreement rate and every disagreement | none |
-| `triage_intake` | prompt | `complaint` | intake instructions: every chart sign with its id, colour and, where the EMSSA manual defines it, its meaning; a quote from the complaint for each sign; never infer a diagnosis | none |
+| `triage_intake` | prompt | `complaint` | intake instructions: every chart sign with its id, colour and, where the EMSSA manual defines it, its meaning; a quote from the complaint for each sign; never infer a diagnosis. The rules for picking a sign are the agent's own, from `src/mizani/prompts.py`, so the two cannot drift apart | none |
 | `handover_summary` | prompt | `triage_id` | findings-only handover instructions | none |
 
 Optional `_meta` on a tool call is copied into the audit row: `run_id` (one per patient run; links the checks made before the triage existed to that triage's timeline), and `model`, `tokens`, `cost` (which model asked for the call and what it cost). Refused or failed calls get `error: true`.
@@ -47,6 +47,8 @@ Optional `_meta` on a tool call is copied into the audit row: `run_id` (one per 
 - Handover numbers from the record: `draft_handover` refuses a number that is not in the patient's record, and a waiting time that is not the real one.
 - Patient text is data: the complaint is stored as-is, and the intake prompt escapes it inside its tags (so it can't close them) and tells the model to ignore instructions inside it. Patient label (≤ 80), complaint (≤ 2,000 characters) and discriminator list (≤ 20) are capped.
 - The container runs as an unprivileged user.
+- It answers only to the names in `MIZANI_ALLOWED_HOSTS`. The MCP SDK guards the `Host` and `Origin` headers by itself only when it listens on 127.0.0.1; in Docker it listens on 0.0.0.0, so `main()` always passes the names. A web page on another site cannot reach it through a browser on this machine by pointing its own domain at 127.0.0.1 (DNS rebinding).
+- Only patients on the waiting list: a re-triage, a handover draft or release, a re-check flag and called in are refused for a patient who was re-triaged or called in meanwhile (`store.waiting`, and the queue for the re-check flag). A re-check proposal still pending when its patient is called in can no longer be committed.
 - Read-only queue: the order comes from committed colours and arrival times; no tool reorders it. A patient leaves it only when a named nurse records, with her own token, that she called them in (`record_called_in`). The agent never calls that tool.
 - Every call logged: inputs, outputs, time, approver, model, tokens, latency, cost.
 

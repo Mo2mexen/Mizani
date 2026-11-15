@@ -80,6 +80,8 @@ services:
       dockerfile: docker/Dockerfile
     environment:
       MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-local-demo-secret-change-me}
+      # The names it answers to (DNS-rebinding guard): this machine, and the app by service name.
+      MIZANI_ALLOWED_HOSTS: 127.0.0.1,localhost,mizani-mcp
     volumes:
       - mizani-data:/data
     ports:
@@ -139,6 +141,8 @@ services:
       MIZANI_FHIR_MCP_URL: http://fhir-mcp:8000/mcp/
       MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-local-demo-secret-change-me}
       MIZANI_API_HOST: 0.0.0.0
+      # The names the page may be opened with (DNS-rebinding guard); a ward server adds its own.
+      MIZANI_ALLOWED_HOSTS: ${MIZANI_ALLOWED_HOSTS:-127.0.0.1,localhost}
     volumes:
       - mizani-data:/data
     ports:

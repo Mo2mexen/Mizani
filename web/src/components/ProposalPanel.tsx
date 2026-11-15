@@ -213,9 +213,10 @@ function ColourBand({
   );
 }
 
-/** The plain-language reason, read from the proposal's own fields; the full rule is printed under it. */
+/** The plain-language reason, read from the engine's cited reason printed under it, so the two never disagree:
+ * a sign that only ties with the TEWS colour did not set it (the engine keeps the TEWS reason then). */
 function setBy(proposal: Proposal): string {
-  const sign = proposal.discriminators.find((d) => d.colour === proposal.colour);
+  const sign = proposal.discriminators.find((d) => proposal.source.includes(`discriminator '${d.name}'`));
   if (sign) return `Set by the chart sign "${sign.name}"`;
   return `Set by the vital signs: TEWS ${proposal.tews.total}`;
 }
