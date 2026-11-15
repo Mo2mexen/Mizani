@@ -22,6 +22,7 @@ from typing import Annotated, Any
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -30,7 +31,7 @@ from langgraph.types import Command
 from mcp.client import Client
 from pydantic import Field
 
-from mizani import audit
+from mizani import audit, store
 from mizani.agent.graph import build_graph
 from mizani.agent.mcp_tools import load_tools, read_json, server_url, with_meta
 from mizani.agent.model import call_model, chat_model
@@ -120,6 +121,22 @@ async def _connect(server: Any) -> list:
     return []
 
 
+def _replay(values: dict, paused: dict | None) -> list[tuple[str, Any]]:
+    """A run's events rebuilt from its checkpoint in the order the browser first got them, so a
+    reconnect's Last-Event-ID still points at the right one. A proposal followed every pause for
+    the nurse: after propose, and after a commit that was refused or not reached. Earlier
+    proposals carry the latest one (the checkpoint keeps only that)."""
+    proposal = paused or {"proposal": values.get("proposal"), "error": None}
+    events: list[tuple[str, Any]] = []
+    for step in values.get("trace", []):
+        events.append(("step", step))
+        output = step.get("output")
+        refused = step["name"] == "commit_triage" and isinstance(output, dict) and "error" in output
+        if (step["kind"] == "waiting_for_nurse" and step["name"] == "nurse") or refused:
+            events.append(("proposal", proposal))
+    return events
+
+
 def _why(record: dict) -> str:
     """Why the committed colour: Mizani's cited reason, or the nurse's override and her reason."""
     decision, proposal = record["decision"], record["proposal"]
@@ -167,6 +184,12 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
                 watcher.cancel()
 
     app = FastAPI(title="Mizani API", lifespan=lifespan)
+    # Only requests addressed to this machine by name: a web page elsewhere cannot reach the API
+    # by pointing its own domain at 127.0.0.1 (DNS rebinding). A ward server adds its address.
+    hosts = os.environ.get("MIZANI_ALLOWED_HOSTS", "127.0.0.1,localhost")
+    app.add_middleware(
+        TrustedHostMiddleware, allowed_hosts=[h.strip() for h in hosts.split(",") if h.strip()]
+    )
 
     def thread(run_id: str) -> dict:
         return {"configurable": {"thread_id": run_id}}
@@ -194,9 +217,10 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         state = await ctx["graph"].aget_state(thread(run_id))
         if not state.values:
             raise HTTPException(404, f"no triage run {run_id}")
-        events: list[tuple[str, Any]] = [("step", s) for s in state.values.get("trace", [])]
+        events = _replay(state.values, state.interrupts[0].value if state.interrupts else None)
         if state.interrupts:
-            events.append(("proposal", state.interrupts[0].value))
+            if not events or events[-1][0] != "proposal":
+                events.append(("proposal", state.interrupts[0].value))
         elif state.values.get("committed"):
             events.append(("committed", state.values["committed"]))
         else:  # it stopped mid-way (API restart or an error): say so instead of waiting forever
@@ -236,7 +260,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         record = timeline["triage"]
         if record is None:
             raise HTTPException(404, f"no triage {triage_id}")
-        if record["status"] != "committed" or record["superseded_by"]:
+        if not store.waiting(record):  # also refused on a stale card of a called-in patient
             raise HTTPException(
                 409, "only a committed patient still in the queue can be re-triaged"
             )
@@ -252,16 +276,19 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         ]
         fresh = body.vitals.model_dump(exclude_none=True)
         vitals = {**{k: v for k, v in record["vitals"].items() if v is not None}, **fresh}
-        started = start_run(
-            {
-                "patient_label": record["patient_label"],
-                "complaint": record["complaint"],
-                "nurse_vitals": vitals,
-                "vitals": vitals,
-                "signs": signs,
-                "retriage_of": triage_id,
-            }
-        )
+        entry = {
+            "patient_label": record["patient_label"],
+            "complaint": record["complaint"],
+            "nurse_vitals": vitals,
+            "vitals": vitals,
+            "signs": signs,
+            "retriage_of": triage_id,
+        }
+        # The complaint was never read against the chart (the model did not answer at intake):
+        # the re-check says so again instead of "no chart sign applies".
+        if any(f["kind"] == "signs_not_checked" for f in record["proposal"]["flags"]):
+            entry["fell_back"] = True
+        started = start_run(entry)
         retriage_runs[triage_id] = started["triage_id"]
         return started
 
@@ -296,7 +323,12 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             state = await ctx["graph"].aget_state(thread(run_id))
         if state.values.get("committed"):
             return state.values["committed"]
-        raise HTTPException(409, state.values.get("nurse_error") or "the commit did not happen")
+        if state.interrupts:  # refused or not reached: back with the nurse, with this reason
+            raise HTTPException(409, state.values.get("nurse_error") or "the commit did not happen")
+        event, data = run.events[-1]  # the run stopped: say why, never an older refusal
+        raise HTTPException(
+            409, data["message"] if event == "error" else "the commit did not happen"
+        )
 
     @app.post("/api/triage/{run_id}/vitals", status_code=202)
     async def remeasure(run_id: str, body: Remeasure) -> dict:
@@ -335,14 +367,22 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         draft with a number that is not in the record. It stays unreleased until a nurse reads it
         and releases it."""
         record = (await committed_record(triage_id))["triage"]
-        queue = await read_json("queue://current", mcp_server)
-        entry = next((q for q in queue if q["triage_id"] == triage_id), None)
-        if entry is None:
-            raise HTTPException(409, "only a committed patient still in the queue gets a handover")
-        waited = (
-            f"Waited {entry['waited_minutes']:.0f} min since arrival (target for "
-            f"{record['colour']}: {entry['target_minutes']} min)."
-        )
+
+        async def waited_line() -> str:
+            """Read when the draft is saved, not before the model call: the server checks the
+            wait against the clock and allows one minute, and a slow model takes longer."""
+            queue = await read_json("queue://current", mcp_server)
+            entry = next((q for q in queue if q["triage_id"] == triage_id), None)
+            if entry is None:
+                raise HTTPException(
+                    409, "only a committed patient still in the queue gets a handover"
+                )
+            return (
+                f"Waited {entry['waited_minutes']:.0f} min since arrival (target for "
+                f"{record['colour']}: {entry['target_minutes']} min)."
+            )
+
+        await waited_line()  # refuse at once, before the model call, if the patient has left
         async with Client(mcp_server or server_url()) as client:
             prompt = await client.get_prompt("handover_summary", {"triage_id": triage_id})
         facts = {
@@ -380,7 +420,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
                     "handover yourself.",
                 ) from None
             lines = _two_lines(str(call.message.content))
-            text = "\n".join([*lines, waited])
+            text = "\n".join([*lines, await waited_line()])
             try:
                 if not lines:
                     raise HTTPException(409, "the draft was empty")

@@ -57,6 +57,17 @@ def get(con: sqlite3.Connection, triage_id: str) -> dict | None:
     return record
 
 
+def waiting(record: dict | None) -> bool:
+    """A committed triage still on the waiting list: not replaced by a re-triage and not called
+    in. The one test behind re-checks, handovers and called in."""
+    return (
+        record is not None
+        and record["status"] == "committed"
+        and not record["superseded_by"]
+        and not record["called_in_at"]
+    )
+
+
 def commit(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
     """Commit a pending triage with a verified approval payload. Each token works once."""
     con.execute("BEGIN IMMEDIATE")
@@ -66,10 +77,14 @@ def commit(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
             raise ApprovalError(f"no triage with id {triage_id}")
         if record["status"] != "pending":
             raise ApprovalError("this triage is already committed")
-        if record["retriage_of"] is not None:  # another re-triage may have replaced it first
+        if record["retriage_of"] is not None:  # the patient may have moved on meanwhile
             previous = get(con, record["retriage_of"])
             if previous["superseded_by"] is not None:
                 raise ApprovalError("this patient was already re-triaged; propose again")
+            if previous["called_in_at"] is not None:
+                raise ApprovalError(
+                    "this patient was already called in to be seen; the re-check is not needed"
+                )
         to_confirm = any(f["kind"] == "confirm_sign" for f in record["proposal"]["flags"])
         if to_confirm and approval["action"] == "approve" and not approval.get("confirmed"):
             raise ApprovalError(
@@ -263,7 +278,7 @@ def release_handover(
         draft = con.execute(
             "SELECT h.id, h.text FROM handover h JOIN triage t ON t.id = h.triage_id"
             " WHERE h.id = ? AND h.triage_id = ? AND h.released_at IS NULL"
-            " AND t.superseded_by IS NULL",
+            " AND t.superseded_by IS NULL AND t.called_in_at IS NULL",
             (draft_id, triage_id),
         ).fetchone()
         if draft is None:

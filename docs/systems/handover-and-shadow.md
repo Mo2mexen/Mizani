@@ -40,7 +40,8 @@ uv run pytest tests/test_mcp_server.py -k "handover or shadow"
 ```
 
 ## Known limitations
-- A handover can be drafted only while the patient is on the waiting list. Once a nurse records that they were called in, `draft_handover` refuses.
+- A handover can be drafted and released only while the patient is on the waiting list. Once a nurse records that they were called in, `draft_handover` and `release_handover` refuse.
+- The waiting time in the third line is read when the draft is saved, after the model has answered, because the server allows one minute of difference and a slow model can take longer than that.
 - The server can't tell a finding from a diagnosis in free text; that rests on the prompt, the evals and the nurse's review before release.
 - The number check reads digits only: a number written in words ("twenty minutes") is not checked.
 - The agreement report counts exact colour matches; it doesn't weigh how far apart the colours are.

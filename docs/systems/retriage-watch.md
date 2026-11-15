@@ -28,6 +28,8 @@ Watches the waiting queue against the SATS target times and tells the nurse when
 - The agent may raise a deterioration flag but can't act on it: it changes no colour and moves no patient.
 - A flag is only raised when the timer has really run out, and it cites the SATS rule.
 - A new colour needs a named nurse's approval like any other triage.
+- Only a patient still on the waiting list is re-checked: a re-check on a stale card of a patient who was called in gets 409 at once, and a re-check proposal still waiting when the patient is called in can no longer be committed, so the patient never comes back to the waiting room.
+- A patient whose first run never checked the chart signs (the model did not answer) keeps the `signs_not_checked` flag on the re-check proposal, instead of a page that says no chart sign applies.
 
 ## Running and testing it alone
 ```

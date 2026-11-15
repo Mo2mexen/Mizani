@@ -26,6 +26,7 @@ The server runs with an 8k context window, flash attention and a q8_0 KV cache, 
 | `LLM_BASE_URL` | OpenAI-compatible URL | where the agent sends model calls | when it is not the compose `ollama` service, `ollama-pull` skips the download |
 | `LLM_API_KEY` | key, empty by default | sent to a model server that checks keys | none |
 | `MIZANI_SECOND_LOOK` | empty by default, `1` to turn on | the agent's second look at its chart signs (agent.md) | one more short model call per patient that has signs |
+| `MIZANI_ALLOWED_HOSTS` | names, comma-separated; default `127.0.0.1,localhost` | the names the page may be opened with (`app`); `mizani-mcp` has its own fixed list that adds its service name | any other `Host` is refused (DNS-rebinding guard, api.md); a ward server that others open by its address adds it here |
 | `ollama-warm` service | none | the model loaded into memory before the first patient | exits when done; skipped when `LLM_BASE_URL` points elsewhere |
 | `ollama` service | HTTP on the compose network | model API at `http://ollama:11434` | stores models in `ollama-models` |
 | `mizani-mcp` service | MCP over streamable HTTP | our tools at `http://mizani-mcp:8000/mcp` (this machine: `127.0.0.1:8000`) | writes the database in `mizani-data` |

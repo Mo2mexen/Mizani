@@ -680,6 +680,73 @@ async def test_a_called_in_token_cannot_commit_or_release():
     assert "not commit" in error_text(r)
 
 
+async def test_a_patient_called_in_meanwhile_cannot_come_back_through_a_retriage():
+    async with Client(mcp) as client:
+        first = await propose(client, ["chest_pain"])
+        tid = first["triage_id"]
+        await commit(client, tid)
+        args = dict(
+            patient_label="Test Patient 01",
+            complaint="chest pain since morning",
+            vitals=VITALS,
+            discriminators=[],
+            retriage_of=tid,
+        )
+        recheck = data(await client.call_tool("propose_priority", args))  # pending, unapproved
+        called = {"triage_id": tid, "approval_token": called_in_token(tid)}
+        data(await client.call_tool("record_called_in", called))
+        late = await client.call_tool(
+            "commit_triage",
+            {"triage_id": recheck["triage_id"], "approval_token": token(recheck["triage_id"])},
+        )
+    assert "already called in" in error_text(late)
+    assert await queue() == []  # the patient stays with the doctor, off the waiting list
+
+
+async def test_a_handover_cannot_be_released_after_the_patient_was_called_in():
+    async with Client(mcp) as client:
+        p = await propose(client, ["chest_pain"])
+        tid = p["triage_id"]
+        await commit(client, tid)
+        draft = data(await client.call_tool("draft_handover", {"triage_id": tid, "text": HANDOVER}))
+        called = {"triage_id": tid, "approval_token": called_in_token(tid)}
+        data(await client.call_tool("record_called_in", called))
+        release = {
+            "triage_id": tid,
+            "draft_id": draft["draft_id"],
+            "approval_token": handover_token(tid, draft["draft_id"]),
+        }
+        late = await client.call_tool("release_handover", release)
+    assert "still in the queue" in error_text(late)
+
+
+async def test_the_agent_and_the_mcp_prompt_share_the_rules_for_picking_a_sign():
+    from mizani.agent.graph import _system_prompt
+    from mizani.prompts import COMPLAINT_IS_DATA, SIGN_RULES
+
+    async with Client(mcp) as client:
+        prompt = await client.get_prompt("triage_intake", {"complaint": "fell off a chair"})
+    served = prompt.messages[0].content.text
+    for text in (served, _system_prompt(["chest_pain"])):
+        assert SIGN_RULES in text and COMPLAINT_IS_DATA in text
+
+
+def test_the_mcp_server_answers_only_to_its_own_names(monkeypatch):
+    """DNS rebinding: in Docker the server listens on 0.0.0.0, where the SDK does not guard
+    the Host header by itself, so main() always passes the allowed names."""
+    from mizani import mcp_server
+
+    seen = {}
+    monkeypatch.setattr(mcp_server.mcp, "run", lambda **kwargs: seen.update(kwargs))
+    monkeypatch.setenv("MIZANI_ALLOWED_HOSTS", "127.0.0.1, localhost,mizani-mcp")
+    monkeypatch.setenv("MIZANI_MCP_HOST", "0.0.0.0")
+    mcp_server.main()
+    security = seen["transport_security"]
+    assert security.enable_dns_rebinding_protection
+    assert security.allowed_hosts == ["127.0.0.1:*", "localhost:*", "mizani-mcp:*"]
+    assert "http://localhost:*" in security.allowed_origins
+
+
 async def test_a_sign_the_agent_took_back_is_flagged_by_the_server():
     async with Client(mcp) as client:
         args = dict(
