@@ -6,6 +6,8 @@ Mizani is an offline triage co-pilot for the front desk of a busy public hospita
 
 > Built for the [African Agentic AI Design Challenge](https://agentic-africa-challenge.lovable.app/), Healthcare track ("The Triage Desk").
 >
+> **Demo video (2:32):** [youtu.be/5X2kgk-QHfY](https://youtu.be/5X2kgk-QHfY). One unedited take with the real model and its tool calls on screen, including where Mizani fails.
+>
 > **One command, on Windows, macOS or Linux:** `git clone https://github.com/Mo2mexen/Mizani.git`, `cd Mizani`, `docker compose up`, then open **http://127.0.0.1:8090**. Steps for each system: [Running it](#running-it).
 >
 > **It needs a local language model, and `docker compose up` provides one.** The first start downloads the model (Qwen3.5 4B, 3.3 GB) and the container images, about 7 GB in all; on our test machine it took 41 minutes on a 27 Mbit/s connection, nearly all of it downloading. After that Mizani runs offline, with no API keys or accounts, and starts in about 25 seconds. **Speed and chart-sign accuracy depend on the model and the machine:** a patient took 10 to 25 seconds with the model on a MacBook Air M4's GPU, and 1 to 2 minutes with the model inside Docker on its CPU. To use another model, copy `.env.example` to `.env` and set `LLM_MODEL`, `LLM_BASE_URL` and `LLM_REASONING_EFFORT` ([docs/REMOTE_MODEL.md](docs/REMOTE_MODEL.md)).
@@ -19,6 +21,8 @@ Mizani helps that nurse without taking the decision away. The nurse types the vi
 The colour is only a proposal. A named nurse approves it or overrides it with a reason, and the MCP server refuses to save anything without that nurse's signed, single-use approval token, whatever the model does. Saved triages go onto a waiting-room board grouped by colour and into a local FHIR server through wso2's fhir-mcp-server, so other hospital systems can read them. While patients wait, the agent compares each wait with the SATS target time for the colour and raises a re-check flag for the nurse; it never moves a patient. Every tool call goes into a hash-chained audit log with inputs, outputs, time, approver, model, tokens, latency and cost.
 
 Mizani never diagnoses or prescribes, treats patient text as data, and uses synthetic patients only. It runs offline on one machine with `docker compose up`. [EVALS.md](docs/EVALS.md) runs each synthetic task five times and reports the pass rate, the run-to-run variation, the cost per run and the failures we have not fixed. Speed and chart-sign accuracy depend on the model; a larger model is a configuration change, and the scoring, approval gate and audit log stay the same.
+
+**Demo video:** [youtu.be/5X2kgk-QHfY](https://youtu.be/5X2kgk-QHfY) (2:32, one unedited take with the real model).
 
 ## The problem
 
