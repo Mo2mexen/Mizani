@@ -207,6 +207,9 @@ class ModelChoice(Contract):
             raise ValueError(
                 "the address starts with http:// or https://, e.g. https://gpu.example/v1"
             )
+        if url.query or url.fragment or url.username or url.password:
+            # the client adds /chat/completions to the address: nothing may change where it goes
+            raise ValueError("give only the server's address and path, without ?, # or a user name")
         if self.location == "cloud":
             if url.scheme != "https":
                 raise ValueError(
