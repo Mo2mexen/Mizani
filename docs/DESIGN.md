@@ -48,8 +48,15 @@ Text colours meet WCAG AA (4.5:1) on `--paper` and `--panel`. On orange and yell
 - **Help:** a white "?" circle next to a control; hover or keyboard focus shows a dark tooltip with one bold line and two or three plain sentences.
 - **Working state:** a green dot that breathes next to "The agent is working · 6 s", the current step on the line below. Still when the system asks for reduced motion.
 
+## Screens for each role (since 16 Nov 2026)
+- **Sign-in:** one narrow panel (24 rem) in the middle of the paper, the logo and name above it, one primary button the panel's width. Why the screen is showing (signed out after 15 idle minutes, switched user, the session ended) is one line in the warning style above the fields. A one-time password leads straight to "Choose your own password" in the same panel.
+- **Header:** the person's name and role at the right ("Amina Otieno" over "Nurse"), then "Switch user" (one click, for a shared tablet) and "Account", a small menu with Change password and Sign out that closes on Escape or a click elsewhere. Tabs appear only when a role has more than one screen; the open one is outlined (`aria-current="page"`). Shadow mode is a nurse's switch and shows only for a nurse.
+- **Dialog:** the native `<dialog>` in panel style over a 40 % ink backdrop (Change password). Escape closes it.
+- **Doctor's screen:** the waiting room as one ordered list, most urgent first; each row's colour is its 10 px left edge plus the printed name ("ORANGE · Very urgent"). No step numbers: a doctor's screen is not the nurse's sequence. The handover inbox sits beside it on a desk and below it on a tablet.
+- **Admin › Users:** a table with a Manage button per person that opens a row of actions under it. An action that cannot be undone in one click (reset, sign out everywhere, deactivate) asks first, in words that name the person and say what will happen. A one-time password is shown once in a box with a 2 px ink border, the code in monospace, "Copy" and "Done, I have given it". On a phone the table becomes one block per person, each value under its label.
+
 ## Words
-- Name things by what the nurse does: "Start triage", "Approve ORANGE", "Draft handover with AI", "Release to doctor", "Record called in", "Next patient".
+- Name things by what the person does: "Start triage", "Approve ORANGE", "Draft handover with AI", "Release to doctor", "Record called in", "Next patient", "Seeing this patient", "Switch user", "Add person", "Give the chief flag".
 - Errors say what happened and what to do, in the page's voice: "Mizani could not write a usable draft (…). Click Draft handover again, or write the handover yourself."
 - Empty states invite the next action: "No patient yet. Fill in the intake…".
 - Patient text is shown as typed, right-to-left when it is Arabic (`dir="auto"`), and never as HTML.

@@ -8,6 +8,7 @@ propose -> nurse approval -> commit -> wso2 fhir-mcp-server -> HAPI FHIR, read b
 
 import json
 import os
+import subprocess
 import urllib.request
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from mcp.client import Client
 
 from mizani.approval import issue_approval
 from mizani.fhir import write_triage
-from mizani.schemas import NurseDecision
+from mizani.schemas import Account
 
 pytestmark = [
     pytest.mark.anyio,
@@ -47,22 +48,36 @@ def fhir_get(path):
         return json.load(response)
 
 
-def compose_secret():
-    """The approval secret compose gave the MCP server: the shell's value, else the one in
-    `.env`, else the compose default."""
-    if os.environ.get("MIZANI_APPROVAL_SECRET"):
-        return os.environ["MIZANI_APPROVAL_SECRET"]
-    env_file = Path(__file__).parent.parent / ".env"
-    if env_file.exists():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
-            key, _, value = line.partition("=")
-            if key.strip() == "MIZANI_APPROVAL_SECRET" and value.strip():
-                return value.strip().strip("\"'")
-    return "local-demo-secret-change-me"
+def in_the_mcp_container(code: str) -> str:
+    """Run Python inside the running mizani-mcp container, against its own database."""
+    command = ["docker", "compose", "exec", "-T", "mizani-mcp", "python", "-c", code]
+    root = Path(__file__).parent.parent
+    return subprocess.run(command, cwd=root, capture_output=True, text=True, check=True).stdout
+
+
+def live_secret() -> str:
+    """The approval secret the MCP server uses: the one `.env` gives it, or the install's own."""
+    code = (
+        "import os; from mizani.approval import ensure_secret; ensure_secret(); "
+        "print(os.environ['MIZANI_APPROVAL_SECRET'])"
+    )
+    return in_the_mcp_container(code).strip()
+
+
+def live_nurse() -> Account:
+    """The test's nurse in the stack's database: an account no one can sign in to."""
+    code = (
+        "from mizani import auth; from mizani.db import db; c = db(); "
+        "a = auth.find(c, 'e2e-nurse') or auth.add_account("
+        "c, 'e2e-nurse', 'Nurse E2E', 'nurse', created_by='tests/test_stack.py'); "
+        "print(a.model_dump_json())"
+    )
+    return Account.model_validate_json(in_the_mcp_container(code))
 
 
 async def test_committed_triage_lands_in_hapi_through_wso2(monkeypatch):
-    monkeypatch.setenv("MIZANI_APPROVAL_SECRET", compose_secret())
+    monkeypatch.setenv("MIZANI_APPROVAL_SECRET", live_secret())
+    nurse = live_nurse()
     async with Client(MIZANI) as mizani:
         args = dict(
             patient_label="Test Patient E2E",
@@ -71,9 +86,7 @@ async def test_committed_triage_lands_in_hapi_through_wso2(monkeypatch):
             discriminators=[{"id": "chest_pain", "quote": "chest pain"}],
         )
         proposal = (await mizani.call_tool("propose_priority", args)).structured_content
-        token = issue_approval(
-            proposal["triage_id"], NurseDecision(nurse_name="Nurse E2E", action="approve")
-        )
+        token = issue_approval(proposal["triage_id"], nurse)
         committed = await mizani.call_tool(
             "commit_triage", {"triage_id": proposal["triage_id"], "approval_token": token}
         )

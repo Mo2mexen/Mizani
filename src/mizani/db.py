@@ -1,4 +1,5 @@
-"""One SQLite file for triages, used approval tokens and the audit log. Local only."""
+"""One SQLite file for triages, used approval tokens, accounts, sign-in sessions and the audit
+log. Local only."""
 
 import os
 import sqlite3
@@ -51,6 +52,29 @@ CREATE TABLE IF NOT EXISTS audit (
     body TEXT NOT NULL,               -- JSON AuditEntry, the hashed content
     prev_hash TEXT NOT NULL,
     hash TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS account (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    full_name TEXT NOT NULL UNIQUE COLLATE NOCASE,  -- what records show as the approver
+    role TEXT NOT NULL CHECK (role IN ('nurse', 'doctor', 'admin')),
+    password_hash TEXT NOT NULL,      -- scrypt, with its salt and cost (auth.py)
+    must_change INTEGER NOT NULL DEFAULT 1,  -- a one-time password: choose your own first
+    active INTEGER NOT NULL DEFAULT 1,       -- deactivated, never deleted (audit rows name it)
+    chief_by TEXT,                    -- the chief flag on a doctor: who gave it, and when
+    chief_at TEXT,
+    failed INTEGER NOT NULL DEFAULT 0,       -- wrong passwords since the last sign-in
+    locked_until TEXT,
+    created_at TEXT NOT NULL,
+    created_by TEXT,
+    last_login_at TEXT
+);
+CREATE TABLE IF NOT EXISTS session (
+    id_hash TEXT PRIMARY KEY,         -- SHA-256 of the cookie's value, never the value itself
+    account_id INTEGER NOT NULL REFERENCES account (id),
+    created_at TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    ended INTEGER NOT NULL DEFAULT 0  -- signed out, timed out, or ended by an admin
 );
 """
 ADDED_COLUMNS = [

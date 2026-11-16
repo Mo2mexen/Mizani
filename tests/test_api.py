@@ -6,9 +6,11 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 from langchain_core.tools import StructuredTool
 from langgraph.checkpoint.memory import InMemorySaver
-from test_agent_graph import NORMAL, FakeModel, reply
+from test_agent_graph import NORMAL, FakeModel, person, reply
 
-from mizani.api import create_app
+from mizani import auth
+from mizani.api import SESSION_COOKIE, create_app
+from mizani.db import db
 from mizani.mcp_server import mcp
 from mizani.rules.pack import load_pack
 
@@ -19,9 +21,24 @@ def fresh_db(tmp_path, monkeypatch):
     monkeypatch.setenv("MIZANI_APPROVAL_SECRET", "test-secret")
 
 
-def client(*replies):
+def session(who="Nurse A", role="nurse", chief=False):
+    """A signed-in session for this person, opened directly (the sign-in itself: test_auth.py)."""
+    return auth.open_session(db(), person(who, role, chief))
+
+
+def signed_in(app, who="Nurse A", role="nurse", base_url="http://127.0.0.1"):
+    """The page's client: signed in, and sending the header every change needs."""
+    return TestClient(
+        app,
+        base_url=base_url,  # a name the API answers to
+        headers={"X-Mizani": "1"},
+        cookies={SESSION_COOKIE: session(who, role)},
+    )
+
+
+def client(*replies, who="Nurse A", role="nurse"):
     app = create_app(FakeModel(messages=iter(replies)), mcp, InMemorySaver())
-    return TestClient(app, base_url="http://127.0.0.1")  # a name the API answers to
+    return signed_in(app, who, role)
 
 
 def events(api, run_id, until, last_event_id=None):
@@ -60,7 +77,7 @@ def test_intake_streams_the_steps_then_the_proposal_and_a_named_nurse_commits():
         proposal = stream[-1][1]["proposal"]
         assert (proposal["colour"], proposal["status"]) == ("orange", "pending")
 
-        approve = {"nurse_name": "Nurse A", "action": "approve", "triage_id": proposal["triage_id"]}
+        approve = {"action": "approve", "triage_id": proposal["triage_id"]}
         done = api.post(f"/api/triage/{run}/decision", json=approve)
         assert done.status_code == 200
         assert (done.json()["colour"], done.json()["approver"]) == ("orange", "Nurse A")
@@ -74,20 +91,15 @@ def test_intake_streams_the_steps_then_the_proposal_and_a_named_nurse_commits():
         assert api.get("/api/audit/verify").json() == {"intact": True, "first_broken_row": None}
 
 
-def test_a_decision_needs_a_nurse_name_and_an_override_needs_a_reason():
+def test_a_decision_takes_no_typed_name_and_an_override_needs_a_reason():
     with client(reply()) as api:
         run = intake(api)
         shown = events(api, run, until="proposal")[-1][1]["proposal"]["triage_id"]
-        no_name = {"nurse_name": " ", "action": "approve", "triage_id": shown}
-        no_reason = {
-            "nurse_name": "Nurse A",
-            "action": "override",
-            "colour": "red",
-            "triage_id": shown,
-        }
-        no_proposal = {"nurse_name": "Nurse A", "action": "approve"}
+        typed_name = {"nurse_name": "Someone Else", "action": "approve", "triage_id": shown}
+        no_reason = {"action": "override", "colour": "red", "triage_id": shown}
+        no_proposal = {"action": "approve"}
         assert api.post(f"/api/triage/{run}/decision", json=no_proposal).status_code == 422
-        assert api.post(f"/api/triage/{run}/decision", json=no_name).status_code == 422
+        assert api.post(f"/api/triage/{run}/decision", json=typed_name).status_code == 422
         assert api.post(f"/api/triage/{run}/decision", json=no_reason).status_code == 422
 
 
@@ -95,8 +107,7 @@ def test_an_override_to_a_colour_off_the_chart_is_refused_and_the_run_keeps_wait
     with client(reply()) as api:
         run = intake(api)
         shown = events(api, run, until="proposal")[-1][1]["proposal"]["triage_id"]
-        bad = {"nurse_name": "Nurse A", "action": "override", "colour": "purple", "reason": "x",
-               "triage_id": shown}  # fmt: skip
+        bad = {"action": "override", "colour": "purple", "reason": "x", "triage_id": shown}
         refused = api.post(f"/api/triage/{run}/decision", json=bad)
         assert refused.status_code == 409 and "not a SATS colour" in refused.json()["detail"]
 
@@ -123,8 +134,7 @@ def test_remeasured_vitals_stream_a_new_proposal():
         assert not any(f["kind"] == "incomplete" for f in proposal["flags"])
 
         # Approving the first proposal after the re-measure is refused, never moved to the new one
-        stale = {"nurse_name": "Nurse A", "action": "approve",
-                 "triage_id": first[-1][1]["proposal"]["triage_id"]}  # fmt: skip
+        stale = {"action": "approve", "triage_id": first[-1][1]["proposal"]["triage_id"]}
         refused = api.post(f"/api/triage/{run}/decision", json=stale)
         assert refused.status_code == 409 and "proposal changed" in refused.json()["detail"]
         fresh = {**stale, "triage_id": proposal["triage_id"]}
@@ -157,7 +167,7 @@ def test_a_waiting_patient_is_retriaged_and_replaced_only_once_a_nurse_commits()
         run = intake(api)
         first = events(api, run, until="proposal")[-1][1]["proposal"]["triage_id"]
         assert api.post(f"/api/queue/{first}/retriage", json={"vitals": worse}).status_code == 409
-        approve = {"nurse_name": "Nurse A", "action": "approve"}
+        approve = {"action": "approve"}
         api.post(f"/api/triage/{run}/decision", json={**approve, "triage_id": first})
 
         response = api.post(f"/api/queue/{first}/retriage", json={"vitals": worse})
@@ -183,7 +193,7 @@ def test_a_waiting_patient_is_retriaged_and_replaced_only_once_a_nurse_commits()
 
 def committed_patient(api, run):
     shown = events(api, run, until="proposal")[-1][1]["proposal"]["triage_id"]
-    approve = {"nurse_name": "Nurse A", "action": "approve", "triage_id": shown}
+    approve = {"action": "approve", "triage_id": shown}
     return api.post(f"/api/triage/{run}/decision", json=approve).json()["triage_id"]
 
 
@@ -198,15 +208,13 @@ def test_the_model_drafts_a_handover_and_only_a_named_nurse_releases_it():
         draft_id = draft.json()["draft_id"]
         assert api.get(f"/api/queue/{triage_id}").json()["handovers"][0]["released_by"] is None
 
-        wrong = api.post(f"/api/queue/{triage_id}/handover/{draft_id + 1}/release",
-                         json={"nurse_name": "Nurse B"})  # fmt: skip
+        wrong = api.post(f"/api/queue/{triage_id}/handover/{draft_id + 1}/release")
         assert wrong.status_code == 409
-        done = api.post(f"/api/queue/{triage_id}/handover/{draft_id}/release",
-                        json={"nurse_name": "Nurse B"})  # fmt: skip
-        assert done.status_code == 200 and done.json()["approver"] == "Nurse B"
+        done = api.post(f"/api/queue/{triage_id}/handover/{draft_id}/release")
+        assert done.status_code == 200 and done.json()["approver"] == "Nurse A"
         rows = api.get("/api/audit", params={"triage_id": triage_id}).json()
     released = [r for r in rows if r["tool"] == "release_handover" and not r["error"]]
-    assert released[0]["approver"] == "Nurse B"
+    assert released[0]["approver"] == "Nurse A"
     assert released[0]["inputs"]["approval_token"] == "***"
 
 
@@ -214,7 +222,7 @@ def test_shadow_mode_records_the_nurses_colour_before_the_decision():
     with client(reply(ids=["chest_pain"])) as api:
         run = intake(api)
         events(api, run, until="proposal")
-        mine = {"nurse_name": "Nurse C", "colour": "yellow", "reason": "walked in"}
+        mine = {"colour": "yellow", "reason": "walked in"}
         assert api.post(f"/api/triage/{run}/assessment", json=mine).status_code == 201
         assert api.post(f"/api/triage/{run}/assessment", json=mine).status_code == 409
         report = api.get("/api/shadow").json()
@@ -287,20 +295,38 @@ def test_an_overridden_handover_cites_the_nurse_not_the_rejected_proposal():
     assert _why(record) == "TEWS 1 -> green"
 
 
-def test_a_named_nurse_calls_a_patient_in_and_the_card_leaves_the_waiting_room():
+def test_the_signed_in_nurse_calls_a_patient_in_and_the_card_leaves_the_waiting_room():
     with client(reply(ids=["chest_pain"])) as api:
         triage_id = committed_patient(api, intake(api))
-        unnamed = api.post(f"/api/queue/{triage_id}/called-in", json={"nurse_name": ""})
-        assert unnamed.status_code == 422 and len(api.get("/api/queue").json()) == 1
-        done = api.post(f"/api/queue/{triage_id}/called-in", json={"nurse_name": "Nurse C"})
-        assert done.status_code == 200 and done.json()["approver"] == "Nurse C"
+        typed_name = api.post(f"/api/queue/{triage_id}/called-in", json={"nurse_name": "X"})
+        # a body is not read: the name is always the signed-in account's
+        assert typed_name.status_code == 200 and typed_name.json()["approver"] == "Nurse A"
         assert api.get("/api/queue").json() == []
-        again = api.post(f"/api/queue/{triage_id}/called-in", json={"nurse_name": "Nurse C"})
+        again = api.post(f"/api/queue/{triage_id}/called-in")
         assert again.status_code == 409
-        assert api.get(f"/api/queue/{triage_id}").json()["triage"]["called_in_by"] == "Nurse C"
+        assert api.get(f"/api/queue/{triage_id}").json()["triage"]["called_in_by"] == "Nurse A"
         rows = api.get("/api/audit", params={"triage_id": triage_id}).json()
     (logged,) = [r for r in rows if r["tool"] == "record_called_in" and not r["error"]]
-    assert logged["approver"] == "Nurse C" and logged["inputs"]["approval_token"] == "***"
+    assert logged["approver"] == "Nurse A" and logged["inputs"]["approval_token"] == "***"
+
+
+def test_a_doctor_reads_the_released_handover_then_sees_the_patient():
+    text = "RR 12, HR 80, alert; chest pain\nOrange: chest pain (SATS chart)"
+    with client(reply(ids=["chest_pain"]), AIMessage(content=text)) as api:
+        triage_id = committed_patient(api, intake(api))  # as Nurse A
+        draft_id = api.post(f"/api/queue/{triage_id}/handover").json()["draft_id"]
+        api.post(f"/api/queue/{triage_id}/handover/{draft_id}/release")
+
+        api.cookies.set(SESSION_COOKIE, session("Doctor D", "doctor"))
+        (waiting,) = api.get("/api/queue").json()
+        (handover,) = api.get("/api/handovers").json()
+        assert waiting["triage_id"] == handover["triage_id"] == triage_id
+        assert handover["text"].startswith("RR 12") and handover["released_by"] == "Nurse A"
+        decide = {"action": "approve", "triage_id": triage_id}
+        assert api.post("/api/triage/x/decision", json=decide).status_code == 403
+        seen = api.post(f"/api/queue/{triage_id}/called-in")
+        assert seen.status_code == 200 and seen.json()["approver"] == "Doctor D"
+        assert api.get("/api/queue").json() == [] and api.get("/api/handovers").json() == []
 
 
 def test_a_handover_draft_says_so_when_the_model_does_not_answer():
@@ -341,7 +367,7 @@ def test_a_slow_handover_draft_states_the_wait_at_the_time_it_is_saved(monkeypat
         yield AIMessage(content="RR 12, HR 80, alert; chest pain\nOrange: chest pain (SATS chart)")
 
     app = create_app(FakeModel(messages=model()), mcp, InMemorySaver())
-    with TestClient(app, base_url="http://127.0.0.1") as api:
+    with signed_in(app) as api:
         triage_id = committed_patient(api, intake(api))
         draft = api.post(f"/api/queue/{triage_id}/handover")
     assert draft.status_code == 201
@@ -362,7 +388,7 @@ def test_a_recheck_after_the_model_failed_still_says_the_signs_were_not_checked(
 def test_a_recheck_on_a_stale_card_of_a_called_in_patient_is_refused_at_once():
     with client(reply(ids=["chest_pain"])) as api:
         triage_id = committed_patient(api, intake(api))
-        api.post(f"/api/queue/{triage_id}/called-in", json={"nurse_name": "Nurse C"})
+        api.post(f"/api/queue/{triage_id}/called-in")
         stale = api.post(f"/api/queue/{triage_id}/retriage", json={"vitals": NORMAL})
     assert stale.status_code == 409 and "still in the queue" in stale.json()["detail"]
 
@@ -380,7 +406,7 @@ def test_a_commit_that_cannot_reach_the_server_goes_back_to_the_nurse(monkeypatc
     with client(reply(ids=["chest_pain"])) as api:
         run = intake(api)
         shown = events(api, run, until="proposal")[-1][1]["proposal"]["triage_id"]
-        approve = {"nurse_name": "Nurse A", "action": "approve", "triage_id": shown}
+        approve = {"action": "approve", "triage_id": shown}
         refused = api.post(f"/api/triage/{run}/decision", json=approve)
         assert refused.status_code == 409 and "did not answer" in refused.json()["detail"]
         done = api.post(f"/api/triage/{run}/decision", json=approve)  # still waiting for her
@@ -391,7 +417,7 @@ def test_after_an_api_restart_a_reconnecting_page_resumes_at_the_right_event():
     partial = {k: v for k, v in NORMAL.items() if k != "heart_rate"}
     saver = InMemorySaver()
     before = create_app(FakeModel(messages=iter([reply()])), mcp, saver)
-    with TestClient(before, base_url="http://127.0.0.1") as api:
+    with signed_in(before) as api:
         run = intake(api, vitals=partial)
         first = events(api, run, until="proposal")
         api.post(f"/api/triage/{run}/vitals", json={"vitals": {"heart_rate": 135}})
@@ -399,7 +425,7 @@ def test_after_an_api_restart_a_reconnecting_page_resumes_at_the_right_event():
     # The API restarts and rebuilds the run from its checkpoint; the page reconnects with the
     # id of the last event it got before the re-measure.
     after = create_app(FakeModel(messages=iter([])), mcp, saver)
-    with TestClient(after, base_url="http://127.0.0.1") as api:
+    with signed_in(after) as api:
         resumed = events(api, run, until="proposal", last_event_id=first[-1][2])
     assert [(kind, i) for kind, _, i in resumed] == [(kind, i) for kind, _, i in second]
     assert resumed[-1][1]["proposal"] == second[-1][1]["proposal"]
@@ -412,7 +438,7 @@ def test_the_api_answers_only_to_this_machines_names(monkeypatch):
     assert rebound.status_code == 400  # DNS rebinding: a page elsewhere cannot reach it
     monkeypatch.setenv("MIZANI_ALLOWED_HOSTS", "127.0.0.1,triage.ward.local")
     app = create_app(FakeModel(messages=iter([])), mcp, InMemorySaver())
-    with TestClient(app, base_url="http://triage.ward.local") as api:
+    with signed_in(app, base_url="http://triage.ward.local") as api:
         assert api.get("/api/colours").status_code == 200  # a ward server adds its own name
 
 

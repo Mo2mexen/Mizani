@@ -8,7 +8,7 @@ Mizani is an offline triage co-pilot for the front desk of a busy public hospita
 >
 > **Demo video (2:32):** [youtu.be/5X2kgk-QHfY](https://youtu.be/5X2kgk-QHfY). One unedited take with the real model and its tool calls on screen, including where Mizani fails.
 >
-> **One command, on Windows, macOS or Linux:** `git clone https://github.com/Mo2mexen/Mizani.git`, `cd Mizani`, `docker compose up`, then open **http://127.0.0.1:8090**. Steps for each system: [Running it](#running-it).
+> **One command, on Windows, macOS or Linux:** `git clone https://github.com/Mo2mexen/Mizani.git`, `cd Mizani`, `docker compose up`, then open **http://127.0.0.1:8090** and sign in as `admin` with the one-time password the log prints (`docker compose logs app`). Steps for each system: [Running it](#running-it).
 >
 > **It needs a local language model, and `docker compose up` provides one.** The first start downloads the model (Qwen3.5 4B, 3.3 GB) and the container images, about 7 GB in all; on our test machine it took 41 minutes on a 27 Mbit/s connection, nearly all of it downloading. After that Mizani runs offline, with no API keys or accounts, and starts in about 25 seconds. **Speed and chart-sign accuracy depend on the model and the machine:** a patient took 10 to 25 seconds with the model on a MacBook Air M4's GPU, and 1 to 2 minutes with the model inside Docker on its CPU. To use another model, copy `.env.example` to `.env` and set `LLM_MODEL`, `LLM_BASE_URL` and `LLM_REASONING_EFFORT` ([docs/REMOTE_MODEL.md](docs/REMOTE_MODEL.md)).
 
@@ -146,7 +146,23 @@ cd Mizani
 docker compose up
 ```
 The repository forces LF line endings (`.gitattributes`), so a Windows checkout builds the same Linux images.
-Then open **http://127.0.0.1:8090** once the log shows `Uvicorn running on http://0.0.0.0:8090`. The page has the intake, the agent's steps live, the proposal with the rule behind every number, approval, the waiting room and the audit log ([docs/systems/web.md](docs/systems/web.md)).
+Then open **http://127.0.0.1:8090** once the log shows `Uvicorn running on http://0.0.0.0:8090`.
+
+**First sign-in.** There is no signup. On the first start the log prints a box like this one (find it again with `docker compose logs app`):
+```
++---------------------------------------------------------+
+| First sign-in to Mizani                                 |
+|   user name:          admin                             |
+|   one-time password:  kq7m-x3pd-9fwt                    |
+| Open the page, sign in, and choose your own password.   |
+| Until then, every start prints a new one-time password. |
++---------------------------------------------------------+
+```
+1. Sign in as `admin` with that password and choose your own (at least 10 characters).
+2. Under **Users**, add the people who will use Mizani: a nurse for the triage desk, a doctor for the waiting room and the handovers nurses release. Each gets a one-time password to change at their first sign-in. A doctor can be given the chief flag there.
+3. Sign out (or **Switch user**) and sign in as the nurse. The page has the intake, the agent's steps live, the proposal with the rule behind every number, approval under the nurse's own name, the waiting room and the audit log ([docs/systems/web.md](docs/systems/web.md)).
+
+A restart before the admin's first sign-in prints a new one-time password and the old one stops working. If you prefer a command, or every admin is locked out: `docker compose run --rm --no-deps app mizani-admin create-admin <user name> "<full name>"` (or `reset-password <user name>`) prints a one-time password. A page left alone for 15 minutes signs out by itself.
 
 `docker compose up` starts the model server (Ollama, pulling the model once and loading it into memory while the rest starts), our MCP server at `http://127.0.0.1:8000/mcp` (try it by hand with `npx @modelcontextprotocol/inspector`), the API with the agent at `http://127.0.0.1:8090` (try it from `http://127.0.0.1:8090/docs`, or with curl as in [docs/systems/api.md](docs/systems/api.md)), wso2's FHIR MCP server at `http://127.0.0.1:8001/mcp/` and a local HAPI FHIR store at `http://127.0.0.1:18080/fhir`. The API waits until HAPI answers, so the first patient's FHIR record is written too. `docker compose ps` shows each long-running service as healthy or unhealthy: the model server, our MCP server (`/health`), the API (`/api/health`) and the FHIR server.
 
@@ -166,7 +182,7 @@ npx @modelcontextprotocol/inspector                                        # cal
 claude mcp add --transport http mizani-triage http://127.0.0.1:8000/mcp    # or add it to an MCP client, here Claude Code
 ```
 
-An agent can check vitals, compute the TEWS with a source for every point and propose a priority. It cannot save one: `commit_triage` refuses any call without an approval token signed for a named nurse, and that refusal is logged too.
+An agent can check vitals, compute the TEWS with a source for every point and propose a priority. It cannot save one: `commit_triage` refuses any call without an approval token signed for the account of a signed-in nurse, and that refusal is logged too.
 
 [docs/INTEGRATION.md](docs/INTEGRATION.md) has a Python example with its output, the approval step for a front end of your own, the HTTP calls that send a patient through Mizani's agent, and how a record system reads the FHIR records.
 
@@ -178,33 +194,34 @@ You need Python 3.12, [uv](https://docs.astral.sh/uv/) and Docker (see [packages
 uv sync                          # install dependencies from uv.lock
 uv run pytest                    # all tests; none of them need a language model
 uv run ruff check . && uv run ruff format --check .
-MIZANI_APPROVAL_SECRET=dev uv run mizani-mcp      # MCP server at http://127.0.0.1:8000/mcp
+uv run mizani-mcp                                # MCP server at http://127.0.0.1:8000/mcp
 npx @modelcontextprotocol/inspector              # call its tools by hand in the browser
 docker compose up -d mizani-mcp fhir-mcp hapi-fhir
 MIZANI_E2E=1 uv run pytest tests/test_stack.py   # proposal -> approval -> commit -> FHIR, no model
-MIZANI_APPROVAL_SECRET=dev MIZANI_FHIR_MCP_URL=http://127.0.0.1:8001/mcp/ uv run mizani-api   # API + agent at http://127.0.0.1:8090
+MIZANI_FHIR_MCP_URL=http://127.0.0.1:8001/mcp/ uv run mizani-api   # API + agent at http://127.0.0.1:8090; prints the first admin's password
 uv run mizani-evals --help                      # the evaluation runner (EVALS.md)
 cd web && npm ci && npm run dev                  # the page at http://localhost:5173 against that API (Node 22)
 VITE_USE_MOCK=true npm run dev                   # the page on fake data, no backend
 ```
 
-Plain `uv run pytest` reports one skipped test. It is `tests/test_stack.py`, the only test that needs real containers (our MCP server, wso2's server and HAPI FHIR), and it runs when `MIZANI_E2E=1` is set, as in the two lines above. CI does not start containers, so run it by hand after changing `docker-compose.yml`, `docker/Dockerfile` or `src/mizani/fhir.py`. The test signs its approval with the same secret compose gives the server: the shell's `MIZANI_APPROVAL_SECRET`, else the one in `.env`, else the compose default.
+Plain `uv run pytest` reports one skipped test. It is `tests/test_stack.py`, the only test that needs real containers (our MCP server, wso2's server and HAPI FHIR), and it runs when `MIZANI_E2E=1` is set, as in the two lines above. CI does not start containers, so run it by hand after changing `docker-compose.yml`, `docker/Dockerfile` or `src/mizani/fhir.py`. The test reads the approval secret and adds its own test nurse (an account no one can sign in to) inside the running `mizani-mcp` container, with `docker compose exec`.
 
-On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` first. On a Mac, run Ollama natively rather than in Docker (Docker on macOS has no GPU, and the model runs 4 to 5 times slower there) and set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. How each part works is in [docs/systems/](docs/systems/).
+Run outside Docker, the MCP server and the API share `.cache/data/`: the database, and the approval secret each install makes on its first start. On a Mac, run Ollama natively rather than in Docker (Docker on macOS has no GPU, and the model runs 4 to 5 times slower there) and set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. How each part works is in [docs/systems/](docs/systems/).
 
 ## What works today
 
 | Part | State |
 |---|---|
 | Rules engine (SATS adult), every rule cited; the chart chosen by a setting (`MIZANI_RULE_PACK`), and a chart with an uncited rule refused at start | done, tested |
-| MCP server `mizani-triage`: 10 tools, 5 resources, 2 prompts, approval gate, hash-chained audit; a chart sign counts only with the complaint's own words behind it, never from text addressed to the software; a red colour from the complaint alone needs the nurse's confirmation | done, tested through an MCP client |
+| Accounts and roles: no signup; an admin adds each person with a one-time password, changed at the first sign-in; nurse, doctor, admin, and a chief flag on a doctor; scrypt passwords, a 15-minute lock after 5 wrong ones, sessions that end after 15 idle minutes or 12 hours, "Switch user" for a shared tablet; the role checked by the API on every request and by the MCP server on every approval; every sign-in and account change in the audit log | done, tested (every endpoint against every role), run live |
+| MCP server `mizani-triage`: 10 tools, 6 resources, 2 prompts, approval gate with a role per action, hash-chained audit; a chart sign counts only with the complaint's own words behind it, never from text addressed to the software; a red colour from the complaint alone needs the nurse's confirmation | done, tested through an MCP client |
 | Agent (LangGraph): reads the entry, checks vitals, scores through the MCP tools, pauses for the nurse, commits with the nurse's token; retries and falls back to the nurse's own vitals when the model's tool calls are wrong or the model server does not answer, and the proposal then says the chart signs were not checked; model, tokens and cost logged with every call | done, tested with a fake model and live with Qwen3.5 4B |
 | Second look (optional, `MIZANI_SECOND_LOOK=1`): the model sees what the server made of its chart signs and corrects or withdraws them once; a withdrawn sign is flagged for the nurse, and an emergency (red) sign cannot be withdrawn | built, tested with a fake model; evaluated on Qwen3.5 4B (180/195 runs pass with it on and with it off, slower with it on); off by default |
-| API (FastAPI): intake, live agent steps as server-sent events, nurse decision (approval token), re-measure, re-triage, handover draft and release, called in, shadow-mode assessment and report, queue, colours, audit log with chain check | done, tested, run live |
-| Web page (React + Vite): intake, the proposal with a source on every number and the words behind every sign, nurse decision with name, re-measure, shadow mode, waiting room with re-check, handover, called in and each patient's recorded details, the agent's steps live (a section the nurse can hide), audit log with the chain check, waiting-room search; desk, tablet and phone layouts, keyboard and screen-reader use | done; served by the API at http://127.0.0.1:8090; every scenario tested in a browser on the full stack |
+| API (FastAPI): sign-in and accounts, intake, live agent steps as server-sent events, nurse decision (approval token for the signed-in nurse), re-measure, re-triage, handover draft and release, the doctors' handover inbox, called in, shadow-mode assessment and report, queue, colours, audit log with chain check | done, tested, run live |
+| Web page (React + Vite): sign-in; for a nurse, intake, the proposal with a source on every number and the words behind every sign, the decision under the nurse's own account, re-measure, shadow mode, waiting room with re-check, handover, called in and each patient's recorded details, the agent's steps live (a section the nurse can hide), audit log with the chain check, waiting-room search; for a doctor, the waiting room by priority, the handover inbox and "Seeing this patient"; for an admin, Users; desk, tablet and phone layouts, keyboard and screen-reader use | done; served by the API at http://127.0.0.1:8090; every scenario tested in a browser on the full stack |
 | FHIR output: the agent's commit step writes Patient, Encounter and Observations through wso2 fhir-mcp-server to a local HAPI FHIR | done, verified end to end and in a live run |
 | Re-triage watch: target-time timers; the agent raises a re-check flag every 30 s for patients past their target time; re-triage with fresh vitals as a new pending proposal that replaces the old entry once a nurse commits it | done, tested, run live |
-| Handover (the model drafts two lines of findings, the waiting time comes from the record, every number is checked against the record, a named nurse releases that exact draft) and shadow mode (nurse's own colour, agreement report) | done, tested, run live |
+| Handover (the model drafts two lines of findings, the waiting time comes from the record, every number is checked against the record, the signed-in nurse releases that exact draft to the doctors' inbox) and shadow mode (nurse's own colour, agreement report) | done, tested, run live |
 | Running it: health checks for every long-running service (`docker compose ps` shows what is broken); backups with one command (`docker compose run --rm backup`), each checked against its manifest and the audit log's recorded head before a restore | done, tested, run live |
 | Evaluation suite: 39 tasks × 5 runs with pass rate, run-to-run variation, latency, tokens, cost | done on 13 Nov 2026: Qwen3.5 4B 180/195 runs pass (92%), the same with the second look on; Qwen3 4B Instruct 2507 145/195 (74%); failures documented |
 

@@ -1,12 +1,17 @@
-"""HTTP API for the nurse's web page: intake, the live agent trace, the nurse's decision, the
-queue, colours and the audit log. Shapes follow `schemas.py`; every endpoint is described in
-docs/systems/api.md.
+"""HTTP API for the page: sign-in, intake, the live agent trace, the nurse's decision, the
+queue, the doctors' inbox, accounts, colours and the audit log. Shapes follow `schemas.py`;
+every endpoint is described in docs/systems/api.md.
+
+Every endpoint but `/api/health` and `/api/auth/login` needs a signed-in account, and each checks
+the account's role on the server (403 otherwise): nurse, doctor, admin, or a doctor with the chief
+flag. A request that changes something must carry the header `X-Mizani: 1`, which a page on
+another site cannot send.
 
 `POST /api/intake` starts one agent run and returns its id at once; the run's steps arrive on
 `GET /api/triage/{id}/stream` (server-sent events). The run pauses at the nurse. Only
-`POST /api/triage/{id}/decision` turns a named nurse's decision into an approval token, and the
-token goes straight to the agent's commit step: the model never sees it. Releasing a handover
-and recording that a patient was called in work the same way.
+`POST /api/triage/{id}/decision` turns the signed-in nurse's decision into an approval token,
+and the token goes straight to the agent's commit step: the model never sees it. Releasing a
+handover and recording that a patient was called in work the same way.
 """
 
 import asyncio
@@ -21,30 +26,154 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 from mcp.client import Client
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
+from starlette.datastructures import Headers, MutableHeaders
 
-from mizani import audit, store
+from mizani import audit, auth, store
 from mizani.agent.graph import build_graph
 from mizani.agent.mcp_tools import load_tools, read_json, server_url, with_meta
 from mizani.agent.model import call_model, chat_model
 from mizani.agent.watch import watch
-from mizani.approval import issue_approval
+from mizani.approval import ensure_secret, issue_approval
 from mizani.db import db, db_path
 from mizani.fhir import fhir_url, write_committed
 from mizani.rules.engine import LABELS
-from mizani.schemas import Contract, NurseDecision, Vitals
+from mizani.schemas import Account, Contract, NurseDecision, Role, Vitals
 
 log = logging.getLogger("mizani.api")
 FINAL_EVENTS = {"committed", "error"}
 MCP_CONNECT_TRIES = 30  # the MCP server may still be starting (compose)
+SESSION_COOKIE = "mizani_session"
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+ROLE_NAMES = {
+    "nurse": "a nurse",
+    "doctor": "a doctor",
+    "admin": "an admin",
+    "chief": "the chief doctor",
+}
+# The page's own files only: no inline scripts, no other sites, never inside another site's frame
+CSP = (
+    "default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; "
+    "form-action 'self'; frame-ancestors 'none'"
+)
+
+
+class Guard:
+    """Refuses an API request that changes something unless it carries `X-Mizani: 1`. A page on
+    another site cannot send a custom header, so a forged form or script fails even before the
+    SameSite cookie would stop it. Adds security headers to every answer, and `no-store` to the
+    API's, so a shared tablet's browser keeps no patient data in its cache."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope["path"]
+        changes = scope["method"] not in SAFE_METHODS
+        if path.startswith("/api/") and changes and Headers(scope=scope).get("x-mizani") != "1":
+            detail = "Refused: this request did not come from the Mizani page."
+            await JSONResponse({"detail": detail}, status_code=403)(scope, receive, send)
+            return
+
+        async def with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers.setdefault("X-Content-Type-Options", "nosniff")
+                headers.setdefault("Referrer-Policy", "no-referrer")
+                headers.setdefault("X-Frame-Options", "DENY")
+                if not path.startswith(("/docs", "/redoc", "/openapi.json")):  # Swagger's CDN
+                    headers.setdefault("Content-Security-Policy", CSP)
+                if path.startswith("/api/"):
+                    headers["Cache-Control"] = "no-store"
+            await send(message)
+
+        await self.app(scope, receive, with_headers)
+
+
+def signed_in(request: Request) -> Account:
+    """The account behind the session cookie, or 401. The page's own polling sends
+    `X-Mizani-Background: 1`, which does not count as use, so an idle tablet still signs out."""
+    value = request.cookies.get(SESSION_COOKIE)
+    touch = request.headers.get("x-mizani-background") != "1"
+    account = auth.session_account(db(), value, touch) if value else None
+    if account is None:
+        raise HTTPException(401, "You are signed out. Sign in again to continue.")
+    return account
+
+
+def allow(*roles: str):
+    """A dependency: the signed-in account if it has one of `roles` and has chosen its own
+    password, 403 otherwise. "chief" is a doctor with the chief flag."""
+
+    def check(account: Annotated[Account, Depends(signed_in)]) -> Account:
+        if account.must_change:
+            raise HTTPException(403, "Choose your own password first.")
+        if not any(auth.has_role(account, role) for role in roles):
+            needed = " or ".join(ROLE_NAMES[role] for role in roles)
+            raise HTTPException(
+                403, f"This needs {needed}; you are signed in as {ROLE_NAMES[account.role]}."
+            )
+        return account
+
+    return check
+
+
+SignedIn = Annotated[Account, Depends(signed_in)]  # also while a one-time password is in use
+Anyone = Annotated[Account, Depends(allow(*auth.ROLES))]
+Nurse = Annotated[Account, Depends(allow("nurse"))]
+Staff = Annotated[Account, Depends(allow("nurse", "doctor"))]
+Doctor = Annotated[Account, Depends(allow("doctor"))]
+Admin = Annotated[Account, Depends(allow("admin"))]
+
+
+class Exact(BaseModel):
+    """For passwords: unknown fields are an error, and nothing is trimmed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class Credentials(Exact):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=auth.MAX_PASSWORD)
+
+
+class NewPassword(Exact):
+    current: str = Field(min_length=1, max_length=auth.MAX_PASSWORD)
+    new: str = Field(min_length=1, max_length=auth.MAX_PASSWORD)
+
+
+class NewAccount(Contract):
+    username: str = Field(min_length=1, max_length=32)
+    full_name: str = Field(min_length=1, max_length=80)
+    role: Role
+
+
+class RoleChange(Contract):
+    role: Role
+
+
+class ChiefFlag(Contract):
+    chief: bool
+
+
+class Activation(Contract):
+    active: bool
+
+
+def refused(exc: auth.AuthError) -> HTTPException:
+    return HTTPException(exc.status, str(exc))
 
 
 class Intake(Contract):
@@ -76,20 +205,15 @@ def _two_lines(content: str) -> list[str]:
 
 
 class Decision(NurseDecision):
-    """The nurse's decision on the proposal she saw. `triage_id` is that proposal's id: if the
+    """The nurse's decision on the proposal on screen. `triage_id` is that proposal's id: if the
     agent has re-scored since (re-measured vitals), the decision is refused, never moved over."""
 
     triage_id: str = Field(min_length=1)
 
 
-class NurseName(Contract):
-    """The named nurse behind an action on a waiting patient."""
-
-    nurse_name: str = Field(min_length=1)
-
-
 class Assessment(Contract):
-    nurse_name: str = Field(min_length=1)
+    """Shadow mode: the nurse's own colour, before Mizani's is shown."""
+
     colour: str = Field(min_length=1)
     reason: str | None = None
 
@@ -191,6 +315,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
     app.add_middleware(
         TrustedHostMiddleware, allowed_hosts=[h.strip() for h in hosts.split(",") if h.strip()]
     )
+    app.add_middleware(Guard)
 
     def thread(run_id: str) -> dict:
         return {"configurable": {"thread_id": run_id}}
@@ -242,8 +367,92 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         run.task = asyncio.create_task(drive(run, entry, run_id))
         return {"triage_id": run_id}
 
+    @app.post("/api/auth/login")
+    def login(body: Credentials, request: Request, response: Response) -> Account:
+        """Sign in. The session lives in an HttpOnly, SameSite=Strict cookie, Secure over HTTPS."""
+        try:
+            value, account = auth.sign_in(db(), body.username, body.password)
+        except auth.AuthError as exc:
+            raise refused(exc) from None
+        secure = request.url.scheme == "https"
+        response.set_cookie(
+            SESSION_COOKIE, value, httponly=True, samesite="strict", secure=secure, path="/"
+        )
+        return account
+
+    @app.post("/api/auth/logout")
+    def logout(request: Request, response: Response, account: SignedIn) -> dict:
+        auth.sign_out(db(), request.cookies[SESSION_COOKIE], account)
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return {"signed_out": True}
+
+    @app.get("/api/auth/me")
+    def me(account: SignedIn) -> Account:
+        """Who is signed in; `must_change` means the page asks for a new password first."""
+        return account
+
+    @app.post("/api/auth/password")
+    def change_password(body: NewPassword, request: Request, account: SignedIn) -> Account:
+        """Change one's own password (the one-time one too). The person's other sessions end."""
+        session = request.cookies[SESSION_COOKIE]
+        try:
+            return auth.change_password(db(), account, body.current, body.new, session)
+        except auth.AuthError as exc:
+            raise refused(exc) from None
+
+    @app.get("/api/admin/users")
+    def users(_: Admin) -> list[Account]:
+        return auth.accounts(db())
+
+    @app.post("/api/admin/users", status_code=201)
+    def add_user(body: NewAccount, admin: Admin) -> dict:
+        """A new account; its one-time password is in this answer only, never stored."""
+        try:
+            account, otp = auth.create_account(
+                db(), admin.full_name, body.username, body.full_name, body.role
+            )
+        except auth.AuthError as exc:
+            raise refused(exc) from None
+        return {"account": account.model_dump(mode="json"), "one_time_password": otp}
+
+    @app.post("/api/admin/users/{account_id}/reset-password")
+    def reset_password(account_id: int, admin: Admin) -> dict:
+        try:
+            return {"one_time_password": auth.reset_password(db(), admin.full_name, account_id)}
+        except auth.AuthError as exc:
+            raise refused(exc) from None
+
+    @app.post("/api/admin/users/{account_id}/role")
+    def set_role(account_id: int, body: RoleChange, admin: Admin) -> Account:
+        try:
+            return auth.set_role(db(), admin, account_id, body.role)
+        except auth.AuthError as exc:
+            raise refused(exc) from None
+
+    @app.post("/api/admin/users/{account_id}/chief")
+    def set_chief(account_id: int, body: ChiefFlag, admin: Admin) -> Account:
+        try:
+            return auth.set_chief(db(), admin, account_id, body.chief)
+        except auth.AuthError as exc:
+            raise refused(exc) from None
+
+    @app.post("/api/admin/users/{account_id}/active")
+    def set_active(account_id: int, body: Activation, admin: Admin) -> Account:
+        try:
+            return auth.set_active(db(), admin, account_id, body.active)
+        except auth.AuthError as exc:
+            raise refused(exc) from None
+
+    @app.post("/api/admin/users/{account_id}/sign-out")
+    def sign_out_everywhere(account_id: int, admin: Admin) -> dict:
+        try:
+            auth.sign_out_everywhere(db(), admin, account_id)
+        except auth.AuthError as exc:
+            raise refused(exc) from None
+        return {"signed_out": True}
+
     @app.post("/api/intake", status_code=202)
-    async def intake(body: Intake) -> dict:
+    async def intake(body: Intake, _: Nurse) -> dict:
         return start_run(
             {
                 "patient_label": body.patient_label,
@@ -253,7 +462,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         )
 
     @app.post("/api/queue/{triage_id}/retriage", status_code=202)
-    async def retriage(triage_id: str, body: Remeasure) -> dict:
+    async def retriage(triage_id: str, body: Remeasure, _: Nurse) -> dict:
         """Re-score a waiting patient with fresh vitals. Starts a run like intake, without the
         model: the chart signs of the current triage are kept, so only the vitals can change the
         colour. The new proposal waits for a nurse, and replaces the old entry once committed."""
@@ -295,6 +504,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
 
     @app.get("/api/triage/{run_id}/stream", response_class=EventSourceResponse)
     async def stream(
+        _: Nurse,
         run: Annotated[Run, Depends(get_run)],  # 404 before the stream starts
         last_event_id: Annotated[str | None, Header()] = None,
     ) -> AsyncIterable[ServerSentEvent]:
@@ -310,7 +520,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
                     return
 
     @app.post("/api/triage/{run_id}/decision")
-    async def decision(run_id: str, body: Decision) -> dict:
+    async def decision(run_id: str, body: Decision, nurse: Nurse) -> dict:
         run = await get_run(run_id)
         async with run.lock:
             proposal = await paused_proposal(run, run_id)
@@ -318,7 +528,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
                 raise HTTPException(
                     409, "the proposal changed (re-measured vitals); review the new one first"
                 )
-            token = issue_approval(proposal["triage_id"], body)
+            token = issue_approval(proposal["triage_id"], nurse, body)
             answer = {"action": body.action, "approval_token": token}
             await drive(run, Command(resume=answer), run_id)
             state = await ctx["graph"].aget_state(thread(run_id))
@@ -332,7 +542,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         )
 
     @app.post("/api/triage/{run_id}/vitals", status_code=202)
-    async def remeasure(run_id: str, body: Remeasure) -> dict:
+    async def remeasure(run_id: str, body: Remeasure, _: Nurse) -> dict:
         run = await get_run(run_id)
         async with run.lock:
             await paused_proposal(run, run_id)
@@ -356,13 +566,13 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         return timeline
 
     @app.get("/api/queue/{triage_id}")
-    async def patient(triage_id: str) -> dict:
+    async def patient(triage_id: str, _: Staff) -> dict:
         """One triage record and its handover drafts (the audit is at /api/audit)."""
         timeline = await committed_record(triage_id)
         return {"triage": timeline["triage"], "handovers": timeline["handovers"]}
 
     @app.post("/api/queue/{triage_id}/handover", status_code=201)
-    async def draft_handover(triage_id: str) -> dict:
+    async def draft_handover(triage_id: str, _: Nurse) -> dict:
         """The model drafts the first two lines of the doctor handover from the record; the
         third, the waiting time, comes from the queue, never from the model. The server refuses a
         draft with a number that is not in the record. It stays unreleased until a nurse reads it
@@ -437,34 +647,38 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
                 messages += [call.message, HumanMessage(f"Refused: {refused.detail}. Try again.")]
 
     @app.post("/api/queue/{triage_id}/handover/{draft_id}/release")
-    async def release_handover(triage_id: str, draft_id: int, body: NurseName) -> dict:
-        """A named nurse releases the draft she read. The token names that draft and goes
+    async def release_handover(triage_id: str, draft_id: int, nurse: Nurse) -> dict:
+        """The signed-in nurse releases the draft they read. The token names that draft and goes
         straight to the server; the model never sees it."""
-        decision = NurseDecision(nurse_name=body.nurse_name, action="approve")
-        token = issue_approval(triage_id, decision, purpose="handover", draft_id=draft_id)
+        token = issue_approval(triage_id, nurse, purpose="handover", draft_id=draft_id)
         args = {"triage_id": triage_id, "draft_id": draft_id, "approval_token": token}
         return await call_tool("release_handover", args)
 
     @app.post("/api/queue/{triage_id}/called-in")
-    async def called_in(triage_id: str, body: NurseName) -> dict:
-        """A named nurse records that she called the patient in to be seen. The card leaves the
-        waiting room and the record stays. Only a nurse does this, never the agent; the server
-        refuses it without her token."""
-        decision = NurseDecision(nurse_name=body.nurse_name, action="approve")
-        token = issue_approval(triage_id, decision, purpose="called_in")
+    async def called_in(triage_id: str, person: Staff) -> dict:
+        """A signed-in nurse or doctor records that the patient was called in to be seen ("Seeing
+        this patient" on the doctor's screen). The card leaves the waiting room and the record
+        stays. Never the agent; the server refuses it without the person's token."""
+        token = issue_approval(triage_id, person, purpose="called_in")
         args = {"triage_id": triage_id, "approval_token": token}
         return await call_tool("record_called_in", args)
 
+    @app.get("/api/handovers")
+    async def handover_inbox(_: Doctor) -> list[dict]:
+        """The doctors' inbox: the handovers nurses released, for patients still waiting."""
+        return await read_json("handovers://released", mcp_server)
+
     @app.post("/api/triage/{run_id}/assessment", status_code=201)
-    async def assessment(run_id: str, body: Assessment) -> dict:
+    async def assessment(run_id: str, body: Assessment, nurse: Nurse) -> dict:
         """Shadow mode: the nurse's own colour, sent before the page shows Mizani's."""
         run = await get_run(run_id)
         proposal = await paused_proposal(run, run_id)
-        args = {"triage_id": proposal["triage_id"], **body.model_dump()}
+        args = {"triage_id": proposal["triage_id"], "nurse_name": nurse.full_name,
+                **body.model_dump()}  # fmt: skip
         return await call_tool("record_nurse_assessment", args, {"run_id": run_id})
 
     @app.get("/api/shadow")
-    async def shadow() -> dict:
+    async def shadow(_: Nurse) -> dict:
         return await read_json("report://shadow-agreement", mcp_server)
 
     @app.get("/api/health")
@@ -480,23 +694,23 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/api/colours")
-    async def colours() -> list[dict]:
+    async def colours(_: Anyone) -> list[dict]:
         return [
             {k: c[k] for k in ("colour", "label", "target_minutes", "source")}
             for c in ctx["colours"]
         ]
 
     @app.get("/api/queue")
-    async def queue() -> list[dict]:
+    async def queue(_: Staff) -> list[dict]:
         # `recheck_due` / `recheck_raised` come from the re-triage watch on the MCP server.
         return await read_json("queue://current", mcp_server)
 
     @app.get("/api/audit")
-    async def audit_log(triage_id: str | None = None) -> list[dict]:
+    async def audit_log(_: Anyone, triage_id: str | None = None) -> list[dict]:
         return audit.entries(db(), triage_id)
 
     @app.get("/api/audit/verify")
-    async def audit_verify() -> dict:
+    async def audit_verify(_: Anyone) -> dict:
         broken = audit.verify_chain(db())
         return {"intact": broken is None, "first_broken_row": broken}
 
@@ -508,8 +722,26 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
     return app
 
 
+def first_sign_in(otp: str) -> str:
+    """The box printed in the server log on a start with no admin password chosen yet."""
+    lines = [
+        "First sign-in to Mizani",
+        f"  user name:          {auth.FIRST_ADMIN[0]}",
+        f"  one-time password:  {otp}",
+        "Open the page, sign in, and choose your own password.",
+        "Until then, every start prints a new one-time password.",
+    ]
+    width = max(len(line) for line in lines) + 2
+    rule = "+" + "-" * width + "+"
+    return "\n".join([rule, *(f"| {line.ljust(width - 1)}|" for line in lines), rule])
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    ensure_secret()  # this install's own, unless .env sets one
+    otp = auth.first_start(db())
+    if otp:
+        print(first_sign_in(otp), flush=True)
     uvicorn.run(
         create_app(),
         host=os.environ.get("MIZANI_API_HOST", "127.0.0.1"),

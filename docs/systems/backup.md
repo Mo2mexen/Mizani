@@ -9,7 +9,7 @@ Copies everything Mizani keeps (the triage database with its audit log, the agen
 
 ## How it works
 1. `docker compose run --rm backup` makes `backups/<UTC time>/`, for example `backups/2026-11-16T132005Z/`.
-2. `mizani.db` and `checkpoints.db` are copied with SQLite's own backup API, which gives a consistent copy even while the API and the MCP server are writing. Each copy is stored as one self-contained file.
+2. `mizani.db` (triages, the waiting room, the accounts and the audit log) and `checkpoints.db` are copied with SQLite's own backup API, which gives a consistent copy even while the API and the MCP server are writing. Each copy is stored as one self-contained file. The approval secret (`approval.secret`) is not copied: a restore onto new volumes makes a new one at the next start, which only matters for approval tokens from the last two minutes.
 3. The FHIR store's files (HAPI's H2 database) go into `hapi-data.tar.gz`, leaving out H2's debug log.
 4. `audit-head.json` records the audit log's row count, its latest hash and whether the chain is intact. `manifest.json` records a SHA-256 for every file, the owner of each data folder, and whether Mizani was running (`stack_running`): if it was, the command says the FHIR files may miss a write in progress.
 5. The command prints the audit head. Keep that line somewhere other than this machine.

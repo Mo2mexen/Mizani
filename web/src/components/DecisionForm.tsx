@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
+import { useAccount } from "../session";
 import type { Colour, Proposal, RunState } from "../types";
 import { EMPTY_VITALS, toVitals } from "../vitals";
 import { VitalsFields } from "./VitalsFields";
@@ -18,9 +19,9 @@ type Props = {
 
 type Busy = "approve" | "override" | "remeasure" | null;
 
-/** Approve, override or re-measure. Nothing is saved without the nurse's name. */
+/** Approve, override or re-measure. A decision is saved under the signed-in nurse's name. */
 export function DecisionForm({ run, proposal, colours, needsConfirm, isConfirmed, onConfirm, onCommitted }: Props) {
-  const [nurse, setNurse] = useState("");
+  const account = useAccount();
   const [overrideColour, setOverrideColour] = useState("");
   const [reason, setReason] = useState("");
   const [isRemeasuring, setIsRemeasuring] = useState(false);
@@ -30,8 +31,7 @@ export function DecisionForm({ run, proposal, colours, needsConfirm, isConfirmed
   const flagged = new Set(
     proposal.flags.filter((f) => f.kind === "remeasure").map((f) => f.source.split(";")[0].replace("input: ", "")),
   );
-  const named = nurse.trim().length > 0;
-  const canApprove = named && (!needsConfirm || isConfirmed) && busy === null;
+  const canApprove = (!needsConfirm || isConfirmed) && busy === null;
 
   async function act(kind: Busy, work: () => Promise<unknown>) {
     setBusy(kind);
@@ -50,7 +50,6 @@ export function DecisionForm({ run, proposal, colours, needsConfirm, isConfirmed
     if (!canApprove) return;
     void act("approve", async () => {
       await api.decide(run.runId, {
-        nurse_name: nurse.trim(),
         action: "approve",
         confirmed: needsConfirm ? isConfirmed : undefined,
         triage_id: proposal.triage_id,
@@ -61,10 +60,9 @@ export function DecisionForm({ run, proposal, colours, needsConfirm, isConfirmed
 
   function override(e: React.FormEvent) {
     e.preventDefault();
-    if (!named || !overrideColour || !reason.trim() || busy !== null) return;
+    if (!overrideColour || !reason.trim() || busy !== null) return;
     void act("override", async () => {
       await api.decide(run.runId, {
-        nurse_name: nurse.trim(),
         action: "override",
         colour: overrideColour,
         reason: reason.trim(),
@@ -86,11 +84,8 @@ export function DecisionForm({ run, proposal, colours, needsConfirm, isConfirmed
   return (
     <div className="decision">
       <h3 className="sub-title">Your decision</h3>
+      <p className="hint">Saved under your name, {account.full_name}.</p>
       <form onSubmit={approve}>
-        <label className="field" htmlFor="nurse-name">
-          <span className="field-label">Your name (required to save)</span>
-          <input id="nurse-name" dir="auto" value={nurse} onChange={(e) => setNurse(e.target.value)} autoComplete="off" />
-        </label>
         {needsConfirm && (
           <label className="check">
             <input type="checkbox" checked={isConfirmed} onChange={(e) => onConfirm(e.target.checked)} />
@@ -111,7 +106,6 @@ export function DecisionForm({ run, proposal, colours, needsConfirm, isConfirmed
             {isRemeasuring ? "Cancel re-measure" : "Enter re-measured vitals"}
           </button>
         </div>
-        {!named && <p className="hint">Type your name to approve or override.</p>}
       </form>
       <form className="override" onSubmit={override}>
         <fieldset>
@@ -134,7 +128,7 @@ export function DecisionForm({ run, proposal, colours, needsConfirm, isConfirmed
           <button
             type="submit"
             className="btn btn-warn"
-            disabled={!named || !overrideColour || !reason.trim() || busy !== null}
+            disabled={!overrideColour || !reason.trim() || busy !== null}
           >
             {busy === "override" ? "Saving…" : "Override"}
           </button>

@@ -2,9 +2,8 @@ import { useState } from "react";
 import { api, ApiError } from "../api";
 import type { Colour } from "../types";
 
-/** Shadow mode: the nurse records her own colour before Mizani's is shown. */
+/** Shadow mode: the signed-in nurse records their own colour before Mizani's is shown. */
 export function ShadowFirst({ runId, colours, onDone }: { runId: string; colours: Colour[]; onDone: () => void }) {
-  const [nurse, setNurse] = useState("");
   const [colour, setColour] = useState("");
   const [reason, setReason] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -15,7 +14,7 @@ export function ShadowFirst({ runId, colours, onDone }: { runId: string; colours
     setIsBusy(true);
     setError(null);
     try {
-      await api.assess(runId, nurse.trim(), colour, reason.trim() || undefined);
+      await api.assess(runId, colour, reason.trim() || undefined);
       onDone();
     } catch (err) {
       // Recorded already (the page was reloaded after the nurse's colour went in): show the proposal.
@@ -39,10 +38,6 @@ export function ShadowFirst({ runId, colours, onDone }: { runId: string; colours
         you decide as usual. Shadow mode is for training and audit: the audit log counts how often you and Mizani agree,
         and your choice is never changed by Mizani's.
       </p>
-      <label className="field" htmlFor="shadow-nurse">
-        <span className="field-label">Your name</span>
-        <input id="shadow-nurse" required value={nurse} onChange={(e) => setNurse(e.target.value)} autoComplete="off" />
-      </label>
       <label className="field" htmlFor="shadow-colour">
         <span className="field-label">Your colour</span>
         <select id="shadow-colour" required value={colour} onChange={(e) => setColour(e.target.value)}>
@@ -63,7 +58,7 @@ export function ShadowFirst({ runId, colours, onDone }: { runId: string; colours
           {error}
         </p>
       )}
-      <button className="btn btn-primary" type="submit" disabled={isBusy || !nurse.trim() || !colour}>
+      <button className="btn btn-primary" type="submit" disabled={isBusy || !colour}>
         {isBusy ? "Recording…" : "Record and show Mizani's proposal"}
       </button>
     </form>

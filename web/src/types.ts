@@ -110,8 +110,8 @@ export type AuditRow = {
   hash: string;
 };
 
+/** The name saved with a decision is the signed-in nurse's, from the session; the page sends none. */
 export type Decision = {
-  nurse_name: string;
   action: "approve" | "override";
   colour?: string;
   reason?: string;
@@ -136,6 +136,42 @@ export type Shadow = {
     mizani_source: string;
     nurse_reason: string | null;
   }[];
+};
+
+export type Role = "nurse" | "doctor" | "admin";
+
+/** A person who signs in (mirrors `Account` in schemas.py; never the password). `chief` is the flag an admin gives a doctor. */
+export type Account = {
+  id: number;
+  username: string;
+  full_name: string;
+  role: Role;
+  chief: boolean;
+  chief_by: string | null;
+  chief_at: string | null;
+  active: boolean;
+  /** Signed in with a one-time password: the page asks for their own first. */
+  must_change: boolean;
+  locked_until: string | null;
+  created_at: string;
+  created_by: string | null;
+  last_login_at: string | null;
+};
+
+/** POST /api/admin/users: the one-time password is in this answer only. */
+export type NewAccount = { account: Account; one_time_password: string };
+
+/** One row of the doctors' inbox (GET /api/handovers): the latest handover a nurse released, for a patient still waiting. */
+export type InboxEntry = {
+  triage_id: string;
+  text: string;
+  released_by: string;
+  released_at: string;
+  patient_label: string;
+  colour: string;
+  waited_minutes: number;
+  target_minutes: number;
+  recheck_due: boolean;
 };
 
 // What one agent run has sent so far on its event stream.
