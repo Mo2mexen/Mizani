@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { IDLE_MINUTES, type SignedOutWhy } from "../session";
+import { IDLE_MINUTES, type SignedOutWhy, useVersion } from "../session";
 import type { Account } from "../types";
 
 const WHY: Record<Exclude<SignedOutWhy, null>, string> = {
@@ -19,6 +19,7 @@ export function SignIn({ why, onSignedIn }: { why: SignedOutWhy; onSignedIn: (ac
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const first = useRef<HTMLInputElement>(null);
+  const version = useVersion();
 
   useEffect(() => first.current?.focus(), []);
 
@@ -91,7 +92,10 @@ export function SignIn({ why, onSignedIn }: { why: SignedOutWhy; onSignedIn: (ac
           <p className="hint">No account yet? Your admin creates one and gives you a one-time password.</p>
         </form>
       )}
-      <p className="signin-foot">Synthetic patients only. Mizani suggests; a signed-in nurse decides every colour.</p>
+      <p className="signin-foot">
+        Synthetic patients only. Mizani suggests; a signed-in nurse decides every colour.
+        {version && <span className="foot-version">Mizani {version}</span>}
+      </p>
     </main>
   );
 }

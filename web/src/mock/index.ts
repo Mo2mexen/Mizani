@@ -151,6 +151,7 @@ const FAKE_PROPOSAL_FOR_RECORD: PatientRecord["proposal"] = {
 };
 
 export const api = {
+  health: async () => ({ status: "ok", version: "FAKE 1.0.0" }),
   me: async () => whoAmI(),
   login: async (username: string, _password: string): Promise<Account> => {
     void _password;

@@ -8,7 +8,7 @@ from langchain_core.tools import StructuredTool
 from langgraph.checkpoint.memory import InMemorySaver
 from test_agent_graph import NORMAL, FakeModel, person, reply
 
-from mizani import auth
+from mizani import __version__, auth
 from mizani.api import SESSION_COOKIE, create_app
 from mizani.db import db
 from mizani.mcp_server import mcp
@@ -506,7 +506,7 @@ def test_test_connection_times_one_short_call_and_says_why_it_failed(monkeypatch
 def test_health_answers_ok_when_the_database_can_be_read():
     with client() as api:
         r = api.get("/api/health")
-    assert (r.status_code, r.json()) == (200, {"status": "ok"})
+    assert (r.status_code, r.json()) == (200, {"status": "ok", "version": __version__})
 
 
 def test_health_is_503_when_the_database_cannot_be_read(tmp_path, monkeypatch):

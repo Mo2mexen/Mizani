@@ -16,6 +16,18 @@ export function useAccount(): Account {
   return account;
 }
 
+/** The version the server runs (pyproject.toml), for the footer; null until it answers. */
+export function useVersion(): string | null {
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    api.health().then(
+      (health) => setVersion(health.version),
+      () => undefined,
+    );
+  }, []);
+  return version;
+}
+
 export function roleName(account: Account): string {
   if (account.role === "doctor") return account.chief ? "Chief doctor" : "Doctor";
   return account.role === "admin" ? "Admin" : "Nurse";

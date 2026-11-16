@@ -153,7 +153,7 @@ To restore: `docker compose down`, then `docker compose run --rm backup restore 
 
 ## 7. Updates
 
-Back up first, then update and rebuild:
+Each version is listed in [CHANGELOG.md](../CHANGELOG.md). Back up first, then update and rebuild:
 
 ```
 docker compose run --rm backup
@@ -161,7 +161,13 @@ git pull
 docker compose up -d --build
 ```
 
-The waiting room, the accounts and the audit log are kept in Docker volumes and survive an update.
+Then check the version: the page shows it at the bottom, and so does the health address, which needs no sign-in:
+
+```
+curl -k https://<MIZANI_HOSTNAME>/api/health      # {"status":"ok","version":"1.0.0"}
+```
+
+The waiting room, the accounts and the audit log are kept in Docker volumes and survive an update; new tables and columns are added on the first start. If something goes wrong, go back: `git checkout <the commit or tag of the version before>`, `docker compose down`, `docker compose run --rm backup restore <the backup you just made>`, `docker compose up -d --build`.
 
 ## 8. When something goes wrong
 
