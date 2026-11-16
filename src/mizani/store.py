@@ -3,6 +3,7 @@
 import json
 import re
 import sqlite3
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from mizani.approval import ApprovalError
@@ -71,8 +72,16 @@ def waiting(record: dict | None) -> bool:
     )
 
 
-def commit(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
-    """Commit a pending triage with a verified approval payload. Each token works once."""
+def commit(
+    con: sqlite3.Connection,
+    triage_id: str,
+    approval: dict,
+    in_use: Callable[[], tuple[RulePack, str]] | None = None,
+) -> dict:
+    """Commit a pending triage with a verified approval payload. Each token works once.
+    `in_use` gives the chart in use and its label; it is read inside the transaction, so a chart
+    activated at the same moment cannot slip in between: a proposal scored with another chart
+    is refused, and so is a colour the chart in use does not have."""
     con.execute("BEGIN IMMEDIATE")
     try:
         record = get(con, triage_id)
@@ -93,12 +102,26 @@ def commit(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
             raise ApprovalError(
                 "a sign here is for the nurse to confirm: confirm it with the patient, or override"
             )
+        override = approval["action"] == "override"
+        colour = approval["colour"] if override else record["proposal"]["colour"]
+        if in_use is not None:
+            pack, chart = in_use()
+            if record["chart"] is not None and record["chart"] != chart:
+                raise ApprovalError(
+                    f"the chart in use changed since this proposal (it was scored with "
+                    f"{record['chart']}; {chart} is in use now): re-measure for a new proposal"
+                )
+            if colour not in {c.colour for c in pack.colours}:
+                raise ApprovalError(
+                    f"override colour '{colour}' is not a colour of the chart in use"
+                    if override
+                    else f"the proposed colour '{colour}' is not in the rule pack in use: "
+                    "re-measure for a new proposal, or override"
+                )
         try:
             con.execute("INSERT INTO used_token (nonce) VALUES (?)", (approval["nonce"],))
         except sqlite3.IntegrityError:
             raise ApprovalError("this approval token was already used") from None
-        override = approval["action"] == "override"
-        colour = approval["colour"] if override else record["proposal"]["colour"]
         decision = {k: approval[k] for k in ("action", "colour", "reason")}
         committed_at = now().isoformat()
         con.execute(
@@ -146,6 +169,8 @@ def queue(con: sqlite3.Connection, pack: RulePack, triage_id: str | None = None)
     A re-check is due once the time since the patient's last triage passes the target time to
     be seen for their colour (manual p6, Table 3)."""
     targets = {c.colour: c.target_minutes for c in pack.colours}
+    # A colour the chart in use lacks (its chart could no longer be loaded) goes first, due now
+    rank = {c.colour: pack.rank(c.colour) for c in pack.colours}
     sql = (
         "SELECT id, patient_label, colour, arrived_at, committed_at, recheck_raised_at"
         " FROM triage WHERE status = 'committed' AND superseded_by IS NULL"
@@ -166,13 +191,13 @@ def queue(con: sqlite3.Connection, pack: RulePack, triage_id: str | None = None)
                 "arrived_at": row["arrived_at"],
                 "waited_minutes": round(_minutes_since(row["arrived_at"]), 1),
                 "minutes_since_triage": round(since_triage, 1),
-                "target_minutes": targets[row["colour"]],
-                "recheck_due": since_triage > targets[row["colour"]],
+                "target_minutes": targets.get(row["colour"], 0),
+                "recheck_due": since_triage > targets.get(row["colour"], 0),
                 "recheck_raised": row["recheck_raised_at"] is not None
                 and row["recheck_raised_at"] >= row["committed_at"],
             }
         )
-    return sorted(out, key=lambda r: (pack.rank(r["colour"]), r["arrived_at"]))
+    return sorted(out, key=lambda r: (rank.get(r["colour"], -1), r["arrived_at"]))
 
 
 def raise_recheck(con: sqlite3.Connection, triage_id: str, pack: RulePack) -> dict:
@@ -327,15 +352,17 @@ def released_handovers(con: sqlite3.Connection, pack: RulePack) -> list[dict]:
     newest first, with the patient's place in the queue. A patient called in leaves it."""
     # A committed re-triage replaces the patient's entry under a new id; a handover released
     # before it is still this patient's. Map every earlier id of each waiting patient to them.
-    current = {}
-    for entry in queue(con, pack):
-        earlier = entry["triage_id"]
-        while earlier and earlier not in current:
-            current[earlier] = entry
-            row = con.execute("SELECT retriage_of FROM triage WHERE id = ?", (earlier,)).fetchone()
-            earlier = row["retriage_of"] if row else None
-    if not current:
+    waiting = {entry["triage_id"]: entry for entry in queue(con, pack)}
+    if not waiting:
         return []
+    chains = con.execute(  # one query for every chain: each id with the waiting entry it led to
+        "WITH RECURSIVE chain(id, now_id) AS ("
+        f" SELECT id, id FROM triage WHERE id IN ({', '.join('?' * len(waiting))})"
+        " UNION SELECT t.retriage_of, chain.now_id FROM triage t JOIN chain ON t.id = chain.id"
+        " WHERE t.retriage_of IS NOT NULL) SELECT id, now_id FROM chain",
+        list(waiting),
+    ).fetchall()
+    current = {row["id"]: waiting[row["now_id"]] for row in chains}
     marks = ", ".join("?" * len(current))  # only the waiting patients' handovers are read
     rows = con.execute(
         "SELECT triage_id, text, released_by, released_at FROM handover"

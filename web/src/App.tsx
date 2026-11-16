@@ -46,7 +46,7 @@ export function App() {
         onSignedIn={session.signIn}
         onSignOut={() => void session.signOut("signed_out")}
       />
-    );;
+    );
   return (
     <SessionContext.Provider value={account}>
       <SignedIn

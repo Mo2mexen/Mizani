@@ -1,7 +1,7 @@
 // Who is signed in, for every screen below the shell. The server checks the role on every
 // request; the page only hides what a role cannot use.
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { api, SIGNED_OUT_EVENT } from "./api";
+import { api, lastUseSentAt, SIGNED_OUT_EVENT } from "./api";
 import type { Account } from "./types";
 
 /** Matches the server's idle limit (auth.IDLE): a shared tablet signs out after this long without use. */
@@ -50,10 +50,12 @@ export function useSession() {
     api.me().then(setAccount, () => setAccount(null)).finally(() => setIsChecking(false));
   }, []);
 
-  // Any 401 from the server: the session ended elsewhere (an admin, another tab, the time limit).
+  // Any 401 from the server: the session ended elsewhere (an admin, another tab, the 12-hour
+  // limit), or the server's idle clock ran out first (it hears of use at most once a minute).
   useEffect(() => {
     const ended = () => {
-      if (current.current && !leaving.current) setWhy("ended");
+      const idle = Date.now() - lastUseSentAt() >= IDLE_MINUTES * 60_000;
+      if (current.current && !leaving.current) setWhy(idle ? "idle" : "ended");
       setAccount(null);
     };
     window.addEventListener(SIGNED_OUT_EVENT, ended);

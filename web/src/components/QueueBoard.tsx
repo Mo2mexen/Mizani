@@ -21,6 +21,8 @@ export function QueueBoard({ colours, queue, onRetriage, onCalledIn }: Props) {
   // Search only hides cards that don't match the label; the order is still the API's.
   const needle = search.trim().toLowerCase();
   const visible = (queue ?? []).filter((e) => !needle || e.patient_label.toLowerCase().includes(needle));
+  // A colour the chart in use lacks (the chart that gave it is no longer in use): its own column, never hidden
+  const others = visible.filter((e) => !colours.some((c) => c.colour === e.colour));
   return (
     <section className="panel queue" aria-labelledby="queue-title">
       <h2 id="queue-title" className="panel-title">
@@ -73,6 +75,24 @@ export function QueueBoard({ colours, queue, onRetriage, onCalledIn }: Props) {
               </div>
             );
           })}
+          {others.length > 0 && (
+            <div className="queue-col c-unknown">
+              <h3 className="queue-head">
+                <span className="swatch" aria-hidden="true" />
+                Not on the chart in use
+                <span className="count">{others.length}</span>
+              </h3>
+              <p className="target">
+                re-check now
+                <span className="src">The chart that gave these colours is no longer in use.</span>
+              </p>
+              <div className="queue-cards">
+                {others.map((e) => (
+                  <Card key={e.triage_id} entry={e} onRetriage={onRetriage} onCalledIn={onCalledIn} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </section>

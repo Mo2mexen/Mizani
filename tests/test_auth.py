@@ -1,6 +1,7 @@
 """Accounts, sign-in, sessions and the role check on every endpoint."""
 
 import json
+import threading
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -331,6 +332,26 @@ def test_sign_in_sets_a_safe_cookie_and_a_one_time_password_blocks_the_rest():
     assert [e["tool"] for e in audit.entries(db())][-3:] == [
         "sign_in", "password_changed", "sign_out"
     ]  # fmt: skip
+
+
+def test_sign_ins_check_passwords_on_threads_of_their_own(monkeypatch):
+    new_account(password="a fine long password")
+    threads = []
+    real = auth.sign_in
+
+    def sign_in(*args):
+        threads.append(threading.current_thread().name)
+        return real(*args)
+
+    monkeypatch.setattr(auth, "sign_in", sign_in)
+    app = create_app(FakeModel(messages=iter([])), mcp, InMemorySaver())
+    with TestClient(app, base_url="http://127.0.0.1") as api:
+        answer = api.post(
+            "/api/auth/login",
+            json={"username": "amina", "password": "a fine long password"},
+            headers={"X-Mizani": "1"},
+        )
+    assert answer.status_code == 200 and threads[0].startswith("password-check")
 
 
 def test_over_https_the_session_cookie_is_secure():

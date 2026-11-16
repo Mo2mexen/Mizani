@@ -241,7 +241,9 @@ def sign_in(con: sqlite3.Connection, username: str, password: str) -> tuple[str,
     """Check the password; returns the new session's cookie value and the account.
 
     Five wrong passwords in a row lock the account for 15 minutes. A wrong user name and a wrong
-    password get the same answer, in the same time."""
+    password get the same answer, in the same time; a locked account says it is locked, so the
+    person knows to wait or ask an admin (user names are not secret: screens and the log show
+    them)."""
     row = con.execute(
         "SELECT * FROM account WHERE username = ?", (username.strip().lower(),)
     ).fetchone()

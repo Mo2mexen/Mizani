@@ -39,12 +39,17 @@ export class ApiError extends Error {
   }
 }
 
+// When this page last sent a request that counts as use: the server's idle clock starts there.
+let lastUseSent = Date.now();
+export const lastUseSentAt = () => lastUseSent;
+
 /** `background` marks the page's own polling, which does not count as use: an idle tablet still signs out. */
 async function call<T>(method: "GET" | "POST", path: string, body?: unknown, background = false): Promise<T> {
   const headers: Record<string, string> = {};
   if (method !== "GET") headers["X-Mizani"] = "1"; // the server refuses a change without it (another site cannot send it)
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (background) headers["X-Mizani-Background"] = "1";
+  else lastUseSent = Date.now();
   const response = await fetch(path, {
     method,
     headers,

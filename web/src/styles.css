@@ -222,6 +222,7 @@ input[type="checkbox"] { width: 1.1rem; height: 1.1rem; margin: 0; accent-color:
 .c-orange { --c: var(--sats-orange); }
 .c-yellow { --c: var(--sats-yellow); }
 .c-green { --c: var(--sats-green); }
+.c-unknown { --c: var(--line-strong); }
 
 .confirm {
   margin-top: 0.7rem; border: 2px solid var(--danger); background: var(--danger-bg);

@@ -5,7 +5,7 @@ import pytest
 from mcp.client import Client
 from test_agent_graph import person
 
-from mizani import approval, audit
+from mizani import approval, audit, store
 from mizani.db import db
 from mizani.mcp_server import mcp
 from mizani.schemas import NurseDecision
@@ -870,8 +870,8 @@ def pack_without(colour):
     return pack.model_copy(update={"colours": [c for c in pack.colours if c.colour != colour]})
 
 
-async def test_the_server_will_not_start_with_a_pack_that_lacks_a_waiting_patients_colour(
-    monkeypatch,
+async def test_the_server_warns_when_a_waiting_patients_colour_is_not_on_the_chart(
+    monkeypatch, capsys
 ):
     from mizani import mcp_server
 
@@ -881,10 +881,11 @@ async def test_the_server_will_not_start_with_a_pack_that_lacks_a_waiting_patien
             "commit_triage", {"triage_id": p["triage_id"], "approval_token": token(p["triage_id"])}
         )
     mcp_server.pack_fits_the_queue()  # the pack in use has the colour: no complaint
+    assert "WARNING" not in capsys.readouterr().out
     smaller = pack_without(p["colour"])
     monkeypatch.setattr(mcp_server, "pack", lambda: smaller)
-    with pytest.raises(SystemExit, match="waiting queue"):
-        mcp_server.pack_fits_the_queue()
+    mcp_server.pack_fits_the_queue()  # the desk still starts
+    assert "listed first, due for a re-check now" in capsys.readouterr().out
 
 
 async def test_a_proposal_from_another_pack_cannot_be_approved_only_overridden(monkeypatch):
@@ -893,7 +894,7 @@ async def test_a_proposal_from_another_pack_cannot_be_approved_only_overridden(m
     async with Client(mcp) as client:
         p = await propose(client)
         smaller = pack_without(p["colour"])
-        monkeypatch.setattr(mcp_server, "pack", lambda: smaller)
+        monkeypatch.setattr(mcp_server.charts, "active", lambda con: (smaller, p["chart"]))
         r = await client.call_tool(
             "commit_triage", {"triage_id": p["triage_id"], "approval_token": token(p["triage_id"])}
         )
@@ -904,3 +905,24 @@ async def test_a_proposal_from_another_pack_cannot_be_approved_only_overridden(m
             "commit_triage", {"triage_id": p["triage_id"], "approval_token": t}
         )
     assert data(ok)["colour"] == other
+
+
+async def test_a_proposal_scored_with_a_chart_no_longer_in_use_cannot_be_committed(monkeypatch):
+    from mizani import mcp_server
+
+    async with Client(mcp) as client:
+        p = await propose(client)
+        same_colours = mcp_server.pack()
+        monkeypatch.setattr(
+            mcp_server.charts, "active", lambda con: (same_colours, "sats_kenya, version 1")
+        )
+        approve = await client.call_tool(
+            "commit_triage", {"triage_id": p["triage_id"], "approval_token": token(p["triage_id"])}
+        )
+        t = token(p["triage_id"], action="override", colour="red", reason="re-assessed")
+        override = await client.call_tool(
+            "commit_triage", {"triage_id": p["triage_id"], "approval_token": t}
+        )
+    for refused in (approve, override):
+        assert "the chart in use changed since this proposal" in error_text(refused)
+    assert store.get(db(), p["triage_id"])["status"] == "pending"
