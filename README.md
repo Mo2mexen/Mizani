@@ -90,7 +90,7 @@ Scoring is done by deterministic rules, so the language model only reads free te
 
 ### Rule packs
 
-Triage scales are YAML files, and each rule records its source. To add a scale (paediatric SATS, the WHO/ICRC/MSF Integrated Interagency Triage Tool, Manchester), you add a YAML file. The engine code stays the same.
+Triage scales are YAML files, and each rule records its source. To add a scale (paediatric SATS, the WHO/ICRC/MSF Integrated Interagency Triage Tool, Manchester), you add a YAML file to `src/mizani/rules/` and name it in `.env` (`MIZANI_RULE_PACK=<name>`, default `sats_adult`). The engine code stays the same. The server refuses a pack in which a clinical rule does not cite one of the pack's own references. Our evaluation ran on the adult SATS pack only.
 
 The adult SATS pack encodes the 7 TEWS vitals with their scoring bands, the 4 colours with their target times, 39 chart signs (6 red, 23 orange, 10 yellow), the additional investigations and the plausible range of each vital, each with its source.
 

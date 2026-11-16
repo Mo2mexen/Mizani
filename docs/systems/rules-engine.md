@@ -24,7 +24,8 @@ The five SATS steps (training manual p6), minus the ones a person does:
 ## Interfaces
 | Name | Input | Output | Side effects |
 |---|---|---|---|
-| `load_pack(name)` | pack name | validated `RulePack` | reads the YAML |
+| `load_pack(name=None, folder=None)` | pack name (default `MIZANI_RULE_PACK`, else `sats_adult`); the folder defaults to `src/mizani/rules/` | validated `RulePack` | reads the YAML; refuses a name that is not a plain file name (`[a-z0-9_]`, no folders), a pack that is not there (the error lists those that are), a file whose `id` is not its name, and a pack with an uncited rule |
+| `available_packs(folder=None)` | | the pack names in the folder | none |
 | `validate_vitals` | `Vitals`, pack | `list[Flag]` | none |
 | `compute_tews` | `Vitals`, pack | `Tews` | none |
 | `match_discriminators` | `SignClaim`s (`{id, quote}`), `Vitals`, pack, complaint | matched rules, `Discriminator`s (with `quote` when from the complaint), flags | none |
@@ -37,7 +38,7 @@ The five SATS steps (training manual p6), minus the ones a person does:
 
 ## Safety rules this system enforces
 - Grounded in a published scale: every value is from the EMSSA adult chart or manual, cited in the pack.
-- No unsourced output: the pack refuses to load a rule without a `source`, and the schemas refuse output without one.
+- No unsourced output: the pack refuses to load a rule without a `source` (blank counts as none), and every clinical rule's source must start with one of the pack's own references (`sources`: `manual p6 ...`, `chart: ...`). The plausible ranges are a data-entry check and are left out of that rule. The schemas refuse output without a source.
 - Only real chart entries: unknown discriminators cannot set a colour.
 - Patient text is data: a sign counts only with the complaint's own words behind it, and never from text addressed to the software.
 - Measurements beat words: a sign the nurse's readings rule out is dropped, and a red colour that rests on words alone asks the nurse to confirm.
@@ -59,4 +60,4 @@ uv run python -c "from mizani.rules.engine import propose; from mizani.rules.pac
 - The 2012 manual also lists "eye injury"; we follow the newer 2015 chart, which doesn't.
 
 ## Extending it
-Another scale is another YAML pack with the same shape plus its tests (band edges, colours, target times). A new discriminator is one line in the pack with its source; give it a test if the inputs can prove it. An optional `hint` holds the manual's definition (cited in the same entry's source); the intake prompt shows it to the model so it picks signs by their meaning, not by a guess.
+Another scale is another YAML pack with the same shape plus its tests (band edges, colours, target times). Put `<name>.yaml` in `src/mizani/rules/` with `id: <name>`, and set `MIZANI_RULE_PACK=<name>` in `.env`; the MCP server prints the pack it loaded when it starts (`Rule pack: sats_adult (...)`). Our evaluation ran on `sats_adult` only, so a new pack needs its own test patients and an evaluation run before it is used. A new discriminator is one line in the pack with its source; give it a test if the inputs can prove it. An optional `hint` holds the manual's definition (cited in the same entry's source); the intake prompt shows it to the model so it picks signs by their meaning, not by a guess.
