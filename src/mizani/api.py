@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import sys
 import time
 import uuid
 from collections.abc import AsyncIterable
@@ -40,7 +41,7 @@ from mcp.client import Client
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.datastructures import Headers, MutableHeaders
 
-from mizani import audit, auth, settings, store
+from mizani import audit, auth, charts, settings, store
 from mizani.agent.graph import build_graph
 from mizani.agent.mcp_tools import load_tools, read_json, server_url, with_meta
 from mizani.agent.model import call_model, chat_model
@@ -49,6 +50,7 @@ from mizani.approval import ensure_secret, issue_approval
 from mizani.db import db, db_path
 from mizani.fhir import fhir_url, write_committed
 from mizani.rules.engine import LABELS
+from mizani.rules.pack import MAX_UPLOAD
 from mizani.schemas import Account, Contract, NurseDecision, Role, Vitals
 
 log = logging.getLogger("mizani.api")
@@ -139,6 +141,7 @@ Nurse = Annotated[Account, Depends(allow("nurse"))]
 Staff = Annotated[Account, Depends(allow("nurse", "doctor"))]
 Doctor = Annotated[Account, Depends(allow("doctor"))]
 Admin = Annotated[Account, Depends(allow("admin"))]
+Chief = Annotated[Account, Depends(allow("chief"))]  # a doctor with the chief flag
 
 
 class Exact(BaseModel):
@@ -173,6 +176,13 @@ class ChiefFlag(Contract):
 
 class Activation(Contract):
     active: bool
+
+
+class ChartUpload(Contract):
+    """A chart (a YAML rule pack) and, optionally, its test patients (YAML, as evals/cases)."""
+
+    chart_yaml: str = Field(min_length=1, max_length=MAX_UPLOAD)
+    cases_yaml: str | None = Field(default=None, max_length=MAX_UPLOAD)
 
 
 class ModelChoice(Contract):
@@ -314,6 +324,15 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
     retriage_runs: dict[str, str] = {}  # committed triage id -> its open re-triage run
     ctx: dict[str, Any] = {}
 
+    async def load_chart() -> None:
+        """The chart in use, as the MCP server scores with it: its signs for the model, its
+        colours for the page, its name for the FHIR record. Again after a chart is activated."""
+        rules = await read_json("rules://sats/adult", mcp_server)
+        ctx["colours"] = await read_json("rules://sats/targets", mcp_server)
+        ctx["sign_ids"] = {d["name"]: d["id"] for d in rules["discriminators"]}
+        ctx["chart_signs"] = rules["discriminators"]
+        ctx["scale"] = (rules["id"], rules["name"])
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         async with AsyncExitStack() as stack:
@@ -322,28 +341,29 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
                 AsyncSqliteSaver.from_conn_string(str(db_path().with_name("checkpoints.db")))
             )
             tools = await _connect(mcp_server)
-            rules = await read_json("rules://sats/adult", mcp_server)
-            ctx["colours"] = await read_json("rules://sats/targets", mcp_server)
             ctx["tools"] = {t.name: t for t in tools}
-            ctx["sign_ids"] = {d["name"]: d["id"] for d in rules["discriminators"]}
+            await load_chart()  # the chart in use, from the MCP server
             # The admin's model choice (Admin › Model) when one is saved, else .env
             ctx["llm"] = llm or chat_model(settings.model(db()))
             url = fhir_url()
-            scale = (rules["id"], rules["name"])  # the rule pack the MCP server scores with
-            write_fhir = (lambda tid: write_committed(tid, url, mcp_server, scale)) if url else None
+            # the record names the chart in use when it is written
+            write_fhir = (
+                (lambda tid: write_committed(tid, url, mcp_server, ctx["scale"])) if url else None
+            )
 
             def build(model) -> Any:
                 return build_graph(
                     model,
                     tools,
-                    rules["discriminators"],
+                    ctx["chart_signs"],
                     saver,
                     write_fhir,
                     second_look=os.environ.get("MIZANI_SECOND_LOOK") == "1",
                 )
 
-            ctx["build"] = build  # rebuilt when the admin changes the model
+            ctx["build"] = build  # rebuilt when the admin changes the model or the chart
             ctx["graph"] = build(ctx["llm"])
+            charts.interrupted(db())  # an evaluation running when the server stopped
             watcher = asyncio.create_task(watch({t.name: t for t in tools}, mcp_server))
             try:
                 yield
@@ -542,6 +562,73 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         ctx["graph"] = ctx["build"](ctx["llm"])
         return settings.public_model(db())
 
+    @app.get("/api/charts")
+    def chart_overview(_: Chief) -> dict:
+        """The chart in use, the one before it, and every upload with its evaluation's state."""
+        return charts.overview(db())
+
+    @app.post("/api/charts", status_code=201)
+    def upload_chart(body: ChartUpload, chief: Chief) -> dict:
+        """Check and keep an uploaded chart and its test patients. It scores nobody yet."""
+        try:
+            return charts.upload(db(), chief.full_name, body.chart_yaml, body.cases_yaml)
+        except charts.ChartError as exc:
+            raise HTTPException(422, str(exc)) from None
+
+    @app.get("/api/charts/{chart_id}")
+    def chart_report(chart_id: int, _: Chief) -> dict:
+        chart = charts.get(db(), chart_id)
+        if chart is None:
+            raise HTTPException(404, f"no chart {chart_id}")
+        return chart
+
+    @app.post("/api/charts/{chart_id}/evaluate", status_code=202)
+    async def evaluate_chart(chart_id: int, chief: Chief) -> dict:
+        """Start the evaluation in a process of its own. One at a time: it uses the desk's model."""
+        chart = charts.get(db(), chart_id, full=False)
+        if chart is None:
+            raise HTTPException(404, f"no chart {chart_id}")
+        running = db().execute("SELECT id FROM chart WHERE status = 'evaluating'").fetchone()
+        if running:
+            raise HTTPException(409, "An evaluation is already running; wait for it to finish.")
+        if chart["status"] in ("active", "retired"):
+            raise HTTPException(409, f"{chart['label']} has been in use; upload it again to test")
+        charts.set_progress(db(), chart_id, "evaluating", "starting")
+        audit.event(db(), "chart_evaluation_started", chief.full_name,
+                    {"chart": chart["label"], "model": ctx["llm"].model_name
+                     if hasattr(ctx["llm"], "model_name") else None})  # fmt: skip
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "mizani.evals.chart", str(chart_id)
+        )
+
+        async def finished() -> None:
+            await process.wait()
+            charts.ended(db(), chart_id, process.returncode)
+
+        ctx["evaluation"] = asyncio.create_task(finished())
+        return charts.get(db(), chart_id, full=False)
+
+    async def put_in_use(ref: str, chief: Account) -> dict:
+        """Activate a chart through the MCP server with the chief doctor's token, then score every
+        new patient with it."""
+        token = issue_approval(f"chart:{ref}", chief, purpose="chart")
+        result = await call_tool("activate_chart", {"chart": ref, "approval_token": token})
+        await load_chart()
+        ctx["graph"] = ctx["build"](ctx["llm"])
+        return {**result, "overview": charts.overview(db())}
+
+    @app.post("/api/charts/{chart_id}/activate")
+    async def activate_chart(chart_id: int, chief: Chief) -> dict:
+        return await put_in_use(str(chart_id), chief)
+
+    @app.post("/api/charts/rollback")
+    async def rollback_chart(chief: Chief) -> dict:
+        """One click back to the chart in use before the current one."""
+        previous = charts.overview(db())["previous"]
+        if previous is None:
+            raise HTTPException(409, "The chart Mizani came with is in use; there is none before.")
+        return await put_in_use(previous, chief)
+
     @app.post("/api/intake", status_code=202)
     async def intake(body: Intake, _: Nurse) -> dict:
         return start_run(
@@ -570,10 +657,12 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             return {"triage_id": open_run}  # a second click returns the re-triage already running
         # The chart signs the complaint gave this triage, with their quotes (the ones the vitals
         # prove are re-proved from the fresh vitals, so a recovered patient loses them).
+        # (A sign of a chart no longer in use is left out; the new chart scores the rest.)
         signs = [
             {"id": ctx["sign_ids"][d["name"]], "quote": d.get("quote") or ""}
             for d in record["proposal"]["discriminators"]
             if d["source"].endswith("matched from input: complaint")
+            and d["name"] in ctx["sign_ids"]
         ]
         fresh = body.vitals.model_dump(exclude_none=True)
         vitals = {**{k: v for k, v in record["vitals"].items() if v is not None}, **fresh}

@@ -23,7 +23,7 @@ All four listen on `127.0.0.1`, so only programs on the same machine can reach t
 
 ## Use the triage tools from your own agent (MCP)
 
-The MCP server has 10 tools, 6 resources and 2 prompts. An agent that speaks MCP can score vitals, check chart signs and propose a priority with them, and every answer carries the rule it came from. The server does not need our agent or any language model.
+The MCP server has 11 tools, 6 resources and 2 prompts. An agent that speaks MCP can score vitals, check chart signs and propose a priority with them, and every answer carries the rule it came from. The server does not need our agent or any language model.
 
 By hand, in a browser: run `npx @modelcontextprotocol/inspector`, choose "Streamable HTTP" and enter `http://127.0.0.1:8000/mcp`.
 
@@ -192,7 +192,7 @@ Mizani does not yet read an existing patient from a record system. wso2's server
 
 ## Change the model or the triage scale
 
-The model is a setting: `LLM_MODEL` and `LLM_BASE_URL` in `.env` point the agent at any OpenAI-compatible server ([REMOTE_MODEL.md](REMOTE_MODEL.md)). A triage scale is a YAML rule pack in `src/mizani/rules/`, where every rule records its source ([systems/rules-engine.md](systems/rules-engine.md)). The server loads the pack that `MIZANI_RULE_PACK` names (default `sats_adult`), and refuses one in which a clinical rule does not cite one of the pack's own references.
+The model is a setting: `LLM_MODEL` and `LLM_BASE_URL` in `.env` point the agent at any OpenAI-compatible server ([REMOTE_MODEL.md](REMOTE_MODEL.md)). A triage scale is a YAML rule pack, where every rule records its source ([systems/rules-engine.md](systems/rules-engine.md)). The server starts with the pack in `src/mizani/rules/` that `MIZANI_RULE_PACK` names (default `sats_adult`); a chief doctor can upload another in the page, evaluate it and activate it ([systems/charts.md](systems/charts.md)). A pack in which a clinical rule does not cite one of its own references is refused either way.
 
 ## Limits
 

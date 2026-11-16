@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS triage (
     superseded_by TEXT,               -- set when a committed re-triage replaces this one
     recheck_raised_at TEXT,           -- last raise_recheck_flag for this triage
     called_in_at TEXT,                -- a nurse called the patient in: off the waiting list
-    called_in_by TEXT
+    called_in_by TEXT,
+    chart TEXT                        -- the chart that scored it: "sats_adult, built in" or
+                                      -- "sats_adult, version 2" (an uploaded chart)
 );
 CREATE TABLE IF NOT EXISTS used_token (nonce TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS handover (
@@ -76,6 +78,24 @@ CREATE TABLE IF NOT EXISTS session (
     last_seen TEXT NOT NULL,
     ended INTEGER NOT NULL DEFAULT 0  -- signed out, timed out, or ended by an admin
 );
+CREATE TABLE IF NOT EXISTS chart (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pack_id TEXT NOT NULL,            -- the chart's own id, e.g. sats_adult
+    version INTEGER NOT NULL,         -- 1, 2, ... for each pack_id uploaded
+    name TEXT NOT NULL,
+    yaml TEXT NOT NULL,               -- the chart as uploaded and checked (rules/pack.py)
+    cases TEXT,                       -- its test patients as uploaded (YAML), or NULL
+    status TEXT NOT NULL CHECK (status IN
+        ('uploaded', 'evaluating', 'evaluated', 'failed', 'active', 'retired')),
+    uploaded_by TEXT NOT NULL,
+    uploaded_at TEXT NOT NULL,
+    progress TEXT,                    -- "12 of 15 runs" while the evaluation runs
+    report TEXT,                      -- JSON: the evaluation report
+    activated_by TEXT,
+    activated_at TEXT,
+    previous TEXT,                    -- the chart in use before this one: an id, or "built-in"
+    UNIQUE (pack_id, version)
+);
 CREATE TABLE IF NOT EXISTS setting (
     key TEXT PRIMARY KEY,             -- e.g. "model": where the model runs (Admin › Model)
     value TEXT NOT NULL,              -- JSON; a model server's key is here, never sent or logged
@@ -91,6 +111,7 @@ ADDED_COLUMNS = [
     ("triage", "recheck_raised_at"),
     ("triage", "called_in_at"),
     ("triage", "called_in_by"),
+    ("triage", "chart"),
 ]
 
 

@@ -14,10 +14,11 @@ Mizani is a triage co-pilot for a hospital front desk. A nurse enters vitals and
    │                   propose_priority · commit_triage (needs approval token)
    │                   raise_recheck_flag · draft_handover · release_handover (needs token)
    │                   record_called_in (needs token) · record_nurse_assessment
+   │                   activate_chart (needs the chief doctor's token)
    │            resources: rules://sats/adult · rules://sats/targets · queue://current
    │                       handovers://released · patient://{id}/timeline · report://shadow-agreement
    │            prompts: triage_intake · handover_summary
-   │            ├─ SATS rules engine (YAML rule pack, every rule cited)
+   │            ├─ SATS rules engine (the chart in use: a YAML rule pack, every rule cited)
    │            └─ SQLite: triages · used tokens · accounts · hash-chained audit log
    │
    └─ MCP ──► wso2 fhir-mcp-server (borrowed) ──► HAPI FHIR (local)
@@ -32,7 +33,7 @@ The agent is the MCP client for both servers over streamable HTTP, using the MCP
 
 ## The MCP server we built: `mizani-triage`
 No existing MCP server encodes SATS, and we wanted the safety rules enforced by the server itself, so they hold whatever the agent or model does:
-- The rule pack (`src/mizani/rules/sats_adult.yaml`) encodes the EMSSA adult chart; every TEWS point, discriminator, flag and colour returns the rule it came from. Sources: [RESEARCH.md](RESEARCH.md). `MIZANI_RULE_PACK` chooses another pack file, and the server refuses one in which a clinical rule does not cite one of the pack's own references, or one that lacks the colour of a patient still waiting.
+- The rule pack (`src/mizani/rules/sats_adult.yaml`) encodes the EMSSA adult chart; every TEWS point, discriminator, flag and colour returns the rule it came from. Sources: [RESEARCH.md](RESEARCH.md). `MIZANI_RULE_PACK` chooses the built-in pack file. A chief doctor can upload another chart; it is checked at once, evaluated on the real model with safety checks that must all hold, and put in use only with the chief doctor's approval token, checked by `activate_chart`. Every chart, built in or uploaded, is refused if a clinical rule does not cite one of its own references, if the engine could not run it, or if it lacks the colour of a patient still waiting; each proposal and record names the chart that scored it ([systems/charts.md](systems/charts.md)).
 - `commit_triage` refuses unless it gets a token signed for that triage by the API after a signed-in nurse decides, and it checks the token's account itself: active, still a nurse. Tokens expire and work once. The model never holds the signing secret, and each install makes its own.
 - A chart sign the model names counts only with the complaint's own words behind it (`{id, quote}`): a sign whose words are missing, not in the complaint, or in text addressed to the software is refused with a flag, and so is a sign the nurse's measurements rule out. When a red colour rests on the complaint's words alone, the proposal asks the nurse to confirm the sign with the patient, and `commit_triage` will not approve it without that confirmation (an override needs none): a false report reads exactly like a true one.
 - Middleware writes every tool call (inputs, outputs, time, approver, model, tokens in and out, latency, cost) to a SHA-256 hash chain; editing any past row breaks the chain.
@@ -65,7 +66,7 @@ Synthetic patients only. One local SQLite file holds triages, used tokens, accou
 | Part | State |
 |---|---|
 | SATS adult rule pack and engine; the pack chosen by `MIZANI_RULE_PACK` | built, tested |
-| `mizani-triage` MCP server: 10 tools, 6 resources, 2 prompts, approval gate with a role per action, audit chain; quoted chart signs, nurse-to-confirm for red from words alone, handover numbers checked against the record | built, tested through an MCP client |
+| `mizani-triage` MCP server: 11 tools, 6 resources, 2 prompts, approval gate with a role per action, audit chain; quoted chart signs, nurse-to-confirm for red from words alone, handover numbers checked against the record | built, tested through an MCP client |
 | Model server in compose | built, tested with GPU |
 | LangGraph agent: extract, validate, score, discriminators, propose, wait for the nurse, commit; with retries, fallback and the re-measure loop | built, tested with a fake model and live with Qwen3.5 4B against `mizani-triage` |
 | FastAPI: intake, live agent steps (server-sent events), nurse decision to approval token, re-measure, re-triage, handover draft and release, shadow-mode assessment and report, queue, colours, audit | built, tested, run live |
@@ -75,5 +76,6 @@ Synthetic patients only. One local SQLite file holds triages, used tokens, accou
 | Re-triage watch (timers on the server; the agent's watch raises re-check flags every 30 s; re-triage endpoint re-scores fresh vitals for the nurse to approve) | built, tested, run live |
 | Handover (the model drafts, a nurse releases that exact draft), shadow mode (nurse's own colour, agreement report) | built, tested, run live |
 | Health checks; backup and restore (`docker compose run --rm backup`) | built, tested, run live (a restore onto new, empty volumes included) |
+| The chief doctor's charts: upload, checks, an evaluation on the real model with safety checks, activation with a signed approval, one-click way back | built, tested, checked live |
 | HTTPS for tablets (Caddy; its own certificate authority or the hospital's certificate; only HTTPS can be opened to the network) | built, checked live (certificate chain, the network address, the closed ports) |
 | Evaluations: 39 tasks × 5 runs, pass rate, run-to-run variation, latency, tokens, cost, and the failure kept on purpose (a patient's false claim of a sign) ([EVALS.md](EVALS.md)) | run on 13 Nov 2026: Qwen3.5 4B 180/195 runs pass (92%), the same with the second look on; Qwen3 4B Instruct 2507 145/195 (74%) |

@@ -25,7 +25,7 @@ The HTTP API the page talks to. It signs people in and checks their role on ever
 14. Accounts. `POST /api/auth/login` sets the session cookie (HttpOnly, SameSite=Strict, Secure when the request came over HTTPS). `GET /api/auth/me` says who is signed in; `POST /api/auth/password` changes one's own password (the one-time one too) and ends the person's other sessions; `POST /api/auth/logout` ends this one. The admin's endpoints under `/api/admin/users` add a person (the answer carries the one-time password, once), reset a password, change a role, give or remove the chief flag, deactivate or reactivate, and sign a person out everywhere. Every one of these goes into the audit log (auth.md).
 
 ## Interfaces
-Roles: N nurse, D doctor (the chief doctor too), A admin, all = any signed-in account.
+Roles: N nurse, D doctor (the chief doctor too), A admin, chief = a doctor with the chief flag, all = any signed-in account.
 
 | Name | Who | Input | Output | Side effects |
 |---|---|---|---|---|
@@ -40,6 +40,12 @@ Roles: N nurse, D doctor (the chief doctor too), A admin, all = any signed-in ac
 | `POST /api/admin/users/{id}/chief` | A | `{chief}` | the account (`chief_by`, `chief_at`); 409 not a doctor | audit row |
 | `POST /api/admin/users/{id}/active` | A | `{active}` | the account; 409 oneself or the last admin | sessions end on deactivation; audit row |
 | `POST /api/admin/users/{id}/sign-out` | A | | `{signed_out: true}` | every session of the account ends; audit row |
+| `GET /api/charts` | chief | | the chart in use, the one before it, every uploaded chart with its evaluation's state | none |
+| `POST /api/charts` | chief | `{chart_yaml, cases_yaml?}` | 201 the chart; 422 with what the check refused | stored, scores nobody yet; audit `chart_uploaded` (charts.md) |
+| `GET /api/charts/{id}` | chief | | the chart with its evaluation report | none |
+| `POST /api/charts/{id}/evaluate` | chief | | 202; 409 while another runs | a process of its own on the desk's model; audit rows at start and end |
+| `POST /api/charts/{id}/activate` | chief | | `{in_use, previous, approver, overview}`; 409 with the server's reason | chart token for the chief doctor, MCP `activate_chart`; the API reloads the chart's signs, colours and name |
+| `POST /api/charts/rollback` | chief | | the same; 409 when the built-in chart is in use | activates the chart in use before |
 | `GET /api/admin/model` | A | | where the model runs: `{location, base_url, model, reasoning_effort, has_key, updated_at, updated_by, this_server}`; never the key | none |
 | `POST /api/admin/model/test` | A | a model choice (below) | `{ok: true, seconds, model, reply}` or `{ok: false, error}` within 180 s | one short call with a fixed question, no patient text; nothing saved |
 | `POST /api/admin/model` | A | `{location: this_server \| hospital \| cloud, base_url?, model?, api_key?, reasoning_effort?, leaves_hospital_confirmed?}`; 422 without an address and a model, a cloud address that is not `https://`, or a cloud choice not confirmed | the setting as GET shows it | saved in the `setting` table (`this_server` deletes it: `.env` again); the next model call uses it; audit row `model_changed` with where complaint text goes and whether a key is set |

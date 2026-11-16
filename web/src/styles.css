@@ -459,8 +459,35 @@ td.src { display: table-cell; }
   .model-fields { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* Charts (the chief doctor): one column, the chart in use first. A failed safety check is red. */
+.charts { display: grid; gap: var(--gap); max-width: 64rem; }
+.chart-in-use { margin: 0 0 0.3rem; font-size: 1.05rem; }
+.chart-in-use code, .chart-row-head code { font-family: var(--font-num); font-size: 0.82rem; color: var(--ink-soft); }
+.upload-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 0.9rem; align-items: start; }
+.chart-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.6rem; }
+.chart-row { border: 1px solid var(--line); border-left: 6px solid var(--line-strong); border-radius: var(--radius); padding: 0.6rem 0.75rem; background: var(--panel); }
+.chart-row.status-active { border-left-color: var(--ok); }
+.chart-row.status-evaluating { border-left-color: var(--focus); }
+.chart-row.status-failed, .chart-row.is-unsafe { border-left-color: var(--danger); }
+.chart-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.6rem; }
+.chart-state { margin-left: auto; font-size: 0.85rem; font-weight: 700; }
+.status-active .chart-state { color: var(--ok); }
+.status-failed .chart-state, .is-unsafe .chart-state { color: var(--danger); }
+.report { margin-top: 0.7rem; border-top: 1px dashed var(--line-strong); padding-top: 0.6rem; }
+.report-head { margin: 0 0 0.3rem; }
+.report .audit { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.report .audit th, .report .audit td { text-align: left; padding: 0.3rem 0.4rem; border-bottom: 1px solid var(--line); }
+.safety { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.35rem; }
+.safety li { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: 0.6rem; font-size: 0.9rem; }
+.safety-result { font-weight: 700; color: var(--ok); }
+.safety li.is-failed .safety-result { color: var(--danger); }
+
 @media (max-width: 1023px) {
   .doctor, .admin { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 559px) {
+  .upload-fields { grid-template-columns: minmax(0, 1fr); }
+  .chart-state { margin-left: 0; }
 }
 /* On a phone the table becomes one block per person, each value under its label. */
 @media (max-width: 819px) {

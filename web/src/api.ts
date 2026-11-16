@@ -5,6 +5,10 @@ import type {
   Account,
   AuditRow,
   CalledIn,
+  ChartActivated,
+  ChartDetail,
+  ChartOverview,
+  ChartSummary,
   Colour,
   Committed,
   Decision,
@@ -90,6 +94,14 @@ export const api = USE_MOCK
       setChief: (id: number, chief: boolean) => call<Account>("POST", `/api/admin/users/${id}/chief`, { chief }),
       setActive: (id: number, active: boolean) => call<Account>("POST", `/api/admin/users/${id}/active`, { active }),
       signOutEverywhere: (id: number) => call<{ signed_out: boolean }>("POST", `/api/admin/users/${id}/sign-out`),
+      // Charts (the chief doctor)
+      charts: () => call<ChartOverview>("GET", "/api/charts"),
+      chart: (id: number) => call<ChartDetail>("GET", `/api/charts/${id}`),
+      uploadChart: (chart_yaml: string, cases_yaml: string | null) =>
+        call<ChartDetail>("POST", "/api/charts", { chart_yaml, cases_yaml }),
+      evaluateChart: (id: number) => call<ChartSummary>("POST", `/api/charts/${id}/evaluate`),
+      activateChart: (id: number) => call<ChartActivated>("POST", `/api/charts/${id}/activate`),
+      rollbackChart: () => call<ChartActivated>("POST", "/api/charts/rollback"),
       // Admin › Model
       modelSetting: () => call<ModelSetting>("GET", "/api/admin/model"),
       testModel: (choice: ModelChoice) => call<ModelTest>("POST", "/api/admin/model/test", choice),

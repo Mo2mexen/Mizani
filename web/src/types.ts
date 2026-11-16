@@ -52,6 +52,8 @@ export type Proposal = Sourced & {
   tews: { total: number; components: ({ field: string; value: unknown; points: number } & Sourced)[] };
   discriminators: Sign[];
   flags: ({ kind: FlagKind; message: string } & Sourced)[];
+  /** The chart that scored it ("sats_adult, built in", "sats_kenya, version 2"); absent on proposals before 16 Nov 2026. */
+  chart?: string | null;
 };
 
 export type Committed = {
@@ -188,6 +190,71 @@ export type ModelChoice = {
 };
 
 export type ModelTest = { ok: true; seconds: number; model: string; reply: string } | { ok: false; error: string };
+
+type ChartStatus = "uploaded" | "evaluating" | "evaluated" | "failed" | "active" | "retired";
+
+/** An uploaded chart (GET /api/charts), without its report. */
+export type ChartSummary = {
+  id: number;
+  pack_id: string;
+  version: number;
+  name: string;
+  label: string;
+  status: ChartStatus;
+  uploaded_by: string;
+  uploaded_at: string;
+  /** "12 of 17 runs" while evaluating; why it stopped when it failed. */
+  progress: string | null;
+  activated_by: string | null;
+  activated_at: string | null;
+  previous: string | null;
+  test_patients: number;
+  safety_ok: boolean;
+};
+
+type SafetyCheck = { check: string; ok: boolean | null; detail: string };
+
+type ChartPatient = {
+  id: string;
+  runs: number;
+  passes: number | null;
+  colour: string;
+  in_use_colour: string;
+  agree: number;
+  changes: boolean;
+  failed_checks: Record<string, number>;
+  seconds_mean: number;
+};
+
+/** The evaluation's report. `pass_rate` only with the chart's own test patients; otherwise only agreement. */
+export type ChartReport = {
+  chart: string;
+  against: string;
+  model: string;
+  mode: "pass rate" | "agreement with the chart in use";
+  runs_per_patient: number;
+  pass_rate: number | null;
+  agreement: number;
+  changes: string[];
+  patients: ChartPatient[];
+  safety: SafetyCheck[];
+  safety_ok: boolean;
+  started: string;
+  seconds: number;
+};
+
+export type ChartDetail = ChartSummary & { report: ChartReport | null };
+
+export type ChartOverview = {
+  active: { label: string; name: string; chart: ChartSummary | null };
+  /** The chart in use before this one: an id, "built-in", or null when the built-in chart is in use. */
+  previous: string | null;
+  previous_label: string | null;
+  built_in: string;
+  charts: ChartSummary[];
+};
+
+export type ChartActivated = { in_use: string; previous: string; approver: string; overview: ChartOverview };
 
 /** One row of the doctors' inbox (GET /api/handovers): the latest handover a nurse released, for a patient still waiting. */
 export type InboxEntry = {
