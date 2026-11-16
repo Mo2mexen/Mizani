@@ -49,6 +49,8 @@ Data survives `docker compose down` and `up`: the waiting room, audit log and ch
 docker compose up                                                          # CPU, any machine
 docker compose -f docker-compose.yml -f docker/docker-compose.gpu.yml up   # NVIDIA GPU
 ```
+With two compose files, Docker Desktop 4.96 on Windows stops the build with "additional privileges requested: pass --allow=fs.read=docker\\Dockerfile" (a Docker bug: one file alone builds). Setting `BUILDX_BAKE_ENTITLEMENTS_FS=0` once as a Windows user variable fixes it (README, "Running it").
+
 To use an Ollama installed on the machine instead, set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. The compose `ollama` service still starts, idle and with no model in it. That Ollama is yours to configure: set `OLLAMA_KEEP_ALIVE=-1` in its environment if it should keep the model loaded too.
 
 To empty the waiting room, the audit log and the FHIR records and keep the downloaded model: `docker compose down`, then `docker volume rm mizani_mizani-data mizani_hapi-data` (the names begin with the folder's name in lower case).
