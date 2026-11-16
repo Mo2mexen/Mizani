@@ -4,6 +4,7 @@ the chart on every proposal and record, and going back."""
 import json
 import time
 from importlib.resources import files
+from pathlib import Path
 
 import pytest
 import yaml
@@ -410,3 +411,15 @@ def test_the_fhir_record_names_the_chart_that_scored_the_triage():
     for unknown in (None, "sats_kenya, version 9", "sats_kenya, version x", "other, built in"):
         assert charts.scale(db(), unknown) is None
     assert chart["label"] == "sats_kenya, version 1"
+
+
+def test_the_sample_chart_in_docs_uploads_and_changes_only_chest_pain():
+    folder = Path(__file__).parent.parent / "docs" / "examples"
+    chart = (folder / "sats_kenya.yaml").read_text(encoding="utf-8")
+    cases = (folder / "sats_kenya_patients.yaml").read_text(encoding="utf-8")
+    uploaded = charts.upload(db(), "Dr Chief", chart, cases)
+    assert (uploaded["label"], uploaded["test_patients"]) == ("sats_kenya, version 1", 2)
+    sample, built_in = parse_pack(chart), charts.built_in()
+    changed = [d.id for d, b in zip(sample.discriminators, built_in.discriminators, strict=True)
+               if (d.id, d.colour) != (b.id, b.colour)]  # fmt: skip
+    assert changed == ["chest_pain"] and sample.tews == built_in.tews

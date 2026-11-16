@@ -1,0 +1,9 @@
+# Test patients for sats_kenya.yaml, made up. Each runs 5 times on the model during the evaluation.
+- id: chest-pain-01
+  complaint: Chest pain since this morning, tight, spreading to the left arm.
+  vitals: {respiratory_rate: 14, heart_rate: 92, systolic_bp: 130, temperature: 36.8, avpu: alert, mobility: walking, trauma: false}
+  expected: {colour: red, signs: [chest_pain]}
+- id: cough-01
+  complaint: Dry cough for three days, eating and drinking well.
+  vitals: {respiratory_rate: 14, heart_rate: 80, systolic_bp: 122, temperature: 37.2, avpu: alert, mobility: walking, trauma: false}
+  expected: {colour: green, no_signs: true}

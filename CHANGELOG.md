@@ -2,6 +2,15 @@
 
 What changed in each version of Mizani. The version is in `pyproject.toml`; the page shows it in its footer and `GET /api/health` returns it. To update an installation, see [docs/INSTALL.md](docs/INSTALL.md), section 7.
 
+## 1.0.1 (17 November 2026)
+
+The page, after the first days of use.
+
+- The header: the person's name and role, then a settings button (a gear) whose menu has Change password and Sign out; "Switch user" and the separate "Account" button are gone. One row on a desk, two tidy rows on a tablet, a much shorter header on a phone.
+- On a tablet, the nurse's dropdowns (consciousness, mobility, the override colour) get the full width, so their text is never cut ("Stretcher / immobile", "choose a colour").
+- Admin › Users: the suggested user name is a hint used when the box is left empty; typing straight after the full name no longer joins onto it. The table's rows are centred.
+- Charts: the upload card has two drop targets with an upload icon (click, or drop a file), shows the chosen file, and points to a sample chart with 2 test patients in `docs/examples/`.
+
 ## 1.0.0 (16 November 2026)
 
 The production release: Mizani as software a hospital runs on its own server, for nurses and doctors on tablets and desk PCs.
@@ -9,7 +18,7 @@ The production release: Mizani as software a hospital runs on its own server, fo
 **Accounts and roles**
 - Everyone signs in with their own account; there is no signup. An admin adds each person with a one-time password, which they replace at their first sign-in.
 - Roles: nurse (the triage desk), doctor (the waiting room by priority, the handovers nurses release, "Seeing this patient"), admin (accounts and settings, nothing clinical), and a chief flag an admin gives one doctor.
-- Passwords hashed with scrypt; five wrong passwords lock an account for 15 minutes; a page signs out after 15 minutes without use, and "Sign out" in the header hands a shared tablet over in one click; the settings button next to the name has Change password.
+- Passwords hashed with scrypt; five wrong passwords lock an account for 15 minutes; a page signs out after 15 minutes without use, and "Sign out" hands a shared tablet over; it sits in the settings menu next to the name, with Change password.
 - The API checks the role on every request, and the MCP server checks it again behind every approval. The name on every decision is the signed-in person's; nothing is typed.
 - The first admin's one-time password is printed in the server log on the first start; `mizani-admin` creates an admin or resets a password from the server's console.
 - Every sign-in, refused sign-in and account change is in the hash-chained audit log.

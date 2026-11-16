@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { clock, day } from "../format";
 import type { ChartDetail, ChartOverview, ChartSummary } from "../types";
@@ -173,43 +173,38 @@ function Upload({ onUploaded }: { onUploaded: () => void }) {
         Upload a chart
       </h2>
       <p className="hint">
-        A chart is a YAML rule pack like the one Mizani came with: every rule cites the chart or manual it comes from.
-        Mizani checks it at once and refuses a rule without a source, a vital value that falls in no band, or a colour
-        the chart does not list. Never a PDF: a chart the model read could not cite its rules.
+        A chart is a YAML rule pack like the one Mizani came with, and every rule cites the chart or manual it comes
+        from. Mizani checks it as soon as it arrives and says what is wrong and where. It scores nobody until it has
+        been evaluated and you activate it. Never a PDF: a chart the model read could not cite its rules.
       </p>
       <div className="upload-fields">
-        <label className="field" htmlFor="chart-file">
-          <span className="field-label">Chart file (.yaml)</span>
-          <input
-            id="chart-file"
-            type="file"
-            accept=".yaml,.yml,text/yaml"
-            onChange={(e) => setChartFile(e.target.files?.[0] ?? null)}
-            required
-          />
-        </label>
-        <label className="field" htmlFor="cases-file">
-          <span className="field-label">
-            Test patients (.yaml) <span className="unit">optional</span>
-          </span>
-          <input
-            id="cases-file"
-            type="file"
-            accept=".yaml,.yml,text/yaml"
-            onChange={(e) => setCasesFile(e.target.files?.[0] ?? null)}
-          />
-          <span className="field-note">
-            Made-up patients with the answer you expect for each (the format of evals/cases/core.yaml). Without them
-            the report can only say how often the new chart agrees with the one in use, not how often it is right.
-          </span>
-        </label>
+        <DropZone
+          id="chart-file"
+          title="Chart file"
+          file={chartFile}
+          onFile={setChartFile}
+          note="The rule pack, a .yaml file."
+        />
+        <DropZone
+          id="cases-file"
+          title="Test patients"
+          isOptional
+          file={casesFile}
+          onFile={setCasesFile}
+          note="Made-up patients with the answer you expect for each. Without them the report can only say how often the new chart agrees with the one in use, not how often it is right."
+        />
       </div>
+      <p className="hint upload-sample">
+        To try it: <code>docs/examples/sats_kenya.yaml</code> with <code>docs/examples/sats_kenya_patients.yaml</code>{" "}
+        (the built-in chart with chest pain raised to red, and 2 test patients: about 3 minutes to evaluate).
+      </p>
       {error && (
         <p className="error" role="alert">
           {error}
         </p>
       )}
-      <button type="submit" className="btn btn-primary" disabled={isBusy || !chartFile}>
+      <button type="submit" className="btn btn-primary btn-with-icon" disabled={isBusy || !chartFile}>
+        <UploadIcon />
         {isBusy ? "Checking…" : "Upload and check"}
       </button>
     </form>
@@ -447,5 +442,94 @@ function Report({ chartId }: { chartId: number }) {
         </>
       )}
     </div>
+  );
+}
+
+type DropZoneProps = {
+  id: string;
+  title: string;
+  isOptional?: boolean;
+  file: File | null;
+  onFile: (file: File | null) => void;
+  note: string;
+};
+
+/** A file picker as a large target: click it, or drop a file on it. The input stays in the page
+ *  (hidden from sight, not from the keyboard), so a keyboard and a screen reader use it as usual. */
+function DropZone({ id, title, isOptional = false, file, onFile, note }: DropZoneProps) {
+  const [isOver, setIsOver] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+
+  function clear(e: React.MouseEvent) {
+    e.preventDefault(); // inside the label: do not open the file chooser
+    onFile(null);
+    if (input.current) input.current.value = "";
+  }
+
+  return (
+    <label
+      htmlFor={id}
+      className={`dropzone${isOver ? " is-over" : ""}${file ? " has-file" : ""}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsOver(true);
+      }}
+      onDragLeave={() => setIsOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setIsOver(false);
+        const dropped = e.dataTransfer.files[0];
+        if (dropped) onFile(dropped);
+      }}
+    >
+      <input
+        ref={input}
+        id={id}
+        className="visually-hidden"
+        type="file"
+        accept=".yaml,.yml,text/yaml"
+        onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+      />
+      <span className="dropzone-icon">
+        <UploadIcon size={26} />
+      </span>
+      <span className="dropzone-title">
+        {title} {isOptional && <span className="unit">optional</span>}
+      </span>
+      {file ? (
+        <span className="dropzone-file">
+          {file.name} <span className="unit">({Math.max(1, Math.round(file.size / 1024))} KB)</span>{" "}
+          <button type="button" className="link-button" onClick={clear}>
+            Remove
+          </button>
+        </span>
+      ) : (
+        <span className="dropzone-hint">
+          Drop a .yaml file here, or <u>choose one</u>
+        </span>
+      )}
+      <span className="field-note">{note}</span>
+    </label>
+  );
+}
+
+function UploadIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
   );
 }

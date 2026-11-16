@@ -377,13 +377,16 @@ function AddPerson({ onAdded }: { onAdded: (account: Account, password: string) 
   const [role, setRole] = useState<Role>("nurse");
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Shown as a hint and used only when the box is left empty: never typed into it, so letters
+  // typed straight after leaving Full name are never joined onto it.
+  const suggestion = suggestedUsername(fullName);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setIsBusy(true);
     setError(null);
     try {
-      const made = await api.addUser(username.trim(), fullName.trim(), role);
+      const made = await api.addUser(username.trim() || suggestion, fullName.trim(), role);
       onAdded(made.account, made.one_time_password);
       setFullName("");
       setUsername("");
@@ -408,7 +411,6 @@ function AddPerson({ onAdded }: { onAdded: (account: Account, password: string) 
           value={fullName}
           placeholder="e.g. Amina Otieno"
           onChange={(e) => setFullName(e.target.value)}
-          onBlur={() => !username && setUsername(suggestedUsername(fullName))}
           required
         />
         <span className="field-note">As records will show it. Two people cannot share a name: add a middle initial.</span>
@@ -418,13 +420,16 @@ function AddPerson({ onAdded }: { onAdded: (account: Account, password: string) 
         <input
           id="add-username"
           value={username}
-          placeholder="e.g. amina.otieno"
+          placeholder={suggestion || "e.g. amina.otieno"}
           onChange={(e) => setUsername(e.target.value)}
           autoCapitalize="none"
           spellCheck={false}
-          required
+          required={!suggestion}
         />
-        <span className="field-note">What they type to sign in: lower-case letters, digits, dots or dashes.</span>
+        <span className="field-note">
+          {suggestion && !username.trim() ? `Leave it empty to use ${suggestion}. ` : ""}What they type to sign in:
+          lower-case letters, digits, dots or dashes.
+        </span>
       </label>
       <label className="field" htmlFor="add-role">
         <span className="field-label">Role</span>

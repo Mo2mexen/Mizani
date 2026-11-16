@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { roleName, useAccount } from "../session";
 
-/** Who is signed in, a settings button (a small menu: Change password) and Sign out, which also
- *  hands a shared tablet to the next person in one click. */
+/** Who is signed in, and a settings button whose menu names the person and has Change password
+ *  and Sign out (which also hands a shared tablet to the next person). */
 export function AccountMenu({ onSignOut }: { onSignOut: () => void }) {
   const account = useAccount();
   const [isOpen, setIsOpen] = useState(false);
@@ -40,9 +40,6 @@ export function AccountMenu({ onSignOut }: { onSignOut: () => void }) {
       >
         <GearIcon />
       </button>
-      <button type="button" className="btn btn-small" onClick={onSignOut}>
-        Sign out
-      </button>
       {isOpen && (
         <div id="account-menu" className="account-menu">
           <p className="account-menu-who">
@@ -59,6 +56,9 @@ export function AccountMenu({ onSignOut }: { onSignOut: () => void }) {
             }}
           >
             Change password
+          </button>
+          <button type="button" onClick={onSignOut}>
+            Sign out
           </button>
         </div>
       )}
