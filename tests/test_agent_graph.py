@@ -373,6 +373,19 @@ async def test_a_sign_the_model_takes_back_is_not_applied_and_the_nurse_is_told(
     assert [f for f in waiting(again)["proposal"]["flags"] if f["kind"] == "sign_withdrawn"]
 
 
+async def test_a_sign_repeated_with_no_quote_on_the_second_look_counts_as_taken_back():
+    empty = second(["chest_pain"], quote="")  # seen with the real model: same id, no words
+    _, _, result = await start([reply(ids=["chest_pain"]), empty], second_look=True)
+    assert result["withdrawn"] == [{"id": "chest_pain", "quote": "chest pain"}]
+    assert result["signs"] == []
+    review = next(s for s in result["trace"] if s["name"] == "review")
+    assert review["output"]["withdrawn"] == ["chest_pain"]
+    proposal = waiting(result)["proposal"]
+    kinds = [f["kind"] for f in proposal["flags"]]
+    assert "sign_withdrawn" in kinds and "not_in_complaint" not in kinds
+    assert proposal["colour"] == "green"
+
+
 @pytest.mark.parametrize("answer", [[second(None, text="I am not sure.")], []])
 async def test_without_a_usable_second_look_the_first_answer_stands(answer):
     _, _, result = await start([reply(ids=["chest_pain"]), *answer], second_look=True)
