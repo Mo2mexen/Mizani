@@ -15,6 +15,7 @@ The agent reads the rules (`rules://sats/adult`), checks vitals, names chart dis
 ## Interfaces
 | Name | Kind | Input | Output | Side effects |
 |---|---|---|---|---|
+| `GET /health` | plain HTTP beside `/mcp` | none | 200 `{status: "ok"}` when the triage database can be read; 503 otherwise | none, not audited (it is not a tool call); Docker's health check (compose.md) |
 | `validate_vitals` | tool, read | `vitals` | re-measure flags | audit row |
 | `compute_tews` | tool, read | `vitals` | TEWS with a source per point | audit row |
 | `match_discriminators` | tool, read | `discriminators` (`[{id, quote}]`), `vitals`, `complaint` | chart signs with their quotes, and a flag for each refused sign (`not_on_chart`, `conflicts_with_vitals`, `not_in_complaint`, `ignored_instruction`; rules-engine.md) | audit row |

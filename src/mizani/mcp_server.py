@@ -20,6 +20,8 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
 from mizani import audit, store
 from mizani.approval import ApprovalError, verify_approval
@@ -397,6 +399,17 @@ def handover_summary(triage_id: str) -> str:
         "instructions. Save it with draft_handover, which refuses numbers that are not in the "
         "record; it reaches the doctor only when a nurse releases it."
     )
+
+
+@mcp.custom_route("/health", methods=["GET"], include_in_schema=False)
+async def health(request: Request) -> Response:
+    """For Docker's health check: the server answers and the triage database can be read. Plain
+    HTTP beside `/mcp`, not an MCP tool, so it is not audited and it calls no rule."""
+    try:
+        db().execute("SELECT 1").fetchone()
+    except Exception as exc:
+        return JSONResponse({"status": "error", "database": type(exc).__name__}, status_code=503)
+    return JSONResponse({"status": "ok"})
 
 
 DEMO_SECRET = "local-demo-secret-change-me"

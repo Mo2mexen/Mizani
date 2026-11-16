@@ -466,6 +466,16 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
     async def shadow() -> dict:
         return await read_json("report://shadow-agreement", mcp_server)
 
+    @app.get("/api/health")
+    async def health() -> dict:
+        """For Docker's health check: the API answers and its database can be read. The MCP
+        server, the model and FHIR have their own checks, so one broken service shows as one."""
+        try:
+            db().execute("SELECT 1").fetchone()
+        except Exception as exc:
+            raise HTTPException(503, f"database: {type(exc).__name__}") from exc
+        return {"status": "ok"}
+
     @app.get("/api/colours")
     async def colours() -> list[dict]:
         return [

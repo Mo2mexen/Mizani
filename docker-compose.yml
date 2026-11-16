@@ -86,6 +86,13 @@ services:
       - mizani-data:/data
     ports:
       - "127.0.0.1:${MCP_HOST_PORT:-8000}:8000"
+    # Healthy once it answers and can read the triage database; `docker compose ps` shows it.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      start_period: 30s
+      retries: 3
 
   # Local FHIR store (HAPI FHIR, R4, its built-in H2 database). Browse it at
   # http://127.0.0.1:18080/fhir from this machine only (18080: 8080 is often taken).
@@ -147,9 +154,16 @@ services:
       - mizani-data:/data
     ports:
       - "127.0.0.1:${API_HOST_PORT:-8090}:8090"  # 8090, not 8080: 8080 is often taken
+    # Healthy once the API answers and can read its database (`/api/health`).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8090/api/health', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      start_period: 60s
+      retries: 3
     depends_on:
       mizani-mcp:
-        condition: service_started
+        condition: service_healthy
       fhir-mcp:
         condition: service_healthy
       ollama-pull:
