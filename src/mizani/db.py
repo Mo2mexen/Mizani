@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS chart (
     name TEXT NOT NULL,
     yaml TEXT NOT NULL,               -- the chart as uploaded and checked (rules/pack.py)
     cases TEXT,                       -- its test patients as uploaded (YAML), or NULL
+    test_patients INTEGER,            -- how many; NULL on a chart uploaded before this column
     status TEXT NOT NULL CHECK (status IN
         ('uploaded', 'evaluating', 'evaluated', 'failed', 'active', 'retired')),
     uploaded_by TEXT NOT NULL,
@@ -114,6 +115,7 @@ ADDED_COLUMNS = [
     ("triage", "called_in_by"),
     ("triage", "chart"),
     ("account", "password_by"),
+    ("chart", "test_patients"),
 ]
 
 

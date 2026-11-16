@@ -15,7 +15,8 @@ from datetime import UTC, datetime
 import yaml
 from pydantic import ValidationError
 
-from mizani import audit
+from mizani import audit, store
+from mizani.approval import ApprovalError
 from mizani.db import db_path
 from mizani.rules.pack import RulePack, load_pack, parse_pack
 
@@ -69,7 +70,7 @@ def parse_cases(text: str, pack: RulePack) -> list[dict]:
     an id, a complaint, vitals and an expected colour of the chart; expected signs are its own."""
     try:
         cases = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, RecursionError) as exc:  # RecursionError: nesting thousands deep
         raise ChartError(f"the test patients file is not valid YAML: {exc}") from None
     if not isinstance(cases, list) or not cases:
         raise ChartError("the test patients file must be a YAML list of patients")
@@ -78,26 +79,29 @@ def parse_cases(text: str, pack: RulePack) -> list[dict]:
     colours = {c.colour for c in pack.colours}
     signs = {d.id for d in pack.discriminators}
     seen = set()
-    for i, case in enumerate(cases, 1):
-        where = f"test patient {i}"
-        if not isinstance(case, dict):
-            raise ChartError(f"{where} is not a mapping")
-        for field in ("id", "complaint", "vitals", "expected"):
-            if field not in case:
-                raise ChartError(f"{where} has no {field}")
-        if case["id"] in seen:
-            raise ChartError(f"two test patients are called {case['id']}")
-        seen.add(case["id"])
-        expected = case["expected"]
-        if not isinstance(expected, dict) or expected.get("colour") not in colours:
-            raise ChartError(f"{case['id']}: expected.colour must be one of {sorted(colours)}")
-        keys = ("signs", "forbidden", "any_signs")
-        named = [sign for key in keys for sign in expected.get(key, [])]
-        unknown = sorted(set(named) - signs)
-        if unknown:
-            raise ChartError(f"{case['id']}: signs not on this chart: {unknown}")
-        case.setdefault("category", "chart test patient")
-        case.setdefault("source", "the chief doctor's test patients")
+    try:
+        for i, case in enumerate(cases, 1):
+            where = f"test patient {i}"
+            if not isinstance(case, dict):
+                raise ChartError(f"{where} is not a mapping")
+            for field in ("id", "complaint", "vitals", "expected"):
+                if field not in case:
+                    raise ChartError(f"{where} has no {field}")
+            if case["id"] in seen:
+                raise ChartError(f"two test patients are called {case['id']}")
+            seen.add(case["id"])
+            expected = case["expected"]
+            if not isinstance(expected, dict) or expected.get("colour") not in colours:
+                raise ChartError(f"{case['id']}: expected.colour must be one of {sorted(colours)}")
+            keys = ("signs", "forbidden", "any_signs")
+            named = [sign for key in keys for sign in expected.get(key, [])]
+            unknown = sorted(set(named) - signs)
+            if unknown:
+                raise ChartError(f"{case['id']}: signs not on this chart: {unknown}")
+            case.setdefault("category", "chart test patient")
+            case.setdefault("source", "the chief doctor's test patients")
+    except (TypeError, AttributeError) as exc:  # e.g. a list where a name belongs
+        raise ChartError(f"{where} could not be read ({exc})") from None
     return cases
 
 
@@ -115,17 +119,15 @@ def upload(con: sqlite3.Connection, actor: str, chart_text: str, cases_text: str
         raise ChartError(f"The chart was refused: {reasons}") from None
     except ValueError as exc:
         raise ChartError(str(exc)) from None
-    if cases_text and cases_text.strip():
-        parse_cases(cases_text, pack)
-    else:
-        cases_text = None
+    cases = parse_cases(cases_text, pack) if cases_text and cases_text.strip() else []
+    cases_text = cases_text if cases else None
     version = con.execute(
         "SELECT COALESCE(MAX(version), 0) + 1 FROM chart WHERE pack_id = ?", (pack.id,)
     ).fetchone()[0]
     cur = con.execute(
-        "INSERT INTO chart (pack_id, version, name, yaml, cases, status, uploaded_by,"
-        " uploaded_at) VALUES (?, ?, ?, ?, ?, 'uploaded', ?, ?)",
-        (pack.id, version, pack.name, chart_text, cases_text, actor, now()),
+        "INSERT INTO chart (pack_id, version, name, yaml, cases, test_patients, status,"
+        " uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, 'uploaded', ?, ?)",
+        (pack.id, version, pack.name, chart_text, cases_text, len(cases), actor, now()),
     )
     audit.event(
         con,
@@ -144,7 +146,10 @@ def _row(row: sqlite3.Row, full: bool = False) -> dict:
                   "progress", "activated_by", "activated_at", "previous")
     }  # fmt: skip
     chart["label"] = label(row["pack_id"], row["version"])
-    chart["test_patients"] = len(yaml.safe_load(row["cases"])) if row["cases"] else 0
+    count = row["test_patients"]  # counted at upload; a chart from before: count them now
+    if count is None:
+        count = len(yaml.safe_load(row["cases"])) if row["cases"] else 0
+    chart["test_patients"] = int(count)
     report = json.loads(row["report"]) if row["report"] else None
     chart["safety_ok"] = bool(report and report.get("safety_ok"))
     if full:
@@ -190,34 +195,42 @@ def target(con: sqlite3.Connection, ref: str) -> tuple[RulePack, dict | None]:
     return parse_pack(text), chart
 
 
-def activate(con: sqlite3.Connection, ref: str, approver: str, waiting: set[str]) -> dict:
+def activate(con: sqlite3.Connection, ref: str, approver: str, nonce: str) -> dict:
     """Put a chart in use (called by the MCP tool, after the chief doctor's token was checked).
     Refused for an uploaded chart whose evaluation did not finish with every safety check held,
-    and for a chart without the colour of a patient still waiting. The chart in use before is
-    kept, so going back is one more activation."""
-    pack, chart = target(con, ref)
-    in_use = con.execute("SELECT 1 FROM chart WHERE status = 'active'").fetchone()
-    if (chart is not None and chart["status"] == "active") or (chart is None and not in_use):
-        raise ChartError(f"{label(pack.id, chart['version'] if chart else None)} is already in use")
-    if chart is not None and chart["status"] not in ("evaluated", "retired"):
-        why = {
-            "uploaded": "it has not been evaluated yet",
-            "evaluating": "its evaluation is still running",
-            "failed": "its evaluation stopped before the end",
-        }[chart["status"]]
-        raise ChartError(f"{chart['label']} cannot be activated: {why}")
-    if chart is not None and not chart["safety_ok"]:
-        raise ChartError(
-            f"{chart['label']} cannot be activated: not every safety check of its evaluation held"
-        )
-    missing = waiting - {c.colour for c in pack.colours}
-    if missing:
-        raise ChartError(
-            f"patients still waiting are {sorted(missing)}, a colour this chart does not have; "
-            "call them in under the chart in use first"
-        )
+    and for a chart without the colour of a patient still waiting. The checks, the token's
+    single use (`nonce`) and the change are one transaction, so nothing can change between them
+    and a refused activation leaves the token unused. The chart in use before is kept, so going
+    back is one more activation."""
     con.execute("BEGIN IMMEDIATE")
     try:
+        pack, chart = target(con, ref)
+        in_use = con.execute("SELECT 1 FROM chart WHERE status = 'active'").fetchone()
+        if (chart is not None and chart["status"] == "active") or (chart is None and not in_use):
+            version = chart["version"] if chart else None
+            raise ChartError(f"{label(pack.id, version)} is already in use")
+        if chart is not None and chart["status"] not in ("evaluated", "retired"):
+            why = {
+                "uploaded": "it has not been evaluated yet",
+                "evaluating": "its evaluation is still running",
+                "failed": "its evaluation stopped before the end",
+            }[chart["status"]]
+            raise ChartError(f"{chart['label']} cannot be activated: {why}")
+        if chart is not None and not chart["safety_ok"]:
+            raise ChartError(
+                f"{chart['label']} cannot be activated: not every safety check of its evaluation"
+                " held"
+            )
+        missing = store.waiting_colours(con) - {c.colour for c in pack.colours}
+        if missing:
+            raise ChartError(
+                f"patients still waiting are {sorted(missing)}, a colour this chart does not "
+                "have; call them in under the chart in use first"
+            )
+        try:
+            con.execute("INSERT INTO used_token (nonce) VALUES (?)", (nonce,))
+        except sqlite3.IntegrityError:
+            raise ApprovalError("this approval token was already used") from None
         before = con.execute("SELECT id FROM chart WHERE status = 'active'").fetchone()
         previous = str(before["id"]) if before else BUILT_IN
         con.execute("UPDATE chart SET status = 'retired' WHERE status = 'active'")
@@ -258,10 +271,16 @@ def set_progress(con: sqlite3.Connection, chart_id: int, status: str, progress: 
 
 
 def ended(con: sqlite3.Connection, chart_id: int, exit_code: int | None) -> None:
-    """The evaluation's process ended. If it did not record a report, say it stopped."""
+    """The evaluation's process ended (`exit_code` None: it never started). If it did not record
+    a report, say it stopped."""
+    why = (
+        "could not start"
+        if exit_code is None
+        else f"stopped before the end (exit code {exit_code})"
+    )
     con.execute(
         "UPDATE chart SET status = 'failed', progress = ? WHERE id = ? AND status = 'evaluating'",
-        (f"stopped before the end (exit code {exit_code}); run the evaluation again", chart_id),
+        (f"{why}; run the evaluation again", chart_id),
     )
 
 

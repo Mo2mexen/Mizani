@@ -86,6 +86,38 @@ def test_five_wrong_passwords_lock_the_account_for_15_minutes(monkeypatch):
     assert reasons[-2:] == ["wrong password, locked for 15 minutes", "locked"]
 
 
+def test_guesses_sent_at_the_same_moment_all_count_and_their_lock_holds(monkeypatch):
+    account, _ = new_account(password="a fine long password")
+    real = auth.password_matches
+
+    def four_guesses_meanwhile(password, stored):
+        """While this password is being checked, other requests guess wrong four times."""
+        for _ in range(auth.MAX_MISSES - 1):
+            auth._count_miss(db(), account.id)
+        return real(password, stored)
+
+    monkeypatch.setattr(auth, "password_matches", four_guesses_meanwhile)
+    with pytest.raises(auth.AuthError, match="Wrong user name or password"):
+        auth.sign_in(db(), "amina", "guess")  # the fifth wrong one in all: none was lost
+    monkeypatch.setattr(auth, "password_matches", real)
+    with pytest.raises(auth.AuthError, match="locked"):
+        auth.sign_in(db(), "amina", "a fine long password")
+
+    monkeypatch.setattr(auth, "now", later(16))
+    auth.sign_in(db(), "amina", "a fine long password")  # the lock is over; the count starts again
+
+    def locked_meanwhile(password, stored):
+        """The right password, while five wrong ones sent at the same moment lock the account."""
+        for _ in range(auth.MAX_MISSES):
+            auth._count_miss(db(), account.id)
+        return real(password, stored)
+
+    monkeypatch.setattr(auth, "password_matches", locked_meanwhile)
+    with pytest.raises(auth.AuthError, match="locked") as refused:
+        auth.sign_in(db(), "amina", "a fine long password")
+    assert refused.value.status == 429
+
+
 def test_an_unknown_name_gets_the_same_answer_and_is_not_logged():
     with pytest.raises(auth.AuthError, match="Wrong user name or password") as unknown:
         auth.sign_in(db(), "my secret password", "x")
@@ -185,8 +217,12 @@ def test_no_password_or_session_ever_reaches_the_audit_log():
     assert audit.verify_chain(db()) is None
 
 
-def test_the_first_start_prints_a_new_admin_password_until_one_is_chosen():
+def test_the_first_start_prints_a_new_admin_password_until_one_is_chosen(monkeypatch):
+    hashes = []
+    real = auth.hash_password
+    monkeypatch.setattr(auth, "hash_password", lambda p: hashes.append(p) or real(p))
     first = auth.first_start(db())
+    assert hashes == [first]  # scrypt once per start, not once per statement
     second = auth.first_start(db())  # a restart before the first sign-in
     assert first and second and first != second
     with pytest.raises(auth.AuthError):

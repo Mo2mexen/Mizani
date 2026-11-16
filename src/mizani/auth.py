@@ -224,6 +224,19 @@ def open_session(con: sqlite3.Connection, account: Account) -> str:
     return value
 
 
+def _count_miss(con: sqlite3.Connection, account_id: int) -> bool:
+    """Count one wrong password in a single statement, so wrong passwords sent at the same moment
+    all count. The fifth in a row locks the account for 15 minutes and starts the count again.
+    True when this one locked it. (A lock set meanwhile by another request is kept.)"""
+    (locked,) = con.execute(
+        "UPDATE account SET failed = CASE WHEN failed + 1 >= ? THEN 0 ELSE failed + 1 END,"
+        " locked_until = CASE WHEN failed + 1 >= ? THEN ? ELSE locked_until END"
+        " WHERE id = ? RETURNING failed = 0",
+        (MAX_MISSES, MAX_MISSES, (now() + LOCKED_FOR).isoformat(), account_id),
+    ).fetchone()
+    return bool(locked)
+
+
 def sign_in(con: sqlite3.Connection, username: str, password: str) -> tuple[str, Account]:
     """Check the password; returns the new session's cookie value and the account.
 
@@ -255,22 +268,27 @@ def sign_in(con: sqlite3.Connection, username: str, password: str) -> tuple[str,
             429,
         )
     if not password_matches(password, row["password_hash"]):
-        misses = row["failed"] + 1
-        locked = misses >= MAX_MISSES
-        until = (now() + LOCKED_FOR).isoformat() if locked else None
-        con.execute(
-            "UPDATE account SET failed = ?, locked_until = ? WHERE id = ?",
-            (0 if locked else misses, until, account.id),
-        )
+        locked = _count_miss(con, account.id)
         refuse(account.username, "wrong password" + (", locked for 15 minutes" if locked else ""))
         raise wrong
     if not account.active:
         refuse(account.username, "deactivated")
         raise AuthError("This account is deactivated. Ask an admin if you need it again.", 403)
-    con.execute(
-        "UPDATE account SET failed = 0, locked_until = NULL, last_login_at = ? WHERE id = ?",
-        (now().isoformat(), account.id),
-    )
+    # The right password, unless the account was locked while it was being checked (guesses sent
+    # at the same moment): then it is refused like any sign-in to a locked account.
+    moment = now().isoformat()
+    opened = con.execute(
+        "UPDATE account SET failed = 0, locked_until = NULL, last_login_at = ?"
+        " WHERE id = ? AND (locked_until IS NULL OR locked_until <= ?)",
+        (moment, account.id, moment),
+    ).rowcount
+    if not opened:
+        refuse(account.username, "locked")
+        raise AuthError(
+            "Too many wrong passwords: this account is locked for now. If you have forgotten "
+            "your password, ask an admin to reset it.",
+            429,
+        )
     value = open_session(con, account)
     audit.event(
         con, "sign_in", account.full_name, {"username": account.username, "role": account.role}
@@ -323,18 +341,12 @@ def change_password(
     sign-in, so a tablet left signed in cannot be used to guess it: the fifth locks the account
     for 15 minutes and signs it out everywhere."""
     row = con.execute(
-        "SELECT password_hash, failed, locked_until FROM account WHERE id = ?", (account.id,)
+        "SELECT password_hash, locked_until FROM account WHERE id = ?", (account.id,)
     ).fetchone()
     if row["locked_until"] and datetime.fromisoformat(row["locked_until"]) > now():
         raise AuthError("Too many wrong passwords: this account is locked for now.", 429)
     if not password_matches(current, row["password_hash"]):
-        misses = row["failed"] + 1
-        locked = misses >= MAX_MISSES
-        until = (now() + LOCKED_FOR).isoformat() if locked else None
-        con.execute(
-            "UPDATE account SET failed = ?, locked_until = ? WHERE id = ?",
-            (0 if locked else misses, until, account.id),
-        )
+        locked = _count_miss(con, account.id)
         if locked:
             _end_sessions(con, account.id)
         reason = "wrong current password" + (", locked for 15 minutes" if locked else "")
@@ -475,12 +487,13 @@ def first_start(con: sqlite3.Connection) -> str | None:
     ):
         return None  # changed by hand: an admin or the console decides about it now
     otp = one_time_password()
+    stored = hash_password(otp)  # scrypt is slow on purpose: once is enough
     if row is None:
-        add_account(con, username, full_name, "admin", hash_password(otp), created_by=CONSOLE)
+        add_account(con, username, full_name, "admin", stored, created_by=CONSOLE)
     con.execute(
         "UPDATE account SET password_hash = ?, must_change = 1, failed = 0, locked_until = NULL,"
         " password_by = ? WHERE username = ?",
-        (hash_password(otp), FIRST_START, username),
+        (stored, FIRST_START, username),
     )
     audit.event(con, "first_admin_password", CONSOLE, {"username": username})
     return otp

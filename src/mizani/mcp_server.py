@@ -9,7 +9,6 @@ tokens it read and wrote, and what it cost.
 
 import json
 import os
-import sqlite3
 import time
 import uuid
 from datetime import UTC, datetime
@@ -216,9 +215,10 @@ def propose_priority(
     set nothing; one that would have counted is shown to the nurse as a `sign_withdrawn` flag.
     An emergency (red) sign cannot be taken back: it still counts, for the nurse to confirm or
     override.
-    Pass `signs_checked=False` when no chart signs could be read from the complaint (the model
-    did not answer, or gave no usable answer): the proposal then carries a `signs_not_checked`
-    flag telling the nurse to check the complaint against the chart by hand."""
+    Pass `signs_checked=False` when the complaint was not read against the chart in use (the
+    model did not answer or gave no usable answer, or a re-check comes after a chart change): the
+    proposal then carries a `signs_not_checked` flag telling the nurse to check the complaint
+    against the chart by hand."""
     previous = None
     if retriage_of is not None:
         previous = store.get(db(), retriage_of)
@@ -348,11 +348,7 @@ def activate_chart(chart: str, approval_token: str) -> ChartInUse:
     con = db()
     try:
         approval = verify_approval(approval_token, f"chart:{chart}", con, purpose="chart")
-        try:
-            con.execute("INSERT INTO used_token (nonce) VALUES (?)", (approval["nonce"],))
-        except sqlite3.IntegrityError:
-            raise ApprovalError("this approval token was already used") from None
-        result = charts.activate(con, chart, approval["approver"], store.waiting_colours(con))
+        result = charts.activate(con, chart, approval["approver"], approval["nonce"])
         return ChartInUse(**result)
     except (ApprovalError, charts.ChartError) as exc:
         raise ToolError(f"chart not activated: {exc}") from None

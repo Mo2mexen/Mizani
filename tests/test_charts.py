@@ -8,7 +8,7 @@ import yaml
 from langgraph.checkpoint.memory import InMemorySaver
 from mcp.client import Client
 from test_agent_graph import NORMAL, FakeModel, person, reply
-from test_api import events, intake, session, signed_in
+from test_api import committed_patient, events, intake, session, signed_in
 
 from mizani import approval, charts, store
 from mizani.api import SESSION_COOKIE, create_app
@@ -89,6 +89,8 @@ def test_upload_versions_a_chart_and_checks_its_test_patients():
         "uploaded",
     )
     assert (second["version"], second["test_patients"]) == (2, 0)
+    db().execute("UPDATE chart SET test_patients = NULL")  # charts uploaded before the count
+    assert charts.get(db(), first["id"])["test_patients"] == 1
     for cases, why in [
         ("- id: x\n  complaint: c\n  vitals: {}\n  expected: {colour: purple}", "expected.colour"),
         (
@@ -97,6 +99,8 @@ def test_upload_versions_a_chart_and_checks_its_test_patients():
         ),
         ("- id: x\n  complaint: c\n  expected: {colour: red}", "has no vitals"),
         ("[]", "a YAML list"),
+        ("- id: [x]\n  complaint: c\n  vitals: {}\n  expected: {colour: red}", "could not be read"),
+        ("[" * 50_000, "not valid YAML"),
     ]:
         with pytest.raises(charts.ChartError, match=why):
             charts.upload(db(), "Dr Chief", KENYA, cases)
@@ -141,15 +145,30 @@ def test_the_engine_checks_refuse_what_would_crash_scoring_or_tie_up_the_server(
     assert "no band takes 37.5 or the values just above it" in bad(gap)
     overlap = KENYA.replace("{gte: 35, lte: 38.4, points: 0}", "{gte: 35, lte: 38.5, points: 0}")
     assert "two bands both take" in bad(overlap)
+    no_bands = edited(lambda d: d["tews"]["temperature"].update(bands=[]))
+    assert "give its points as bands" in bad(no_bands)  # not an IndexError
+    no_row = edited(lambda d: d["tews"].pop("trauma"))
+    assert "tews has no row for ['trauma']" in bad(no_row)  # not a KeyError at the first patient
+    assert "not valid YAML" in bad("[" * 50_000)  # nested too deep for the parser
+
+
+def test_a_check_that_did_not_foresee_a_chart_still_refuses_it(monkeypatch):
+    def unforeseen(*args):
+        raise TypeError("'<' not supported between instances of 'NoneType' and 'float'")
+
+    monkeypatch.setattr("mizani.rules.pack._joins", unforeseen)
+    assert "could not be checked (TypeError: '<' not supported" in bad(KENYA)
+    with pytest.raises(charts.ChartError, match="could not be checked"):
+        charts.upload(db(), "Dr Chief", KENYA, None)  # a refusal the page shows, not a 500
 
 
 def test_activation_waits_for_the_evaluation_and_progress_never_touches_a_chart_in_use():
     chart = charts.upload(db(), "Dr Chief", KENYA, CASES)
     assert charts.start(db(), chart["id"]) and not charts.start(db(), chart["id"])  # one at a time
     with pytest.raises(charts.ChartError, match="its evaluation is still running"):
-        charts.activate(db(), str(chart["id"]), "Dr Chief", set())
+        charts.activate(db(), str(chart["id"]), "Dr Chief", "nonce-1")
     charts.set_progress(db(), chart["id"], "evaluated", None, {"safety_ok": True})
-    charts.activate(db(), str(chart["id"]), "Dr Chief", set())
+    charts.activate(db(), str(chart["id"]), "Dr Chief", "nonce-2")
     charts.set_progress(db(), chart["id"], "evaluating", "3 of 12 runs")  # a stray update
     assert charts.get(db(), chart["id"])["status"] == "active"
     other = charts.upload(db(), "Dr Chief", KENYA, CASES)
@@ -158,7 +177,7 @@ def test_activation_waits_for_the_evaluation_and_progress_never_touches_a_chart_
     assert charts.get(db(), other["id"])["report"] is None
     charts.set_progress(db(), other["id"], "evaluated", None, {"safety_ok": False})
     with pytest.raises(charts.ChartError, match="not every safety check"):
-        charts.activate(db(), str(other["id"]), "Dr Chief", set())
+        charts.activate(db(), str(other["id"]), "Dr Chief", "nonce-3")
 
 
 async def test_a_crashed_run_never_counts_as_agreement_and_blocks_activation(monkeypatch):
@@ -255,3 +274,56 @@ async def test_the_chief_activates_and_goes_back_through_the_api(monkeypatch):
         assert again.status_code == 409
         rows = [r["tool"] for r in api.get("/api/audit").json()]
     assert rows.count("activate_chart") == 2 and "chart_uploaded" in rows
+
+
+def test_a_recheck_after_a_chart_change_says_the_complaint_was_not_checked_again():
+    renamed = SATS.replace("id: sats_adult", "id: sats_renamed").replace(
+        "name: Chest pain,", "name: Pain in the chest,"
+    )
+    chart = charts.upload(db(), "Dr Chief", renamed, None)
+    evaluated(chart["id"])
+    app = create_app(FakeModel(messages=iter([reply(ids=["chest_pain"])])), mcp, InMemorySaver())
+    with signed_in(app) as api:
+        triage_id = committed_patient(api, intake(api))  # orange: chest pain, under the old chart
+        api.cookies.set(SESSION_COOKIE, session("Chief C", "doctor", True))
+        assert api.post(f"/api/charts/{chart['id']}/activate").status_code == 200
+        api.cookies.set(SESSION_COOKIE, session("Nurse A"))
+        again = api.post(f"/api/queue/{triage_id}/retriage", json={"vitals": NORMAL})
+        proposal = events(api, again.json()["triage_id"], until="proposal")[-1][1]["proposal"]
+    kinds = [f["kind"] for f in proposal["flags"]]
+    assert "signs_not_checked" in kinds and "retriage" in kinds  # never a quiet green
+
+
+def test_an_evaluation_that_cannot_start_leaves_the_chart_free_to_try_again(monkeypatch):
+    chart = charts.upload(db(), "Dr Chief", KENYA, CASES)
+
+    async def no_process(*args, **kwargs):
+        raise OSError("no memory for a new process")
+
+    monkeypatch.setattr("mizani.api.asyncio.create_subprocess_exec", no_process)
+    app = create_app(FakeModel(messages=iter([])), mcp, InMemorySaver())
+    with signed_in(app, "Chief C", "doctor") as api:
+        api.cookies.set(SESSION_COOKIE, session("Chief C", "doctor", True))
+        refused = api.post(f"/api/charts/{chart['id']}/evaluate")
+    assert refused.status_code == 503 and "could not start" in refused.json()["detail"]
+    after = charts.get(db(), chart["id"], full=False)
+    assert after["status"] == "failed" and after["progress"].startswith("could not start")
+    assert charts.start(db(), chart["id"])  # not stuck as "evaluating"
+
+
+async def test_a_chart_token_is_used_only_by_an_activation_that_happens():
+    chart = charts.upload(db(), "Dr Chief", KENYA, CASES)
+    ref = str(chart["id"])
+    token = await chief_token(ref)
+    async with Client(mcp) as client:
+
+        async def activate(token):
+            return await client.call_tool("activate_chart", {"chart": ref, "approval_token": token})
+
+        assert "has not been evaluated yet" in (await activate(token)).content[0].text
+        evaluated(chart["id"])
+        assert not (await activate(token)).is_error  # the refusal did not use it up
+        # as if it were back to "evaluated", so only the token's single use can refuse it
+        db().execute("UPDATE chart SET status = 'evaluated' WHERE id = ?", (chart["id"],))
+        again = await activate(token)
+    assert "already used" in again.content[0].text

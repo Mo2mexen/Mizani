@@ -10,7 +10,7 @@ import os
 import re
 from importlib.resources import files
 from importlib.resources.abc import Traversable
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -27,6 +27,10 @@ CODED = {
 }
 
 Source = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+# The seven TEWS rows, each scored on every patient: a chart must give all of them
+TewsField = Literal[
+    "respiratory_rate", "heart_rate", "systolic_bp", "temperature", "avpu", "mobility", "trauma"
+]
 
 
 class Rule(BaseModel):
@@ -142,18 +146,7 @@ class RulePack(Rule):
     sources: dict[str, str]
     colours: list[ColourLevel]
     tews_colour: list[TewsColour]
-    tews: dict[
-        Literal[
-            "respiratory_rate",
-            "heart_rate",
-            "systolic_bp",
-            "temperature",
-            "avpu",
-            "mobility",
-            "trauma",
-        ],
-        TewsRow,
-    ]
+    tews: dict[TewsField, TewsRow]
     discriminators: list[DiscriminatorRule]
     investigations: dict[str, Investigation]
     plausible: Plausible
@@ -194,6 +187,9 @@ class RulePack(Rule):
             raise ValueError(
                 f"chart sign ids repeat: {sorted({i for i in ids if ids.count(i) > 1})}"
             )
+        missing = [field for field in get_args(TewsField) if field not in self.tews]
+        if missing:
+            raise ValueError(f"tews has no row for {missing}: TEWS needs all seven")
         mins = [t.min_total for t in self.tews_colour]
         if not mins or mins != sorted(mins, reverse=True) or mins[-1] != 0:
             raise ValueError("tews_colour goes from the highest min_total down to 0")
@@ -205,7 +201,7 @@ class RulePack(Rule):
                 if missing:
                     raise ValueError(f"tews.{field} gives no points for {sorted(missing)}")
                 continue
-            if row.bands is None:
+            if not row.bands:
                 raise ValueError(f"tews.{field} is measured: give its points as bands, not values")
             if field not in self.plausible.ranges:
                 raise ValueError(f"plausible.ranges has no range for tews.{field}")
@@ -269,11 +265,16 @@ def parse_pack(text: str) -> RulePack:
         raise ValueError(f"the chart file is over {MAX_UPLOAD:,} characters")
     try:
         data = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, RecursionError) as exc:  # RecursionError: nesting thousands deep
         raise ValueError(f"the chart file is not valid YAML: {exc}") from None
     if not isinstance(data, dict):
         raise ValueError("the chart file must be a YAML mapping (id, name, sources, colours, ...)")
-    pack = RulePack.model_validate(data)
+    try:
+        pack = RulePack.model_validate(data)
+    except ValueError:  # pydantic's ValidationError: each message names its place
+        raise
+    except Exception as exc:  # anything a check did not foresee is a refusal, never a crash
+        raise ValueError(f"the chart could not be checked ({type(exc).__name__}: {exc})") from None
     if not PACK_NAME.fullmatch(pack.id):
         raise ValueError(f"chart id {pack.id!r}: use lower-case letters, digits and _ only")
     return pack
