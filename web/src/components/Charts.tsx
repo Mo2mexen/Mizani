@@ -30,8 +30,9 @@ export function Charts() {
   const [note, setNote] = useState<string | null>(null);
   const isRunning = overview?.charts.some((c) => c.status === "evaluating") ?? false;
 
-  function load() {
-    return api.charts().then(
+  /** `background`: the refresh while an evaluation runs, which does not keep the session alive. */
+  function load(background = false) {
+    return api.charts(background).then(
       (o) => {
         setOverview(o);
         setError(null);
@@ -46,7 +47,7 @@ export function Charts() {
 
   useEffect(() => {
     if (!isRunning) return;
-    const id = setInterval(() => void load(), REFRESH_MS);
+    const id = setInterval(() => void load(true), REFRESH_MS);
     return () => clearInterval(id);
   }, [isRunning]);
 

@@ -97,7 +97,7 @@ export const api = USE_MOCK
       setActive: (id: number, active: boolean) => call<Account>("POST", `/api/admin/users/${id}/active`, { active }),
       signOutEverywhere: (id: number) => call<{ signed_out: boolean }>("POST", `/api/admin/users/${id}/sign-out`),
       // Charts (the chief doctor)
-      charts: () => call<ChartOverview>("GET", "/api/charts"),
+      charts: (background = false) => call<ChartOverview>("GET", "/api/charts", undefined, background),
       chart: (id: number) => call<ChartDetail>("GET", `/api/charts/${id}`),
       uploadChart: (chart_yaml: string, cases_yaml: string | null) =>
         call<ChartDetail>("POST", "/api/charts", { chart_yaml, cases_yaml }),

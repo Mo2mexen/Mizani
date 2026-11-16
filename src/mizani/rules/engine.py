@@ -8,19 +8,12 @@ always pending; only a named nurse commits it.
 import re
 import unicodedata
 from difflib import SequenceMatcher
+from typing import get_args
 
-from mizani.rules.pack import DiscriminatorRule, RulePack
+from mizani.rules.pack import DiscriminatorRule, RulePack, TewsField
 from mizani.schemas import Discriminator, Flag, Proposal, SignClaim, Tews, TewsComponent, Vitals
 
-TEWS_FIELDS = (
-    "respiratory_rate",
-    "heart_rate",
-    "systolic_bp",
-    "temperature",
-    "avpu",
-    "mobility",
-    "trauma",
-)
+TEWS_FIELDS = get_args(TewsField)
 LABELS = {
     "respiratory_rate": "Respiratory rate",
     "heart_rate": "Heart rate",
@@ -391,8 +384,9 @@ def propose(
     signs_checked: bool = True,
 ) -> Proposal:
     """The pending proposal. Its `source` is a one-line, cited reason for the colour.
-    `signs_checked=False` means the agent got no chart signs from the model (it did not answer,
-    or gave no usable answer): the proposal then tells the nurse the complaint was not checked.
+    `signs_checked=False` means the complaint was not read against the chart in use (the model
+    did not answer or gave no usable answer, or a re-check comes after a chart change): the
+    proposal then tells the nurse to check the complaint by hand.
     `withdrawn` are signs the agent named and then took back. They set nothing, with one
     exception: the model cannot take back an emergency (red) sign. That one still counts, and
     the nurse confirms or overrides it."""
@@ -426,9 +420,10 @@ def propose(
             Flag(
                 kind="signs_not_checked",
                 message=(
-                    "The model gave no usable answer for this complaint, so no chart sign was "
-                    "looked for and the colour comes from the measurements alone. Check the "
-                    "complaint against the chart by hand: a sign can raise the colour."
+                    "This complaint was not read against the chart in use (the model gave no "
+                    "usable answer, or the chart changed since the first triage), so a sign it "
+                    "shows may be missing from this colour. Check the complaint against the "
+                    "chart by hand: a sign can raise the colour."
                 ),
                 source="input: complaint",
             )

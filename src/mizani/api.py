@@ -601,9 +601,13 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         audit.event(db(), "chart_evaluation_started", chief.full_name,
                     {"chart": chart["label"], "model": ctx["llm"].model_name
                      if hasattr(ctx["llm"], "model_name") else None})  # fmt: skip
-        process = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "mizani.evals.chart", str(chart_id)
-        )
+        try:
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "mizani.evals.chart", str(chart_id)
+            )
+        except OSError as exc:  # it never started: the chart must not stay "evaluating"
+            charts.ended(db(), chart_id, None)
+            raise HTTPException(503, f"The evaluation could not start: {exc}") from None
 
         async def finished() -> None:
             await process.wait()
@@ -661,12 +665,15 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             return {"triage_id": open_run}  # a second click returns the re-triage already running
         # The chart signs the complaint gave this triage, with their quotes (the ones the vitals
         # prove are re-proved from the fresh vitals, so a recovered patient loses them).
-        # (A sign of a chart no longer in use is left out; the new chart scores the rest.)
-        signs = [
-            {"id": ctx["sign_ids"][d["name"]], "quote": d.get("quote") or ""}
+        worded = [
+            d
             for d in record["proposal"]["discriminators"]
             if d["source"].endswith("matched from input: complaint")
-            and d["name"] in ctx["sign_ids"]
+        ]
+        signs = [
+            {"id": ctx["sign_ids"][d["name"]], "quote": d.get("quote") or ""}
+            for d in worded
+            if d["name"] in ctx["sign_ids"]
         ]
         fresh = body.vitals.model_dump(exclude_none=True)
         vitals = {**{k: v for k, v in record["vitals"].items() if v is not None}, **fresh}
@@ -678,9 +685,16 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             "signs": signs,
             "retriage_of": triage_id,
         }
-        # The complaint was never read against the chart (the model did not answer at intake):
-        # the re-check says so again instead of "no chart sign applies".
-        if any(f["kind"] == "signs_not_checked" for f in record["proposal"]["flags"]):
+        # The complaint was never read against the chart now in use: the model did not answer at
+        # intake, or the chief doctor changed the chart since (a sign may be gone, or a new one
+        # may apply). A re-check never calls the model, so it tells the nurse to check the
+        # complaint by hand instead of letting the colour read as "no chart sign applies".
+        scored_with = record["proposal"].get("chart")
+        if (
+            len(signs) < len(worded)
+            or (scored_with is not None and scored_with != charts.active(db())[1])
+            or any(f["kind"] == "signs_not_checked" for f in record["proposal"]["flags"])
+        ):
             entry["fell_back"] = True
         started = start_run(entry)
         retriage_runs[triage_id] = started["triage_id"]
