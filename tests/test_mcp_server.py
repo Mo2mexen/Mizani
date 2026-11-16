@@ -769,3 +769,21 @@ async def test_a_sign_the_agent_took_back_is_flagged_by_the_server():
 
 def test_an_approval_lives_two_minutes():
     assert approval.TOKEN_TTL_SECONDS == 120
+
+
+def test_health_answers_ok_and_is_plain_http_beside_mcp():
+    from starlette.testclient import TestClient
+
+    with TestClient(mcp.streamable_http_app(), base_url="http://127.0.0.1:8000") as http:
+        r = http.get("/health")
+    assert (r.status_code, r.json()) == (200, {"status": "ok"})
+    assert audit.entries(db()) == []  # a health check is not a tool call, so it is not audited
+
+
+def test_health_is_503_when_the_database_cannot_be_read(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+
+    monkeypatch.setenv("MIZANI_DB", str(tmp_path))  # a folder, not a database file
+    with TestClient(mcp.streamable_http_app(), base_url="http://127.0.0.1:8000") as http:
+        r = http.get("/health")
+    assert r.status_code == 503 and r.json()["status"] == "error"

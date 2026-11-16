@@ -413,3 +413,16 @@ def test_the_api_answers_only_to_this_machines_names(monkeypatch):
     app = create_app(FakeModel(messages=iter([])), mcp, InMemorySaver())
     with TestClient(app, base_url="http://triage.ward.local") as api:
         assert api.get("/api/colours").status_code == 200  # a ward server adds its own name
+
+
+def test_health_answers_ok_when_the_database_can_be_read():
+    with client() as api:
+        r = api.get("/api/health")
+    assert (r.status_code, r.json()) == (200, {"status": "ok"})
+
+
+def test_health_is_503_when_the_database_cannot_be_read(tmp_path, monkeypatch):
+    with client() as api:
+        monkeypatch.setenv("MIZANI_DB", str(tmp_path))  # a folder, not a database file
+        r = api.get("/api/health")
+    assert r.status_code == 503
