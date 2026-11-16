@@ -19,11 +19,13 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from collections.abc import AsyncIterable
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
+from urllib.parse import urlparse
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
@@ -35,10 +37,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 from mcp.client import Client
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.datastructures import Headers, MutableHeaders
 
-from mizani import audit, auth, store
+from mizani import audit, auth, settings, store
 from mizani.agent.graph import build_graph
 from mizani.agent.mcp_tools import load_tools, read_json, server_url, with_meta
 from mizani.agent.model import call_model, chat_model
@@ -52,6 +54,7 @@ from mizani.schemas import Account, Contract, NurseDecision, Role, Vitals
 log = logging.getLogger("mizani.api")
 FINAL_EVENTS = {"committed", "error"}
 MCP_CONNECT_TRIES = 30  # the MCP server may still be starting (compose)
+MODEL_TEST_SECONDS = 180  # Test connection: a model loading from a hard disk took about 120 s
 SESSION_COOKIE = "mizani_session"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 ROLE_NAMES = {
@@ -172,6 +175,39 @@ class Activation(Contract):
     active: bool
 
 
+class ModelChoice(Contract):
+    """Where the model runs (Admin › Model). An empty `api_key` keeps the saved one when the
+    address is the same, so the admin never has to see or retype it."""
+
+    location: Literal["this_server", "hospital", "cloud"]
+    base_url: str | None = Field(default=None, max_length=300)
+    model: str | None = Field(default=None, max_length=200)
+    api_key: str | None = Field(default=None, max_length=500)
+    reasoning_effort: str | None = Field(default="none", max_length=20)
+    leaves_hospital_confirmed: bool = False
+
+    @model_validator(mode="after")
+    def check_the_server(self) -> "ModelChoice":
+        if self.location == "this_server":
+            return self
+        if not self.base_url or not self.model:
+            raise ValueError("give the model server's address and the model's name")
+        url = urlparse(self.base_url)
+        if url.scheme not in ("http", "https") or not url.hostname:
+            raise ValueError(
+                "the address starts with http:// or https://, e.g. https://gpu.example/v1"
+            )
+        if self.location == "cloud":
+            if url.scheme != "https":
+                raise ValueError(
+                    "a cloud server needs an https:// address, so complaint text and the key "
+                    "are encrypted on the way"
+                )
+            if not self.leaves_hospital_confirmed:
+                raise ValueError("confirm that complaint text will leave this hospital")
+        return self
+
+
 def refused(exc: auth.AuthError) -> HTTPException:
     return HTTPException(exc.status, str(exc))
 
@@ -290,18 +326,24 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             ctx["colours"] = await read_json("rules://sats/targets", mcp_server)
             ctx["tools"] = {t.name: t for t in tools}
             ctx["sign_ids"] = {d["name"]: d["id"] for d in rules["discriminators"]}
-            ctx["llm"] = llm or chat_model()
+            # The admin's model choice (Admin › Model) when one is saved, else .env
+            ctx["llm"] = llm or chat_model(settings.model(db()))
             url = fhir_url()
             scale = (rules["id"], rules["name"])  # the rule pack the MCP server scores with
             write_fhir = (lambda tid: write_committed(tid, url, mcp_server, scale)) if url else None
-            ctx["graph"] = build_graph(
-                ctx["llm"],
-                tools,
-                rules["discriminators"],
-                saver,
-                write_fhir,
-                second_look=os.environ.get("MIZANI_SECOND_LOOK") == "1",
-            )
+
+            def build(model) -> Any:
+                return build_graph(
+                    model,
+                    tools,
+                    rules["discriminators"],
+                    saver,
+                    write_fhir,
+                    second_look=os.environ.get("MIZANI_SECOND_LOOK") == "1",
+                )
+
+            ctx["build"] = build  # rebuilt when the admin changes the model
+            ctx["graph"] = build(ctx["llm"])
             watcher = asyncio.create_task(watch({t.name: t for t in tools}, mcp_server))
             try:
                 yield
@@ -450,6 +492,55 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         except auth.AuthError as exc:
             raise refused(exc) from None
         return {"signed_out": True}
+
+    def candidate(body: ModelChoice) -> dict | None:
+        """The choice as `chat_model` takes it; None means this server (.env). A blank key keeps
+        the saved key for the same address."""
+        if body.location == "this_server":
+            return None
+        choice = body.model_dump(exclude={"leaves_hospital_confirmed"})
+        saved = settings.model(db())
+        if not choice["api_key"] and saved and saved.get("base_url") == choice["base_url"]:
+            choice["api_key"] = saved.get("api_key")
+        return choice
+
+    @app.get("/api/admin/model")
+    def model_setting(_: Admin) -> dict:
+        """Where the model runs now; the key is never sent, only whether one is set."""
+        return settings.public_model(db())
+
+    @app.post("/api/admin/model/test")
+    async def test_model(body: ModelChoice, _: Admin) -> dict:
+        """One short call to the chosen server, timed. Nothing is saved, and no patient text is
+        sent: the question is a fixed word."""
+        started = time.perf_counter()
+        try:
+            call = await asyncio.wait_for(
+                call_model(
+                    chat_model(candidate(body)), [HumanMessage("Reply with one word: ready")]
+                ),
+                timeout=MODEL_TEST_SECONDS,
+            )
+        except TimeoutError:
+            return {"ok": False, "error": f"No answer within {MODEL_TEST_SECONDS} s."}
+        except Exception as exc:  # the server refused, the address is wrong, the key is wrong
+            return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:300]}"}
+        return {
+            "ok": True,
+            "seconds": round(time.perf_counter() - started, 1),
+            "model": call.model,
+            "reply": str(call.message.content).strip()[:80],
+        }
+
+    @app.post("/api/admin/model")
+    def save_model(body: ModelChoice, admin: Admin) -> dict:
+        """Save the choice and use it from the next model call; runs already going finish on the
+        model they started with. Audited, with where complaint text goes, never with the key."""
+        choice = candidate(body)
+        settings.save_model(db(), admin.full_name, choice or {"location": "this_server"})
+        ctx["llm"] = chat_model(choice)
+        ctx["graph"] = ctx["build"](ctx["llm"])
+        return settings.public_model(db())
 
     @app.post("/api/intake", status_code=202)
     async def intake(body: Intake, _: Nurse) -> dict:

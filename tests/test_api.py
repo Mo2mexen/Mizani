@@ -442,6 +442,64 @@ def test_the_api_answers_only_to_this_machines_names(monkeypatch):
         assert api.get("/api/colours").status_code == 200  # a ward server adds its own name
 
 
+CLOUD = {
+    "location": "cloud",
+    "base_url": "https://gpu.example/v1",
+    "model": "qwen3.5:9b",
+    "api_key": "sk-secret-123",
+}
+
+
+def test_the_admin_moves_the_model_without_a_restart_and_the_key_never_comes_back(monkeypatch):
+    built = []
+
+    def chat_model(choice=None):  # the model the next patient gets; it names chest pain
+        built.append(choice)
+        return FakeModel(messages=iter([reply(ids=["chest_pain"])]))
+
+    monkeypatch.setattr("mizani.api.chat_model", chat_model)
+    with client(who="Admin E", role="admin") as api:  # starts on a model with no replies
+        now = api.get("/api/admin/model").json()
+        assert (now["location"], now["has_key"]) == ("this_server", False)
+        unconfirmed = api.post("/api/admin/model", json=CLOUD)
+        assert unconfirmed.status_code == 422 and "leave this hospital" in unconfirmed.text
+        plain = {**CLOUD, "base_url": "http://gpu.example/v1", "leaves_hospital_confirmed": True}
+        assert api.post("/api/admin/model", json=plain).status_code == 422  # https only
+        saved = api.post("/api/admin/model", json={**CLOUD, "leaves_hospital_confirmed": True})
+        assert saved.json()["location"] == "cloud" and saved.json()["has_key"] is True
+        assert "sk-secret-123" not in saved.text + api.get("/api/admin/model").text
+        assert (built[-1]["model"], built[-1]["api_key"]) == ("qwen3.5:9b", "sk-secret-123")
+        blank_key = {**CLOUD, "api_key": "", "leaves_hospital_confirmed": True}
+        api.post("/api/admin/model", json=blank_key)
+        assert built[-1]["api_key"] == "sk-secret-123"  # kept for the same address
+
+        api.cookies.set(SESSION_COOKIE, session("Nurse A"))  # the next patient: the new model
+        proposal = events(api, intake(api), until="proposal")[-1][1]["proposal"]
+        assert proposal["colour"] == "orange"  # chest pain, named by the new model
+        rows = api.get("/api/audit").json()
+
+        api.cookies.set(SESSION_COOKIE, session("Admin E", "admin"))
+        back = api.post("/api/admin/model", json={"location": "this_server"}).json()
+        assert back["location"] == "this_server" and built[-1] is None
+    changes = [r for r in rows if r["tool"] == "model_changed"]
+    assert changes[0]["approver"] == "Admin E" and changes[0]["inputs"]["has_key"] is True
+    assert changes[0]["outputs"] == {"complaint_text_leaves_the_hospital": True}
+    assert "sk-secret-123" not in json.dumps(rows)
+
+
+def test_test_connection_times_one_short_call_and_says_why_it_failed(monkeypatch):
+    answers = iter([AIMessage("ready", response_metadata={"model_name": "qwen-test"})])
+    monkeypatch.setattr("mizani.api.chat_model", lambda choice=None: FakeModel(messages=answers))
+    hospital = {"location": "hospital", "base_url": "http://10.0.0.5:11434/v1", "model": "q"}
+    with client(who="Admin E", role="admin") as api:
+        ok = api.post("/api/admin/model/test", json=hospital).json()
+        failed = api.post("/api/admin/model/test", json=hospital).json()  # no answer left
+        nothing_saved = api.get("/api/admin/model").json()["location"]
+    assert ok["ok"] and (ok["model"], ok["reply"]) == ("qwen-test", "ready")
+    assert ok["seconds"] >= 0 and failed["ok"] is False and failed["error"]
+    assert nothing_saved == "this_server"
+
+
 def test_health_answers_ok_when_the_database_can_be_read():
     with client() as api:
         r = api.get("/api/health")

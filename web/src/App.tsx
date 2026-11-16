@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { AccountMenu } from "./components/AccountMenu";
+import { AdminModel } from "./components/AdminModel";
 import { AdminUsers } from "./components/AdminUsers";
 import { AuditDrawer } from "./components/AuditDrawer";
 import { DoctorView } from "./components/DoctorView";
@@ -14,7 +15,11 @@ type View = { id: string; label: string };
 /** The screens each role can open. The server checks the role on every request; this only
  *  decides what is shown. A role with one screen gets no tabs. */
 function viewsFor(account: Account): View[] {
-  if (account.role === "admin") return [{ id: "users", label: "Users" }];
+  if (account.role === "admin")
+    return [
+      { id: "users", label: "Users" },
+      { id: "model", label: "Model" },
+    ];
   if (account.role === "doctor") return [{ id: "waiting", label: "Waiting room" }];
   return [{ id: "triage", label: "Triage" }];
 }
@@ -106,6 +111,7 @@ function SignedIn({ account, onSwitchUser, onSignOut }: { account: Account; onSw
       {view === "triage" && <NurseView colours={colours} isShadow={isShadow} />}
       {view === "waiting" && <DoctorView colours={colours} />}
       {view === "users" && <AdminUsers />}
+      {view === "model" && <AdminModel />}
       <AuditDrawer isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />
       <footer className="foot">
         Synthetic patients only. Mizani suggests; a signed-in nurse approves every priority. Every number shows the rule

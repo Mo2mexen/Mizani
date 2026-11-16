@@ -17,7 +17,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 
 from mizani import audit
-from mizani.schemas import Account, AuditEntry
+from mizani.schemas import Account
 
 ROLES = ("nurse", "doctor", "admin")
 IDLE = timedelta(minutes=15)  # a shared tablet signs out after 15 minutes without use
@@ -138,29 +138,6 @@ def has_role(account: Account, role: str) -> bool:
     return account.role == role
 
 
-def log(
-    con: sqlite3.Connection,
-    event: str,
-    actor: str | None,
-    inputs: dict,
-    outputs: dict | None = None,
-    error: bool = False,
-) -> None:
-    """One row in the hash-chained audit log, beside the MCP tool calls."""
-    audit.record(
-        con,
-        AuditEntry(
-            time=now(),
-            tool=event,
-            inputs=inputs,
-            outputs=outputs or {},
-            error=error,
-            approver=actor,
-            latency_ms=0,
-        ),
-    )
-
-
 def _check_new_password(password: str, username: str) -> None:
     if len(password) < MIN_PASSWORD:
         raise AuthError(f"Choose a password of at least {MIN_PASSWORD} characters.")
@@ -217,7 +194,7 @@ def create_account(
     """A new account and its one-time password, shown once to the admin who made it."""
     otp = one_time_password()
     account = add_account(con, username, full_name, role, hash_password(otp), created_by=actor)
-    log(
+    audit.event(
         con,
         "account_created",
         actor,
@@ -248,7 +225,9 @@ def sign_in(con: sqlite3.Connection, username: str, password: str) -> tuple[str,
     wrong = AuthError("Wrong user name or password.", 401)
 
     def refuse(name: str | None, reason: str) -> None:
-        log(con, "sign_in_refused", None, {"username": name}, {"reason": reason}, error=True)
+        audit.event(
+            con, "sign_in_refused", None, {"username": name}, {"reason": reason}, error=True
+        )
 
     if row is None:
         password_matches(password, _dummy_hash())
@@ -283,7 +262,9 @@ def sign_in(con: sqlite3.Connection, username: str, password: str) -> tuple[str,
         (now().isoformat(), account.id),
     )
     value = open_session(con, account)
-    log(con, "sign_in", account.full_name, {"username": account.username, "role": account.role})
+    audit.event(
+        con, "sign_in", account.full_name, {"username": account.username, "role": account.role}
+    )
     return value, get(con, account.id)
 
 
@@ -314,7 +295,7 @@ def session_account(con: sqlite3.Connection, value: str, touch: bool = True) -> 
 
 def sign_out(con: sqlite3.Connection, value: str, account: Account) -> None:
     con.execute("UPDATE session SET ended = 1 WHERE id_hash = ?", (_session_hash(value),))
-    log(con, "sign_out", account.full_name, {"username": account.username})
+    audit.event(con, "sign_out", account.full_name, {"username": account.username})
 
 
 def _end_sessions(con: sqlite3.Connection, account_id: int, keep: str | None = None) -> None:
@@ -340,7 +321,7 @@ def change_password(
         (hash_password(new), account.id),
     )
     _end_sessions(con, account.id, keep=session)
-    log(con, "password_changed", account.full_name, {"username": account.username})
+    audit.event(con, "password_changed", account.full_name, {"username": account.username})
     return get(con, account.id)
 
 
@@ -372,7 +353,7 @@ def reset_password(con: sqlite3.Connection, actor: str, account_id: int) -> str:
         (hash_password(otp), account.id),
     )
     _end_sessions(con, account.id)
-    log(con, "password_reset", actor, {"username": account.username})
+    audit.event(con, "password_reset", actor, {"username": account.username})
     return otp
 
 
@@ -391,7 +372,7 @@ def set_role(con: sqlite3.Connection, actor: Account, account_id: int, role: str
         " chief_at = CASE WHEN ? = 'doctor' THEN chief_at END WHERE id = ?",
         (role, role, role, account.id),
     )
-    log(con, "role_changed", actor.full_name,
+    audit.event(con, "role_changed", actor.full_name,
         {"username": account.username, "from": account.role, "to": role})  # fmt: skip
     return get(con, account.id)
 
@@ -408,7 +389,7 @@ def set_chief(con: sqlite3.Connection, actor: Account, account_id: int, chief: b
         "UPDATE account SET chief_by = ?, chief_at = ? WHERE id = ?",
         (actor.full_name if chief else None, stamp, account.id),
     )
-    log(con, "chief_flag_given" if chief else "chief_flag_removed", actor.full_name,
+    audit.event(con, "chief_flag_given" if chief else "chief_flag_removed", actor.full_name,
         {"username": account.username})  # fmt: skip
     return get(con, account.id)
 
@@ -425,7 +406,7 @@ def set_active(con: sqlite3.Connection, actor: Account, account_id: int, active:
     con.execute("UPDATE account SET active = ? WHERE id = ?", (int(active), account.id))
     if not active:
         _end_sessions(con, account.id)
-    log(con, "account_reactivated" if active else "account_deactivated", actor.full_name,
+    audit.event(con, "account_reactivated" if active else "account_deactivated", actor.full_name,
         {"username": account.username})  # fmt: skip
     return get(con, account.id)
 
@@ -433,7 +414,7 @@ def set_active(con: sqlite3.Connection, actor: Account, account_id: int, active:
 def sign_out_everywhere(con: sqlite3.Connection, actor: Account, account_id: int) -> None:
     account = _target(con, account_id)
     _end_sessions(con, account.id)
-    log(con, "signed_out_everywhere", actor.full_name, {"username": account.username})
+    audit.event(con, "signed_out_everywhere", actor.full_name, {"username": account.username})
 
 
 def first_start(con: sqlite3.Connection) -> str | None:
@@ -456,5 +437,5 @@ def first_start(con: sqlite3.Connection) -> str | None:
             " failed = 0, locked_until = NULL WHERE username = ?",
             (hash_password(otp), username),
         )
-    log(con, "first_admin_password", CONSOLE, {"username": username})
+    audit.event(con, "first_admin_password", CONSOLE, {"username": username})
     return otp
