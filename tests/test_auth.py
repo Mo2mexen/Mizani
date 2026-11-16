@@ -256,6 +256,17 @@ def test_sign_in_sets_a_safe_cookie_and_a_one_time_password_blocks_the_rest():
     ]  # fmt: skip
 
 
+def test_over_https_the_session_cookie_is_secure():
+    new_account(password="a fine long password")
+    secure = TestClient(app(), base_url="https://127.0.0.1", headers={"X-Mizani": "1"})
+    with secure as api:
+        signed = api.post(
+            "/api/auth/login", json={"username": "amina", "password": "a fine long password"}
+        )
+    cookie = signed.headers["set-cookie"].lower()
+    assert signed.status_code == 200 and "; secure" in cookie and "httponly" in cookie
+
+
 def test_a_change_without_the_page_header_is_refused_and_answers_carry_safe_headers():
     with TestClient(app(), base_url="http://127.0.0.1") as api:
         forged = api.post("/api/auth/login", json={"username": "a", "password": "b"})

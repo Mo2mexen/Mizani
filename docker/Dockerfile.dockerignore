@@ -8,3 +8,5 @@ __pycache__
 data
 web/node_modules
 backups
+certs
+.env
