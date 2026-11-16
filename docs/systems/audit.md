@@ -8,7 +8,7 @@ Every tool call, in order, in a log that shows if anyone edited it afterwards. I
 - Tests: `tests/test_mcp_server.py`
 
 ## How it works
-Each row stores an `AuditEntry` (time, tool, inputs, outputs, an `error` flag for failed or refused calls, approver, model, tokens, latency in ms, cost) plus the triage id and the agent's run id, as canonical JSON. Its hash is SHA-256 of the previous row's hash plus this JSON, so the rows form a chain. Writes take an exclusive lock so the chain never forks. `verify_chain` recomputes every hash and returns the first row that doesn't match.
+Each row stores an `AuditEntry` (time, tool, inputs, outputs, an `error` flag for failed or refused calls, approver, model, tokens in total and split into in and out, latency in ms, cost) plus the triage id and the agent's run id, as canonical JSON. Its hash is SHA-256 of the previous row's hash plus this JSON, so the rows form a chain. Writes take an exclusive lock so the chain never forks. `verify_chain` recomputes every hash and returns the first row that doesn't match.
 
 Model, tokens, cost and `run_id` come from the `_meta` the agent sends with a tool call; malformed values are dropped, so the call and its audit row go through. Approval tokens in the inputs are stored as `***`. Each server thread has its own SQLite connection and writes take an exclusive lock, so parallel calls can't interleave inside one transaction (a test runs 8 writers at once and checks the chain). The run id (one per patient run) is what lets a patient's timeline include the checks the agent made before `propose_priority` created the triage id. Local models cost 0; the agent can also log its own model calls with `audit.record`.
 

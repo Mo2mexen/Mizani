@@ -2,8 +2,9 @@
 (and `LLM_API_KEY` when the server checks keys).
 
 Thinking is off on every request and temperature is 0, so calls are fast and repeatable. Each
-call reports the model, tokens and latency; they go into the audit log with the tool calls the
-model asked for. `/v1` cannot set the context size per request, so set it on the server
+call reports the model, tokens (in, out and total) and latency; they go into the audit log with
+the tool calls the model asked for. `/v1` cannot set the context size per request, so set it on
+the server
 (Ollama: 8192 or more), or a prompt with every tool definition can be cut off without an error.
 """
 
@@ -43,10 +44,18 @@ class ModelCall:
     tokens: int
     latency_ms: float
     cost: float = 0.0  # local open-weights model
+    tokens_in: int = 0  # the prompt: system text, chart signs, tool definitions, the entry
+    tokens_out: int = 0  # the model's reply: its tool calls
 
     def meta(self) -> dict:
         """`_meta` for the MCP tool calls this model call asked for, so the audit log has it."""
-        return {"model": self.model, "tokens": self.tokens, "cost": self.cost}
+        return {
+            "model": self.model,
+            "tokens": self.tokens,
+            "tokens_in": self.tokens_in,
+            "tokens_out": self.tokens_out,
+            "cost": self.cost,
+        }
 
 
 async def call_model(llm: Runnable[LanguageModelInput, AIMessage], messages) -> ModelCall:
@@ -58,4 +67,6 @@ async def call_model(llm: Runnable[LanguageModelInput, AIMessage], messages) -> 
         model=message.response_metadata.get("model_name", "unknown"),
         tokens=usage.get("total_tokens", 0),
         latency_ms=round((time.perf_counter() - started) * 1000, 1),
+        tokens_in=usage.get("input_tokens", 0),
+        tokens_out=usage.get("output_tokens", 0),
     )

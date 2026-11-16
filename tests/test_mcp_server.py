@@ -220,12 +220,15 @@ async def test_override_sets_the_nurses_colour():
 
 async def test_every_call_is_logged_with_model_tokens_and_latency():
     async with Client(mcp) as client:
-        await propose(client, model="qwen3.5:4b-q4_K_M", tokens=321, cost=0.0)
+        await propose(
+            client, model="qwen3.5:4b-q4_K_M", tokens=321, tokens_in=300, tokens_out=21, cost=0.0
+        )
         await client.call_tool("commit_triage", {"triage_id": "nope", "approval_token": ""})
     logged = audit.entries(db())
     assert [e["tool"] for e in logged] == ["propose_priority", "commit_triage"]
     first = logged[0]
     assert (first["model"], first["tokens"], first["cost"]) == ("qwen3.5:4b-q4_K_M", 321, 0.0)
+    assert (first["tokens_in"], first["tokens_out"]) == (300, 21)
     assert first["latency_ms"] >= 0 and first["inputs"]["patient_label"] == "Test Patient 01"
     assert "commit refused" in json.dumps(logged[1]["outputs"])
     assert (logged[0]["error"], logged[1]["error"]) == (False, True)
@@ -524,9 +527,12 @@ async def test_recheck_is_raised_once_and_never_for_a_replaced_triage():
 
 async def test_bad_meta_never_breaks_a_call_or_its_audit_row():
     async with Client(mcp) as client:
-        p = await propose(client, tokens=-5, cost="free", model=None)
+        p = await propose(
+            client, tokens=-5, tokens_in="many", tokens_out=-1, cost="free", model=None
+        )
     row = audit.entries(db(), p["triage_id"])[0]
     assert row["tool"] == "propose_priority" and row["tokens"] is None and row["cost"] == 0.0
+    assert row["tokens_in"] is None and row["tokens_out"] is None
 
 
 async def test_audit_rows_never_hold_a_usable_approval_token():

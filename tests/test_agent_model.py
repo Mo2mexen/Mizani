@@ -49,5 +49,18 @@ async def test_call_reports_model_tokens_and_latency():
     )
     call = await call_model(GenericFakeChatModel(messages=iter([reply])), [HumanMessage("hi")])
     assert (call.model, call.tokens, call.cost) == ("qwen3.5:4b-q4_K_M", 874, 0.0)
+    assert (call.tokens_in, call.tokens_out) == (800, 74)
     assert call.latency_ms >= 0
-    assert call.meta() == {"model": "qwen3.5:4b-q4_K_M", "tokens": 874, "cost": 0.0}
+    assert call.meta() == {
+        "model": "qwen3.5:4b-q4_K_M",
+        "tokens": 874,
+        "tokens_in": 800,
+        "tokens_out": 74,
+        "cost": 0.0,
+    }
+
+
+async def test_a_server_that_reports_no_usage_counts_zero_not_a_crash():
+    reply = AIMessage("ok", response_metadata={"model_name": "some-server"})
+    call = await call_model(GenericFakeChatModel(messages=iter([reply])), [HumanMessage("hi")])
+    assert (call.tokens, call.tokens_in, call.tokens_out) == (0, 0, 0)

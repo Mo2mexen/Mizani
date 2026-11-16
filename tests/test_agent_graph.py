@@ -211,6 +211,14 @@ async def test_every_model_token_is_on_exactly_one_audit_row():
     )  # the rejected answer + the used one
     assert tokens["match_discriminators"] == tokens["compute_tews"] == tokens["commit_triage"] == 0
     assert sum(r["tokens"] for r in rows) == 2 * USAGE["total_tokens"]
+    # In and out are counted the same way: once, on the first tool call after the model call.
+    assert sum(r["tokens_in"] for r in rows) == 2 * USAGE["input_tokens"]
+    assert sum(r["tokens_out"] for r in rows) == 2 * USAGE["output_tokens"]
+    model_step = next(s for s in result["trace"] if s["kind"] == "model")
+    assert (model_step["output"]["tokens_in"], model_step["output"]["tokens_out"]) == (
+        USAGE["input_tokens"],
+        USAGE["output_tokens"],
+    )
     assert {r["model"] for r in rows} == {"fake-model"}
 
 

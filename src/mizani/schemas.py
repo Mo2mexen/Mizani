@@ -125,5 +125,7 @@ class AuditEntry(Contract):
     approver: str | None = None
     model: str | None = None
     tokens: int | None = Field(default=None, ge=0)
+    tokens_in: int | None = Field(default=None, ge=0)  # the prompt; rows before 16 Nov 2026: none
+    tokens_out: int | None = Field(default=None, ge=0)  # the model's reply
     latency_ms: float = Field(ge=0)
     cost: float = Field(default=0.0, ge=0)

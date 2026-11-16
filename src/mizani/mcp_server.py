@@ -1,9 +1,10 @@
 """Mizani MCP server (`mizani-triage`): SATS tools, resources and prompts over streamable HTTP.
 
 Every tool call is written to the hash-chained audit log by `audit_calls`, including refused
-ones (flagged `error`). The agent adds `_meta: {"run_id", "model", "tokens", "cost"}` to each call:
-`run_id` (one per patient run) links the checks made before the triage existed to that triage,
-and the rest records which model asked for the call and what it cost.
+ones (flagged `error`). The agent adds `_meta: {"run_id", "model", "tokens", "tokens_in",
+"tokens_out", "cost"}` to each call: `run_id` (one per patient run) links the checks made before
+the triage existed to that triage, and the rest records which model asked for the call, the
+tokens it read and wrote, and what it cost.
 """
 
 import json
@@ -42,9 +43,10 @@ def _plain(value: Any) -> Any:
 def _usage(meta: dict) -> dict:
     """Model usage from the caller's _meta, kept only when well formed: a malformed value must
     neither fail a call that already happened nor stop its audit row."""
-    tokens, cost, model, run_id = (meta.get(k) for k in ("tokens", "cost", "model", "run_id"))
+    cost, model, run_id = (meta.get(k) for k in ("cost", "model", "run_id"))
+    counts = {k: meta.get(k) for k in ("tokens", "tokens_in", "tokens_out")}
     return {
-        "tokens": tokens if isinstance(tokens, int) and tokens >= 0 else None,
+        **{k: v if isinstance(v, int) and v >= 0 else None for k, v in counts.items()},
         "cost": float(cost) if isinstance(cost, int | float) and cost >= 0 else 0.0,
         "model": str(model)[:200] if model is not None else None,
         "run_id": str(run_id)[:200] if run_id is not None else None,
@@ -96,6 +98,8 @@ async def audit_calls(ctx, call_next):
                 approver=approver,
                 model=usage["model"],
                 tokens=usage["tokens"],
+                tokens_in=usage["tokens_in"],
+                tokens_out=usage["tokens_out"],
                 latency_ms=round((time.perf_counter() - started) * 1000, 2),
                 cost=usage["cost"],
             ),

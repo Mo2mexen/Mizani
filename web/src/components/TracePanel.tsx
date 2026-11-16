@@ -20,9 +20,17 @@ const KIND_LABEL: Record<TraceStep["kind"], string> = {
 };
 const MASKED = "hidden until you record your own colour (shadow mode)";
 
+type Usage = { tokens?: number; tokens_in?: number; tokens_out?: number };
+
+/** "1,982 in · 143 out · ": what the model read and wrote; the total alone for runs logged before the split. */
+function tokenLabel({ tokens, tokens_in, tokens_out }: Usage): string {
+  if (tokens_in || tokens_out) return `${(tokens_in ?? 0).toLocaleString()} in · ${(tokens_out ?? 0).toLocaleString()} out · `;
+  return tokens ? `${tokens.toLocaleString()} tok · ` : "";
+}
+
 function Step({ step, isMasked }: { step: TraceStep; isMasked: boolean }) {
   const [isOpen, setIsOpen] = useState(false);
-  const output = step.output as { error?: string; tokens?: number } | null;
+  const output = step.output as { error?: string; tokens?: number; tokens_in?: number; tokens_out?: number } | null;
   const isError = Boolean(output && typeof output === "object" && "error" in output && output.error);
   const line = traceLine(step);
   return (
@@ -32,7 +40,7 @@ function Step({ step, isMasked }: { step: TraceStep; isMasked: boolean }) {
         <span className="trace-kind">{KIND_LABEL[step.kind]}</span>
         <span className="trace-name">{step.kind === "waiting_for_nurse" ? "waiting for the nurse" : step.name}</span>
         <span className="trace-meta">
-          {step.kind === "model" && output?.tokens ? `${output.tokens} tok · ` : ""}
+          {step.kind === "model" && output ? tokenLabel(output) : ""}
           {step.latency_ms ? `${(step.latency_ms / 1000).toFixed(1)} s` : ""}
         </span>
       </button>
@@ -55,6 +63,15 @@ export function TracePanel({ run, isMasked }: Props) {
   const tools = run?.steps.filter((s) => s.kind === "tool_call").length ?? 0;
   const models = run?.steps.filter((s) => s.kind === "model").length ?? 0;
   const seconds = (run?.steps ?? []).reduce((t, s) => t + (s.latency_ms ?? 0), 0) / 1000;
+  const used = (run?.steps ?? [])
+    .filter((s) => s.kind === "model")
+    .reduce<Required<Usage>>(
+      (sum, s) => {
+        const o = (s.output ?? {}) as Usage;
+        return { tokens: sum.tokens + (o.tokens ?? 0), tokens_in: sum.tokens_in + (o.tokens_in ?? 0), tokens_out: sum.tokens_out + (o.tokens_out ?? 0) };
+      },
+      { tokens: 0, tokens_in: 0, tokens_out: 0 },
+    );
 
   function toggle() {
     setIsOpen(!isOpen);
@@ -71,7 +88,8 @@ export function TracePanel({ run, isMasked }: Props) {
         How Mizani got there: the agent's steps
         {run && (
           <span className="count">
-            {models} model call{models === 1 ? "" : "s"} · {tools} tool call{tools === 1 ? "" : "s"} · {seconds.toFixed(1)} s ·
+            {models} model call{models === 1 ? "" : "s"} · {tokenLabel(used)}
+            {tools} tool call{tools === 1 ? "" : "s"} · {seconds.toFixed(1)} s ·
             run <span className="run-id">{run.runId}</span>
           </span>
         )}

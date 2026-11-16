@@ -33,7 +33,7 @@ The agent reads the rules (`rules://sats/adult`), checks vitals, names chart dis
 | `triage_intake` | prompt | `complaint` | intake instructions: every chart sign with its id, colour and, where the EMSSA manual defines it, its meaning; a quote from the complaint for each sign; never infer a diagnosis. The rules for picking a sign are the agent's own, from `src/mizani/prompts.py`, so the two cannot drift apart | none |
 | `handover_summary` | prompt | `triage_id` | findings-only handover instructions | none |
 
-Optional `_meta` on a tool call is copied into the audit row: `run_id` (one per patient run; links the checks made before the triage existed to that triage's timeline), and `model`, `tokens`, `cost` (which model asked for the call and what it cost). Refused or failed calls get `error: true`.
+Optional `_meta` on a tool call is copied into the audit row: `run_id` (one per patient run; links the checks made before the triage existed to that triage's timeline), and `model`, `tokens`, `tokens_in`, `tokens_out`, `cost` (which model asked for the call, what it read and wrote, and what it cost; a value that is not a whole number of 0 or more is stored as empty). Refused or failed calls get `error: true`.
 
 ## Depends on / used by
 - Depends on: the rules engine, `schemas.py`, `approval.py`, `audit.py`, SQLite, `mcp`.

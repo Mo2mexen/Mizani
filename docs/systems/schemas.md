@@ -21,7 +21,7 @@ Every model extends `Contract`, which rejects unknown fields (a typo like `pulse
 - `SignClaim`: a chart sign the agent names, `{id, quote}`; the engine applies it only if the quote is in the complaint outside text addressed to the software.
 - `Proposal`: the suggested colour. Its `source` is a one-line, cited reason for the colour (the TEWS total or the discriminator that set it). `status` can only be `"pending"`; committing happens elsewhere, after a nurse decision.
 - `NurseDecision`: needs a nurse name. An override needs a colour and a reason; an approval cannot carry a colour. `confirmed` records that the nurse checked a sign with the patient; `commit_triage` asks for it before approving a red colour that rests on the complaint's words alone.
-- `AuditEntry`: one logged tool call (inputs, outputs, time, approver, model, tokens, latency, cost). `error` marks a call that failed or was refused, with the reason in the outputs. The audit store adds the hash chain.
+- `AuditEntry`: one logged tool call (inputs, outputs, time, approver, model, tokens with `tokens_in` and `tokens_out`, latency, cost). `error` marks a call that failed or was refused, with the reason in the outputs. The audit store adds the hash chain.
 
 ## Interfaces
 | Name | Input | Output | Side effects |
