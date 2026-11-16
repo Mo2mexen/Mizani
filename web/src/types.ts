@@ -100,8 +100,13 @@ export type AuditRow = {
   approver: string | null;
   model: string | null;
   tokens: number | null;
+  /** The prompt and the reply of the model calls this row carries; absent on rows logged before 16 Nov 2026. */
+  tokens_in?: number | null;
+  tokens_out?: number | null;
   latency_ms: number;
   cost: number;
+  /** The agent run that made the call; null for calls from the page or another client. */
+  run_id?: string | null;
   hash: string;
 };
 

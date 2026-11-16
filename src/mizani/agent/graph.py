@@ -38,14 +38,25 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from mizani.agent.mcp_tools import with_meta
-from mizani.agent.model import call_model
+from mizani.agent.model import ModelCall, call_model
 from mizani.prompts import COMPLAINT_IS_DATA, SIGN_RULES, chart_line
 
 MAX_ATTEMPTS = 3  # model calls per extraction: the first one and two retries
 # The tools the model calls, and the arguments it fills in; the graph adds the nurse's vitals
 # and the complaint to match_discriminators itself, so the model never copies them.
 MODEL_TOOLS = {"validate_vitals": ("vitals",), "match_discriminators": ("discriminators",)}
-NOTHING_UNLOGGED = {"tokens": 0, "cost": 0.0}
+NOTHING_UNLOGGED = {"tokens": 0, "tokens_in": 0, "tokens_out": 0, "cost": 0.0}
+
+
+def _plus(unlogged: dict, call: ModelCall) -> dict:
+    """Add one model call's usage to the usage not on an audit row yet. A run checkpointed before
+    tokens in and out were kept has neither key, so they start at 0."""
+    return {
+        "tokens": unlogged["tokens"] + call.tokens,
+        "tokens_in": unlogged.get("tokens_in", 0) + call.tokens_in,
+        "tokens_out": unlogged.get("tokens_out", 0) + call.tokens_out,
+        "cost": unlogged["cost"] + call.cost,
+    }
 
 
 class TriageState(TypedDict, total=False):
@@ -263,10 +274,7 @@ def build_graph(
             "attempts": attempts,
             "model_failed": False,
             "model": call.model,
-            "unlogged": {
-                "tokens": unlogged["tokens"] + call.tokens,
-                "cost": unlogged["cost"] + call.cost,
-            },
+            "unlogged": _plus(unlogged, call),
             "trace": [step],
         }
         missing = [name for name in MODEL_TOOLS if name not in calls]
@@ -381,10 +389,7 @@ def build_graph(
             "unreviewed": before,
             "signs": final,
             "withdrawn": withdrawn,
-            "unlogged": {
-                "tokens": unlogged["tokens"] + call.tokens,
-                "cost": unlogged["cost"] + call.cost,
-            },
+            "unlogged": _plus(unlogged, call),
             "trace": [step],
         }
 

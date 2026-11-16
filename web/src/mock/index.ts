@@ -149,7 +149,7 @@ export function openStream(runId: string, on: StreamHandlers): () => void {
   const triageId = `mock-${runId}`;
   streams.set(runId, on);
   const events: ["step" | "proposal", unknown][] = [
-    ["step", step("model", "extract", { attempt: 1 }, { tool_calls: [], tokens: 1640, model: "FAKE mock model" })],
+    ["step", step("model", "extract", { attempt: 1 }, { tool_calls: [], tokens: 1640, tokens_in: 1520, tokens_out: 120, model: "FAKE mock model" })],
     ["step", step("tool_call", "validate_vitals", { vitals: {} }, [])],
     ["step", step("tool_call", "compute_tews", { vitals: {} }, { total: 2 })],
     ["step", step("tool_call", "match_discriminators", { discriminators: [{ id: "chest_pain", quote: "chest pain since this morning" }] }, {})],

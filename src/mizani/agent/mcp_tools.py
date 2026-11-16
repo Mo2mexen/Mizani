@@ -1,8 +1,9 @@
 """The `mizani-triage` MCP tools as LangChain tools, for the agent and its model.
 
 Built on the MCP Python SDK client (langchain-mcp-adapters only supports MCP SDK 1.x, and the
-server is on 2.x). Each call can carry `_meta: {model, tokens, cost}` from the model call that
-asked for it, so the server's audit log records them: `tool.ainvoke(call, with_meta(meta))`.
+server is on 2.x). Each call can carry `_meta: {model, tokens, tokens_in, tokens_out, cost}` from
+the model call that asked for it, so the server's audit log records them:
+`tool.ainvoke(call, with_meta(meta))`.
 """
 
 import json

@@ -18,7 +18,7 @@ Mizani is an offline triage co-pilot for the front desk of a busy public hospita
 
 Mizani helps that nurse without taking the decision away. The nurse types the vital signs and the complaint, in English or Arabic. An agent running on a local open-weights model (Qwen3.5 4B through Ollama) checks the readings, asks for a re-measure when one is missing or impossible, and then calls our MCP server to score the patient on SATS. A deterministic rules engine does the scoring from a rule pack that cites the adult chart for every value, so each point, matched sign and proposed colour shows the rule behind it.
 
-The colour is only a proposal. A named nurse approves it or overrides it with a reason, and the MCP server refuses to save anything without that nurse's signed, single-use approval token, whatever the model does. Saved triages go onto a waiting-room board grouped by colour and into a local FHIR server through wso2's fhir-mcp-server, so other hospital systems can read them. While patients wait, the agent compares each wait with the SATS target time for the colour and raises a re-check flag for the nurse; it never moves a patient. Every tool call goes into a hash-chained audit log with inputs, outputs, time, approver, model, tokens, latency and cost.
+The colour is only a proposal. A named nurse approves it or overrides it with a reason, and the MCP server refuses to save anything without that nurse's signed, single-use approval token, whatever the model does. Saved triages go onto a waiting-room board grouped by colour and into a local FHIR server through wso2's fhir-mcp-server, so other hospital systems can read them. While patients wait, the agent compares each wait with the SATS target time for the colour and raises a re-check flag for the nurse; it never moves a patient. Every tool call goes into a hash-chained audit log with inputs, outputs, time, approver, model, tokens in and out, latency and cost.
 
 Mizani never diagnoses or prescribes, treats patient text as data, and uses synthetic patients only. It runs offline on one machine with `docker compose up`. [EVALS.md](docs/EVALS.md) runs each synthetic task five times and reports the pass rate, the run-to-run variation, the cost per run and the failures we have not fixed. Speed and chart-sign accuracy depend on the model; a larger model is a configuration change, and the scoring, approval gate and audit log stay the same.
 
@@ -60,7 +60,7 @@ FastAPI + LangGraph agent (pauses for the nurse, resumes after approval)
   ├─ Model: any OpenAI-compatible endpoint → Ollama + Qwen3.5 locally
   ├─ MCP ─► mizani-triage (our server): tools · resources · prompts
   └─ MCP ─► wso2 fhir-mcp-server ─► HAPI FHIR (local)
-Audit log (SQLite, hash-chained): every tool call with inputs, outputs, time, approver, model, tokens, latency, cost
+Audit log (SQLite, hash-chained): every tool call with inputs, outputs, time, approver, model, tokens in and out, latency, cost
 ```
 
 ### Our MCP server

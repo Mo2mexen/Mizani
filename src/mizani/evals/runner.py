@@ -233,9 +233,12 @@ async def run_case(case: dict, graph, tools: dict, names: dict, folder: str) -> 
         if case.get("kind") in EXTRA:
             checks += await EXTRA[case["kind"]](case, graph, config, tools, result)
     except Exception as exc:  # a crash is a failed run, reported with its reason
-        crashed = {"checks": [], "signature": "crash", "tokens": 0, "model_calls": 0, "cost": 0.0}
         return {
-            **crashed,
+            "checks": [],
+            "signature": "crash",
+            "model_calls": 0,
+            **dict.fromkeys(("tokens", "tokens_in", "tokens_out"), 0),
+            "cost": 0.0,
             "pass": False,
             "error": repr(exc),
             "seconds": time.perf_counter() - started,
@@ -250,7 +253,10 @@ async def run_case(case: dict, graph, tools: dict, names: dict, folder: str) -> 
         "seconds": round(seconds, 2),
         "model_calls": len(steps),
         "model_ms": round(sum(s["latency_ms"] for s in steps), 1),
-        "tokens": sum(s["output"].get("tokens", 0) for s in steps),
+        **{
+            k: sum(s["output"].get(k, 0) for s in steps)
+            for k in ("tokens", "tokens_in", "tokens_out")
+        },
         "cost": sum(s["output"].get("cost", 0.0) for s in steps),
     }
 
@@ -269,6 +275,8 @@ def summarise(case: dict, runs: list[dict]) -> dict:
         "seconds_mean": round(statistics.mean(seconds), 2),
         "seconds_sd": round(statistics.pstdev(seconds), 2),
         "tokens_mean": round(statistics.mean(r["tokens"] for r in runs)),
+        "tokens_in_mean": round(statistics.mean(r["tokens_in"] for r in runs)),
+        "tokens_out_mean": round(statistics.mean(r["tokens_out"] for r in runs)),
         "cost_per_run": round(statistics.mean(r["cost"] for r in runs), 6),
         "failed_checks": Counter(n for r in runs for n, ok in r["checks"] if not ok),
         "errors": [r["error"] for r in runs if "error" in r],

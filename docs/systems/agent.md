@@ -37,9 +37,9 @@ Re-check runs: `watch()` asks the server every 30 s to flag patients past their 
 
 ## Model client and MCP tools
 1. `chat_model()` builds one OpenAI-compatible chat model from `LLM_BASE_URL` and `LLM_MODEL`. Every request has thinking off (`reasoning_effort: "none"`; set `LLM_REASONING_EFFORT` empty for a server that rejects the field) and temperature 0. A model server that checks keys gets its key from `LLM_API_KEY`; Ollama needs none. Without settings it uses Ollama on the same machine with `qwen3.5:4b-q4_K_M`.
-2. `call_model(llm, messages)` runs one model call and returns the reply with the model name, total tokens, latency in ms and cost (0 for a local model).
+2. `call_model(llm, messages)` runs one model call and returns the reply with the model name, the tokens in (the prompt), out (the reply) and in total, latency in ms and cost (0 for a local model).
 3. `load_tools()` connects to `mizani-triage` with the MCP Python SDK client, lists its tools and wraps each one as a LangChain tool with the server's own argument schema. The agent binds the two it needs to the model, each cut down to the arguments the model fills in (`MODEL_TOOLS`, `_model_view`).
-4. Tools run with `tool.ainvoke(call, with_meta(meta))`. The wrapper opens a connection, calls the tool with `_meta: {model, tokens, cost, run_id}` and returns the tool's text plus its structured result. The server's audit log copies model, tokens and cost into the row, so every logged call shows which model the run used and what it cost.
+4. Tools run with `tool.ainvoke(call, with_meta(meta))`. The wrapper opens a connection, calls the tool with `_meta: {model, tokens, tokens_in, tokens_out, cost, run_id}` and returns the tool's text plus its structured result. The server's audit log copies model, tokens (in, out, total) and cost into the row, so every logged call shows which model the run used and what it cost.
 5. A refused or failed tool call (for example `commit_triage` without an approval token) comes back as an error tool message carrying the server's reason, so the agent can retry or report it instead of crashing.
 
 We use the MCP SDK client directly because `langchain-mcp-adapters` only supports MCP SDK 1.x and our server is built on 2.x. Its successor, `langchain.mcp`, does not send `_meta` with a tool call, and the audit log needs it.
@@ -51,8 +51,8 @@ We use the MCP SDK client directly because `langchain-mcp-adapters` only support
 | run: `ainvoke({patient_label, complaint, nurse_vitals}, thread)` | the nurse's entry | state paused at the nurse: `__interrupt__` with `{proposal, error}`, `trace` | model call, tool calls, pending triage |
 | resume: `ainvoke(Command(resume=answer), thread)` | `{"action": "remeasure", "vitals": {...}}` or `{"action": "approve" \| "override", "approval_token": ...}` | paused again, or `committed` | tool calls, commit |
 | `chat_model()` | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_REASONING_EFFORT`, `LLM_API_KEY` | chat model, thinking off, temperature 0 | none |
-| `call_model(llm, messages)` | bound model, messages | `ModelCall`: reply, model, tokens, latency_ms, cost | one model request |
-| `ModelCall.meta()` | | `{model, tokens, cost}` for `_meta` | none |
+| `call_model(llm, messages)` | bound model, messages | `ModelCall`: reply, model, tokens, tokens_in, tokens_out, latency_ms, cost | one model request |
+| `ModelCall.meta()` | | `{model, tokens, tokens_in, tokens_out, cost}` for `_meta` | none |
 | `load_tools(server)` | URL (default `MIZANI_MCP_URL`) or in-process server | one LangChain tool per MCP tool | lists tools on the server |
 | `with_meta(meta)` | `_meta` dict | run config for `tool.ainvoke` | none |
 | `raise_due_rechecks(tools, server)` | MCP tools | flags raised this round | `raise_recheck_flag` calls, audit rows |
