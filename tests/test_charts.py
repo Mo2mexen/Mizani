@@ -148,6 +148,8 @@ def test_the_engine_checks_refuse_what_would_crash_scoring_or_tie_up_the_server(
     assert "two bands both take" in bad(overlap)
     no_bands = edited(lambda d: d["tews"]["temperature"].update(bands=[]))
     assert "give its points as bands" in bad(no_bands)  # not an IndexError
+    same_name = edited(lambda d: d["discriminators"][1].update(name="Chest pain"))
+    assert "chart sign names repeat: ['Chest pain']" in bad(same_name)  # a re-check maps names
     no_row = edited(lambda d: d["tews"].pop("trauma"))
     assert "tews has no row for ['trauma']" in bad(no_row)  # not a KeyError at the first patient
     assert "not valid YAML" in bad("[" * 50_000)  # nested too deep for the parser
@@ -355,6 +357,28 @@ async def test_a_chart_in_use_that_no_longer_loads_gives_way_to_the_built_in_one
     assert [r["tool"] for r in audit.entries(db())].count("chart_unloadable") == 1
     (entry,) = queue  # still listed, first and due now, instead of a crash
     assert (entry["colour"], entry["target_minutes"], entry["recheck_due"]) == ("blue", 0, True)
+    async with Client(mcp) as client:  # going back to it says why it cannot
+        ref = str(chart["id"])
+        again = await client.call_tool(
+            "activate_chart", {"chart": ref, "approval_token": await chief_token(ref)}
+        )
+    assert "cannot be activated: this version of Mizani cannot load it" in again.content[0].text
+
+
+def test_inside_a_commit_the_chart_check_writes_nothing():
+    chart = charts.upload(db(), "Dr Chief", KENYA, None)
+    evaluated(chart["id"])
+    charts.activate(db(), str(chart["id"]), "Dr Chief", "nonce-1")
+    stricter = edited(lambda d: d["tews"].pop("trauma"))
+    db().execute("UPDATE chart SET yaml = ? WHERE id = ?", (stricter, chart["id"]))
+    charts._cache.clear()
+    con = db()
+    con.execute("BEGIN IMMEDIATE")  # as store.commit does before it asks for the chart in use
+    assert charts.active(con)[1] == "sats_adult, built in"
+    con.execute("ROLLBACK")
+    assert charts.get(db(), chart["id"])["status"] == "active"  # marked by the next call instead
+    charts.active(db())
+    assert charts.get(db(), chart["id"])["status"] == "failed"
 
 
 def test_the_fhir_record_names_the_chart_that_scored_the_triage():

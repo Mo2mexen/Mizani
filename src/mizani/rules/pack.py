@@ -182,11 +182,13 @@ class RulePack(Rule):
         """What the engine relies on, checked before a chart scores anyone: unique sign ids,
         TEWS colours from the highest total down to 0, every plausible value in exactly one band
         of its row, every coded value scored, and the four investigations the engine raises."""
-        ids = [d.id for d in self.discriminators]
-        if len(ids) != len(set(ids)):
-            raise ValueError(
-                f"chart sign ids repeat: {sorted({i for i in ids if ids.count(i) > 1})}"
-            )
+        for what, values in (
+            ("ids", [d.id for d in self.discriminators]),
+            ("names", [d.name for d in self.discriminators]),  # a record keeps a sign's name
+        ):
+            if len(values) != len(set(values)):
+                repeated = sorted({v for v in values if values.count(v) > 1})
+                raise ValueError(f"chart sign {what} repeat: {repeated}")
         missing = [field for field in get_args(TewsField) if field not in self.tews]
         if missing:
             raise ValueError(f"tews has no row for {missing}: TEWS needs all seven")

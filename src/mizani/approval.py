@@ -142,6 +142,7 @@ def verify_approval(
         raise ApprovalError("the account changed since this approval; decide again")
     allowed = ALLOWED[purpose]
     if not any(auth.has_role(account, role) for role in allowed):
-        who = " or ".join("the chief doctor" if r == "chief" else f"a {r}" for r in allowed)
-        raise ApprovalError(f"only {who} may {WHAT[purpose]}; this is from a {account.role}")
+        who = " or ".join(auth.ROLE_NAMES[r] for r in allowed)
+        mine = auth.ROLE_NAMES[account.role]
+        raise ApprovalError(f"only {who} may {WHAT[purpose]}; this is from {mine}")
     return payload

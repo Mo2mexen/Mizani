@@ -133,9 +133,10 @@ def test_a_deactivated_account_cannot_sign_in_and_its_sessions_end():
     session, _ = auth.sign_in(db(), "amina", "another long password")
     auth.set_active(db(), boss, account.id, False)
     assert auth.session_account(db(), session) is None
-    with pytest.raises(auth.AuthError, match="deactivated") as off:
-        auth.sign_in(db(), "amina", "another long password")
-    assert off.value.status == 403
+    for password in ("another long password", "a wrong guess"):  # never confirms a guess
+        with pytest.raises(auth.AuthError, match="deactivated") as off:
+            auth.sign_in(db(), "amina", password)
+        assert off.value.status == 403
     auth.set_active(db(), boss, account.id, True)
     assert auth.sign_in(db(), "amina", "another long password")[1].active
 
@@ -161,6 +162,16 @@ def test_the_database_keeps_only_a_hash_of_the_session():
     session = auth.open_session(db(), account)
     stored = [r["id_hash"] for r in db().execute("SELECT id_hash FROM session")]
     assert session not in stored and len(stored[0]) == 64
+
+
+def test_ended_and_expired_sessions_are_cleared_at_the_next_sign_in(monkeypatch):
+    account, _ = new_account(password="a fine long password")
+    ended = auth.open_session(db(), account)
+    auth.sign_out(db(), ended, account)
+    auth.open_session(db(), account)  # still open, but past 12 hours by the next sign-in
+    monkeypatch.setattr(auth, "now", later(13 * 60))
+    auth.sign_in(db(), "amina", "a fine long password")
+    assert db().execute("SELECT COUNT(*) FROM session").fetchone()[0] == 1
 
 
 def test_admin_rules_protect_the_last_admin_and_the_chief_flag_is_for_doctors():
