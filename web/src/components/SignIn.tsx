@@ -12,10 +12,24 @@ const WHY: Record<Exclude<SignedOutWhy, null>, string> = {
 
 /** The first screen on any device. There is no signup: an admin creates the account and gives a
  *  one-time password, which the person replaces here before anything else. */
-export function SignIn({ why, onSignedIn }: { why: SignedOutWhy; onSignedIn: (account: Account) => void }) {
+export function SignIn({
+  why,
+  pending,
+  onSignedIn,
+  onSignOut,
+}: {
+  why: SignedOutWhy;
+  /** Already signed in with a one-time password (the page was reloaded): only the new password is left. */
+  pending?: Account;
+  onSignedIn: (account: Account) => void;
+  /** With pending: someone else's tablet session; sign it out. */
+  onSignOut?: () => void;
+}) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [oneTime, setOneTime] = useState<{ account: Account; password: string } | null>(null);
+  const [oneTime, setOneTime] = useState<{ account: Account; password: string | null } | null>(
+    pending ? { account: pending, password: null } : null,
+  );
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const first = useRef<HTMLInputElement>(null);
@@ -46,7 +60,14 @@ export function SignIn({ why, onSignedIn }: { why: SignedOutWhy; onSignedIn: (ac
         <h1 className="brand-name">Mizani</h1>
       </div>
       {oneTime ? (
-        <ChooseOwnPassword oneTime={oneTime} onDone={onSignedIn} />
+        <>
+          <ChooseOwnPassword oneTime={oneTime} onDone={onSignedIn} />
+          {onSignOut && (
+            <button type="button" className="btn btn-small" onClick={onSignOut}>
+              Not {oneTime.account.full_name}? Sign out
+            </button>
+          )}
+        </>
       ) : (
         <form className="panel signin-panel" onSubmit={handleSubmit} aria-labelledby="signin-title">
           <h2 id="signin-title" className="panel-title">
@@ -101,14 +122,16 @@ export function SignIn({ why, onSignedIn }: { why: SignedOutWhy; onSignedIn: (ac
 }
 
 /** After a one-time password: the person picks their own before they can use Mizani. The
- *  one-time password they just typed is sent as the current one, so they type it only once. */
+ *  one-time password they just typed is sent as the current one, so they type it only once;
+ *  after a reload the page no longer has it, and asks for it here. */
 function ChooseOwnPassword({
   oneTime,
   onDone,
 }: {
-  oneTime: { account: Account; password: string };
+  oneTime: { account: Account; password: string | null };
   onDone: (account: Account) => void;
 }) {
+  const [given, setGiven] = useState("");
   const [next, setNext] = useState("");
   const [again, setAgain] = useState("");
   const [isShown, setIsShown] = useState(false);
@@ -122,7 +145,7 @@ function ChooseOwnPassword({
     setIsBusy(true);
     setError(null);
     try {
-      onDone(await api.changePassword(oneTime.password, next));
+      onDone(await api.changePassword(oneTime.password ?? given, next));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Not saved");
     } finally {
@@ -139,6 +162,20 @@ function ChooseOwnPassword({
         Welcome, {oneTime.account.full_name}. You signed in with a one-time password. Choose one only you know: at least
         10 characters, without your user name. A few words in a row are easy to remember.
       </p>
+      {oneTime.password === null && (
+        <label className="field" htmlFor="own-given">
+          <span className="field-label">The one-time password you were given</span>
+          <input
+            id="own-given"
+            type="password"
+            value={given}
+            onChange={(e) => setGiven(e.target.value)}
+            autoComplete="current-password"
+            required
+            autoFocus
+          />
+        </label>
+      )}
       <label className="field" htmlFor="own-new">
         <span className="field-label">New password</span>
         <input
@@ -149,7 +186,7 @@ function ChooseOwnPassword({
           autoComplete="new-password"
           minLength={10}
           required
-          autoFocus
+          autoFocus={oneTime.password !== null}
         />
       </label>
       <label className="field" htmlFor="own-again">
@@ -179,7 +216,7 @@ function ChooseOwnPassword({
           {error}
         </p>
       )}
-      <button type="submit" className="btn btn-primary signin-go" disabled={isBusy || next.length < 10 || next !== again}>
+      <button type="submit" className="btn btn-primary signin-go" disabled={isBusy || next.length < 10 || next !== again || (oneTime.password === null && !given)}>
         {isBusy ? "Saving…" : "Save and continue"}
       </button>
     </form>

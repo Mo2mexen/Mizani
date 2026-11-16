@@ -593,7 +593,8 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             raise HTTPException(409, "An evaluation is already running; wait for it to finish.")
         if chart["status"] in ("active", "retired"):
             raise HTTPException(409, f"{chart['label']} has been in use; upload it again to test")
-        charts.set_progress(db(), chart_id, "evaluating", "starting")
+        if not charts.start(db(), chart_id):  # another click got there first
+            raise HTTPException(409, "An evaluation is already running; wait for it to finish.")
         audit.event(db(), "chart_evaluation_started", chief.full_name,
                     {"chart": chart["label"], "model": ctx["llm"].model_name
                      if hasattr(ctx["llm"], "model_name") else None})  # fmt: skip

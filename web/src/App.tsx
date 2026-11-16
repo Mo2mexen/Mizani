@@ -37,6 +37,16 @@ export function App() {
 
   if (session.isChecking) return <p className="signin-checking">Opening Mizani…</p>;
   if (!account) return <SignIn why={session.why} onSignedIn={session.signIn} />;
+  // Signed in with a one-time password, then the page was reloaded: own password first
+  if (account.must_change)
+    return (
+      <SignIn
+        why={null}
+        pending={account}
+        onSignedIn={session.signIn}
+        onSignOut={() => void session.signOut("signed_out")}
+      />
+    );;
   return (
     <SessionContext.Provider value={account}>
       <SignedIn

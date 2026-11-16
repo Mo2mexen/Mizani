@@ -5,6 +5,7 @@ triage scale is a new file and the engine stays. Every clinical rule must cite o
 own references (`sources`), so a value cannot reach the nurse without the rule behind it.
 """
 
+import math
 import os
 import re
 from importlib.resources import files
@@ -17,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 DEFAULT_PACK = "sats_adult"
 PACK_NAME = re.compile(r"[a-z0-9_]{1,64}")  # a file name only: no folders, no "..", no extension
 MAX_UPLOAD = 200_000  # characters; the adult SATS chart is about 11,000
+MAX_SPAN = 10_000  # widest plausible range checked value by value (SATS: 260 at most)
 # The coded vitals and every value the intake can send (schemas.Vitals), each needing points
 CODED = {
     "avpu": ("alert", "confused", "voice", "pain", "unresponsive"),
@@ -74,6 +76,30 @@ class Band(Rule):
             for name, sign in bounds
             if getattr(self, name) is not None
         )
+
+
+def _joins(bands: list[Band], low: float, high: float) -> str | None:
+    """For a value that can be any decimal (temperature): the bands, in order, must cover the
+    plausible range from `low` to `high` with no gap and no overlap, so every value falls in
+    exactly one. Returns what is wrong, or None."""
+    spans = []
+    for b in bands:
+        start, start_in = (b.gte, True) if b.gte is not None else (b.gt, False)
+        end, end_in = (b.lte, True) if b.lte is not None else (b.lt, False)
+        spans.append((-math.inf if start is None else start, not start_in,
+                      math.inf if end is None else end, end_in))  # fmt: skip
+    spans.sort()
+    first, last = spans[0], spans[-1]
+    if first[0] > low or (first[0] == low and first[1]):
+        return f"no band takes {low:g}"
+    if last[2] < high or (last[2] == high and not last[3]):
+        return f"no band takes {high:g}"
+    for (_, _, end, end_in), (start, start_open, _, _) in zip(spans, spans[1:], strict=False):
+        if end < start or (end == start and not end_in and start_open):
+            return f"no band takes {end:g} or the values just above it"
+        if end > start or (end == start and end_in and not start_open):
+            return f"two bands both take {start:g}"
+    return None
 
 
 class TewsRow(Rule):
@@ -172,17 +198,26 @@ class RulePack(Rule):
         if not mins or mins != sorted(mins, reverse=True) or mins[-1] != 0:
             raise ValueError("tews_colour goes from the highest min_total down to 0")
         for field, row in self.tews.items():
-            if row.values is not None:
+            if field in CODED:
+                if row.values is None:
+                    raise ValueError(f"tews.{field} is coded: give its points as values, not bands")
                 missing = set(CODED[field]) - set(row.values)
                 if missing:
                     raise ValueError(f"tews.{field} gives no points for {sorted(missing)}")
                 continue
+            if row.bands is None:
+                raise ValueError(f"tews.{field} is measured: give its points as bands, not values")
             if field not in self.plausible.ranges:
                 raise ValueError(f"plausible.ranges has no range for tews.{field}")
             low, high = self.plausible.ranges[field]
-            step = 0.1 if field == "temperature" else 1
-            for i in range(int(round((high - low) / step)) + 1):
-                value = round(low + i * step, 1)
+            if not 0 < high - low <= MAX_SPAN:
+                raise ValueError(f"plausible.ranges.{field} must be a range of at most {MAX_SPAN}")
+            if field == "temperature":  # any decimal: the bands must join, with no gap
+                problem = _joins(row.bands, low, high)
+                if problem:
+                    raise ValueError(f"tews.temperature: {problem}")
+                continue
+            for value in range(math.ceil(low), math.floor(high) + 1):  # whole numbers only
                 hits = sum(band.contains(value) for band in row.bands)
                 if hits != 1:
                     raise ValueError(

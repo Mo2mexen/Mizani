@@ -484,6 +484,22 @@ async def test_the_doctors_inbox_has_the_latest_released_handover_of_each_waitin
     assert json.loads(await _read("handovers://released")) == []
 
 
+async def test_a_released_handover_follows_the_patient_through_a_re_triage():
+    async with Client(mcp) as client:
+        tid = (await propose(client, ["chest_pain"]))["triage_id"]
+        await commit(client, tid)
+        d = data(await client.call_tool("draft_handover", {"triage_id": tid, "text": HANDOVER}))
+        approval_token = handover_token(tid, d["draft_id"])
+        release = {"triage_id": tid, "draft_id": d["draft_id"], "approval_token": approval_token}
+        data(await client.call_tool("release_handover", release))
+        args = dict(patient_label="Test Patient 01", complaint="chest pain since morning",
+                    vitals=VITALS, discriminators=[], retriage_of=tid)  # fmt: skip
+        new = data(await client.call_tool("propose_priority", args))["triage_id"]
+        await commit(client, new)
+    (entry,) = json.loads(await _read("handovers://released"))
+    assert entry["triage_id"] == new and entry["text"].startswith("RR 12")
+
+
 async def test_a_handover_token_cannot_commit_a_triage():
     async with Client(mcp) as client:
         p = await propose(client)

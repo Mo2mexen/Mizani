@@ -31,6 +31,7 @@ OTP_LETTERS = "abcdefghjkmnpqrstuvwxyz23456789"  # no 0, o, 1, l or i to misread
 USERNAME = re.compile(r"[a-z0-9][a-z0-9._-]{1,31}")
 FIRST_ADMIN = ("admin", "Administrator")
 CONSOLE = "mizani-admin (server console)"  # the actor for changes made on the server itself
+FIRST_START = "first start"  # password_by of the one-time password the first start prints
 
 
 class AuthError(Exception):
@@ -182,8 +183,17 @@ def add_account(
     one_time = password_hash != "!"  # a real password from an admin is a one-time password
     cur = con.execute(
         "INSERT INTO account (username, full_name, role, password_hash, must_change, created_at,"
-        " created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (username, full_name, role, password_hash, int(one_time), now().isoformat(), created_by),
+        " created_by, password_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            username,
+            full_name,
+            role,
+            password_hash,
+            int(one_time),
+            now().isoformat(),
+            created_by,
+            created_by,
+        ),
     )
     return get(con, cur.lastrowid)
 
@@ -309,15 +319,39 @@ def change_password(
     con: sqlite3.Connection, account: Account, current: str, new: str, session: str
 ) -> Account:
     """The owner changes their password: needs the current one (or the one-time one). Other
-    sessions of the account end; this one stays."""
-    row = con.execute("SELECT password_hash FROM account WHERE id = ?", (account.id,)).fetchone()
+    sessions of the account end; this one stays. A wrong current password counts like a wrong
+    sign-in, so a tablet left signed in cannot be used to guess it: the fifth locks the account
+    for 15 minutes and signs it out everywhere."""
+    row = con.execute(
+        "SELECT password_hash, failed, locked_until FROM account WHERE id = ?", (account.id,)
+    ).fetchone()
+    if row["locked_until"] and datetime.fromisoformat(row["locked_until"]) > now():
+        raise AuthError("Too many wrong passwords: this account is locked for now.", 429)
     if not password_matches(current, row["password_hash"]):
+        misses = row["failed"] + 1
+        locked = misses >= MAX_MISSES
+        until = (now() + LOCKED_FOR).isoformat() if locked else None
+        con.execute(
+            "UPDATE account SET failed = ?, locked_until = ? WHERE id = ?",
+            (0 if locked else misses, until, account.id),
+        )
+        if locked:
+            _end_sessions(con, account.id)
+        reason = "wrong current password" + (", locked for 15 minutes" if locked else "")
+        audit.event(con, "password_change_refused", account.full_name,
+                    {"username": account.username}, {"reason": reason}, error=True)  # fmt: skip
+        if locked:
+            raise AuthError(
+                "Too many wrong passwords: the account is locked for 15 minutes and signed out.",
+                429,
+            )
         raise AuthError("Your current password is not right.", 403)
     if new == current:
         raise AuthError("Choose a password different from the current one.")
     _check_new_password(new, account.username)
     con.execute(
-        "UPDATE account SET password_hash = ?, must_change = 0 WHERE id = ?",
+        "UPDATE account SET password_hash = ?, must_change = 0, failed = 0, password_by = NULL"
+        " WHERE id = ?",
         (hash_password(new), account.id),
     )
     _end_sessions(con, account.id, keep=session)
@@ -348,9 +382,9 @@ def reset_password(con: sqlite3.Connection, actor: str, account_id: int) -> str:
     account = _target(con, account_id)
     otp = one_time_password()
     con.execute(
-        "UPDATE account SET password_hash = ?, must_change = 1, failed = 0, locked_until = NULL"
-        " WHERE id = ?",
-        (hash_password(otp), account.id),
+        "UPDATE account SET password_hash = ?, must_change = 1, failed = 0, locked_until = NULL,"
+        " password_by = ? WHERE id = ?",
+        (hash_password(otp), actor, account.id),
     )
     _end_sessions(con, account.id)
     audit.event(con, "password_reset", actor, {"username": account.username})
@@ -418,24 +452,35 @@ def sign_out_everywhere(con: sqlite3.Connection, actor: Account, account_id: int
 
 
 def first_start(con: sqlite3.Connection) -> str | None:
-    """On a start with no admin who has chosen their own password, make sure the account `admin`
-    exists with a fresh one-time password, and return it for the server log. Each such start
-    replaces the last one, so a lost log line costs a restart. Once an admin has signed in and
-    chosen a password, this returns None for good."""
+    """On a fresh install, make sure the account `admin` exists with a one-time password, and
+    return it for the server log. Each start until then makes a new one (the old stops working),
+    so a lost log line costs a restart. It does nothing once any admin has chosen a password, once
+    another admin account was set up (with `mizani-admin` or in the page), or when `admin` itself
+    was changed by hand (reset, deactivated, or given another role)."""
     settled = con.execute(
         "SELECT 1 FROM account WHERE role = 'admin' AND active = 1 AND must_change = 0"
     ).fetchone()
-    if settled:
-        return None
     username, full_name = FIRST_ADMIN
+    others = con.execute(
+        "SELECT 1 FROM account WHERE role = 'admin' AND active = 1 AND username != ?", (username,)
+    ).fetchone()
+    if settled or others:
+        return None
+    row = con.execute(
+        "SELECT active, role, password_by FROM account WHERE username = ?", (username,)
+    ).fetchone()
+    # (An empty password_by is an `admin` the first start made before the column existed.)
+    if row is not None and (
+        not row["active"] or row["role"] != "admin" or row["password_by"] not in (FIRST_START, None)
+    ):
+        return None  # changed by hand: an admin or the console decides about it now
     otp = one_time_password()
-    if find(con, username) is None:
+    if row is None:
         add_account(con, username, full_name, "admin", hash_password(otp), created_by=CONSOLE)
-    else:
-        con.execute(
-            "UPDATE account SET password_hash = ?, must_change = 1, active = 1, role = 'admin',"
-            " failed = 0, locked_until = NULL WHERE username = ?",
-            (hash_password(otp), username),
-        )
+    con.execute(
+        "UPDATE account SET password_hash = ?, must_change = 1, failed = 0, locked_until = NULL,"
+        " password_by = ? WHERE username = ?",
+        (hash_password(otp), FIRST_START, username),
+    )
     audit.event(con, "first_admin_password", CONSOLE, {"username": username})
     return otp
