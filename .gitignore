@@ -25,6 +25,8 @@ build/
 
 # Local files: tool caches and the database of a run outside Docker
 .cache/
+# Backups made with `docker compose run --rm backup` (patient data: never in git)
+backups/
 data/
 *.db
 *.sqlite

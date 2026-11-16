@@ -20,6 +20,7 @@ dependencies = [
 mizani-mcp = "mizani.mcp_server:main"
 mizani-api = "mizani.api:main"
 mizani-evals = "mizani.evals.runner:main"
+mizani-backup = "mizani.backup:main"
 
 [build-system]
 requires = ["uv_build>=0.13,<0.14"]

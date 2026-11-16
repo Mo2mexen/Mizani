@@ -171,6 +171,29 @@ services:
       ollama-pull:
         condition: service_completed_successfully
 
+  # Backups, run by hand and never by `docker compose up` (profile "tools"):
+  #   docker compose run --rm backup                 a new backup in ./backups/<UTC time>/
+  #   docker compose run --rm backup list            the backups there are
+  #   docker compose run --rm backup restore <name>  after `docker compose down` only
+  # Root, because HAPI's volume is private to its own user; restored files go back to each
+  # volume's owner. Details: docs/systems/backup.md.
+  backup:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    profiles: ["tools"]
+    user: "0:0"
+    entrypoint: ["mizani-backup"]
+    command: ["create"]
+    environment:
+      MIZANI_DATA_DIR: /data
+      MIZANI_HAPI_DIR: /hapi
+      MIZANI_BACKUP_DIR: /backups
+    volumes:
+      - mizani-data:/data
+      - hapi-data:/hapi
+      - ./backups:/backups
+
 volumes:
   ollama-models:
   mizani-data:
