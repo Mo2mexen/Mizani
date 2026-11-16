@@ -25,6 +25,8 @@ The production release: Mizani as software a hospital runs on its own server, fo
 **The chief doctor's charts**
 - Upload a triage chart (a YAML rule pack) with test patients. Mizani checks it, evaluates it on the real model with safety checks that must all hold, and the chief doctor activates it with a signed approval; one click goes back. Every proposal and record names the chart that scored it.
 - Every chart, the built-in one included, is checked for what the engine relies on before it scores anyone.
+- A triage is saved only under the chart that scored it: if the chart changed while the proposal waited, the nurse re-measures for a new one. A re-check after a chart change tells the nurse to check the complaint against the new chart by hand.
+- If an update makes a chart in use unloadable, Mizani takes it out of use with the reason and scores with the built-in chart; a waiting patient whose colour that chart lacks is shown in its own column, never hidden.
 
 **Also**
 - `/api/health` and the page show the version.
