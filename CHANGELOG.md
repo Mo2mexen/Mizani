@@ -2,6 +2,14 @@
 
 What changed in each version of Mizani. The version is in `pyproject.toml`; the sign-in screen and the settings menu (the gear next to the name) show it, and `GET /api/health` returns it. To update an installation, see [docs/INSTALL.md](docs/INSTALL.md), section 7.
 
+## 1.0.3 (17 November 2026)
+
+- The audit log can be made taller or shorter by dragging its top edge (or with the arrow keys), and keeps that height in the browser.
+- The doctor's waiting room takes the full width until a nurse releases a handover; the handovers then appear beside it.
+- Charts and Admin › Model use the full width like the other screens; the three model choices sit side by side on a desk.
+- The chart upload boxes keep their background when pointed at or dragged over; the border turns black and runs around the edge.
+- The browser tab reads "Mizani · Triage co-pilot".
+
 ## 1.0.2 (17 November 2026)
 
 - The header is the logo and "Mizani" only (the tagline is gone), and the browser tab reads "Mizani - Triage co-pilot".
