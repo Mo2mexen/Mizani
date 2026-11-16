@@ -42,6 +42,9 @@ How a hospital changes the triage chart Mizani scores with, safely. The chief do
 - No chart goes into use with a failed safety check, or without the colour of a patient still waiting.
 - The model never sees the chart file; it is told the chart's signs, as always, and the engine sets the colour.
 
+## A sample to try
+`docs/examples/sats_kenya.yaml` is the built-in adult chart with one made-up change (chest pain raised from orange to red), and `docs/examples/sats_kenya_patients.yaml` has 2 test patients for it. Uploaded together, the evaluation takes about 3 minutes on a laptop; the chest-pain patient then comes out RED under it, and "Go back" returns to the built-in chart. `tests/test_charts.py` checks that the sample still uploads and differs only in that sign.
+
 ## Running and testing it alone
 ```
 uv run pytest tests/test_charts.py

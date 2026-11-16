@@ -39,3 +39,8 @@ data/
 Thumbs.db
 .idea/
 .vscode/
+
+# Local, never committed: a person's own command notes, and the HTTPS root certificate copied
+# out of Caddy to trust it on a device (docs/INSTALL.md)
+COMMANDS.txt
+mizani-root.crt

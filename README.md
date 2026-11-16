@@ -160,7 +160,7 @@ Then open **http://127.0.0.1:8090** once the log shows `Uvicorn running on http:
 ```
 1. Sign in as `admin` with that password and choose your own (at least 10 characters).
 2. Under **Users**, add the people who will use Mizani: a nurse for the triage desk, a doctor for the waiting room and the handovers nurses release. Each gets a one-time password to change at their first sign-in. A doctor can be given the chief flag there.
-3. **Sign out** and sign in as the nurse. The page has the intake, the agent's steps live, the proposal with the rule behind every number, approval under the nurse's own name, the waiting room and the audit log ([docs/systems/web.md](docs/systems/web.md)).
+3. **Sign out** (in the settings menu next to your name) and sign in as the nurse. The page has the intake, the agent's steps live, the proposal with the rule behind every number, approval under the nurse's own name, the waiting room and the audit log ([docs/systems/web.md](docs/systems/web.md)).
 
 **Tablets and desk PCs.** The same page is served over HTTPS at **https://localhost:8443** (Caddy, with its own certificate authority). In a hospital, two lines in `.env` open it to the network under the hospital's name (`MIZANI_HOSTNAME`, `MIZANI_LISTEN=0.0.0.0`), and each tablet trusts the certificate once, or the hospital uses its own certificate: [docs/INSTALL.md](docs/INSTALL.md) has the steps for hospital IT, backups and updates included.
 

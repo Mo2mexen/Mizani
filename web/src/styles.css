@@ -292,6 +292,13 @@ td.src { display: table-cell; }
 }
 .override legend { font-size: 0.85rem; font-weight: 600; color: var(--ink-soft); padding: 0 0.3rem; }
 .override .btn { margin-bottom: 0.55rem; }
+/* Below a desk width the nurse's columns are narrow: each dropdown gets the full width, so its
+   text ("Stretcher / immobile", "choose a colour") is never cut. */
+@media (max-width: 1199px) {
+  .vitals-grid > .field:has(select) { grid-column: 1 / -1; }
+  .override fieldset { grid-template-columns: minmax(0, 1fr) auto; }
+  .override fieldset > label:first-of-type { grid-column: 1 / -1; }
+}
 .remeasure { margin-top: 0.8rem; padding-top: 0.6rem; border-top: 1px dashed var(--line-strong); }
 .committed .btn { margin-top: 0.3rem; }
 
@@ -428,7 +435,8 @@ td.src { display: table-cell; }
   text-align: left; font-size: 0.8rem; font-weight: 600; color: var(--ink-soft);
   border-bottom: 2px solid var(--ink); padding: 0.35rem 0.5rem;
 }
-.people td { padding: 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: break-word; }
+.people td { padding: 0.5rem; border-bottom: 1px solid var(--line); vertical-align: middle; overflow-wrap: break-word; }
+.people td[data-label="Last sign-in"] { white-space: nowrap; }
 .people tbody.is-off td { color: var(--ink-soft); }
 .people td[data-label="User name"] { white-space: nowrap; }
 .person-manage { text-align: right; width: 1%; }
@@ -480,7 +488,26 @@ td.src { display: table-cell; }
 .charts { display: grid; gap: var(--gap); max-width: 64rem; }
 .chart-in-use { margin: 0 0 0.3rem; font-size: 1.05rem; }
 .chart-in-use code, .chart-row-head code { font-family: var(--font-num); font-size: 0.82rem; color: var(--ink-soft); }
-.upload-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 0.9rem; align-items: start; }
+.upload-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9rem; align-items: stretch; margin-bottom: 0.4rem; }
+/* A file picker as a large target: dashed until a file is chosen, then solid and green. */
+.dropzone {
+  display: grid; justify-items: center; align-content: start; gap: 0.35rem; text-align: center;
+  padding: 1.1rem 1rem; border: 2px dashed var(--line-strong); border-radius: var(--radius); background: var(--paper);
+  cursor: pointer; transition: border-color var(--duration-fast) ease, background-color var(--duration-fast) ease;
+}
+.dropzone:hover, .dropzone.is-over { border-color: var(--ink); background: #fff; }
+.dropzone:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+.dropzone.has-file { border-style: solid; border-color: var(--ok); background: #fff; }
+.dropzone-icon { display: inline-grid; place-items: center; width: 3rem; height: 3rem; border-radius: 50%; background: var(--panel); border: 1px solid var(--line); color: var(--ink-soft); }
+.dropzone.has-file .dropzone-icon { color: var(--ok); border-color: var(--ok); }
+.dropzone-title { font-weight: 700; }
+.dropzone-hint { color: var(--ink-soft); font-size: 0.9rem; }
+.dropzone-hint u { color: var(--ink); text-underline-offset: 2px; }
+.dropzone-file { font-weight: 600; overflow-wrap: anywhere; }
+.dropzone .field-note { max-width: 30rem; }
+.link-button { border: 0; background: none; padding: 0; color: var(--ink); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; font: inherit; font-weight: 600; }
+.btn-with-icon { display: inline-flex; align-items: center; gap: 0.45rem; }
+.upload-sample code { font-size: 0.82rem; overflow-wrap: anywhere; }
 .chart-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.6rem; }
 .chart-row { border: 1px solid var(--line); border-left: 6px solid var(--line-strong); border-radius: var(--radius); padding: 0.6rem 0.75rem; background: var(--panel); }
 .chart-row.status-active { border-left-color: var(--ok); }
