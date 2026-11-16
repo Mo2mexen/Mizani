@@ -1,6 +1,6 @@
 [project]
 name = "mizani"
-version = "0.1.0"
+version = "1.0.0"
 description = "Offline triage co-pilot for the hospital front desk: SATS rules engine, MCP server and agent."
 readme = "README.md"
 license = "Apache-2.0"
@@ -21,6 +21,7 @@ mizani-mcp = "mizani.mcp_server:main"
 mizani-api = "mizani.api:main"
 mizani-evals = "mizani.evals.runner:main"
 mizani-backup = "mizani.backup:main"
+mizani-admin = "mizani.admin:main"
 
 [build-system]
 requires = ["uv_build>=0.13,<0.14"]

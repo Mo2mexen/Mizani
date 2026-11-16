@@ -1,89 +1,84 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { AccountMenu } from "./components/AccountMenu";
+import { AdminModel } from "./components/AdminModel";
+import { AdminUsers } from "./components/AdminUsers";
 import { AuditDrawer } from "./components/AuditDrawer";
-import { IntakeForm } from "./components/IntakeForm";
-import { ProposalPanel } from "./components/ProposalPanel";
-import { QueueBoard } from "./components/QueueBoard";
-import { TracePanel } from "./components/TracePanel";
-import { colourLabel } from "./format";
-import type { Colour, QueueEntry, RunState } from "./types";
-import { useRun } from "./useRun";
+import { Charts } from "./components/Charts";
+import { DoctorView } from "./components/DoctorView";
+import { NurseView } from "./components/NurseView";
+import { SignIn } from "./components/SignIn";
+import { SessionContext, useSession, useVersion } from "./session";
+import type { Account, Colour } from "./types";
 
-const QUEUE_REFRESH_MS = 5000; // the agent's re-check watch runs every 30 s on the server
+type View = { id: string; label: string };
 
-// The open run lives in the address (#run=<id>), so a reload or a second tab picks it up again:
-// the API replays the run's events, rebuilt from its checkpoint if the API restarted.
-function runFromAddress(): string | null {
-  return new URLSearchParams(window.location.hash.slice(1)).get("run");
-}
-
-/** One sentence for screen readers when the run reaches a result. */
-function announcement(run: RunState | null, colours: Colour[], isMasked: boolean): string {
-  if (!run) return "";
-  if (run.error) return `The agent stopped: ${run.error}`;
-  if (run.committed) {
-    const c = run.committed;
-    return `Saved ${c.colour}, ${c.action === "override" ? "overridden" : "approved"} by ${c.approver}.`;
-  }
-  if (run.proposal && isMasked) return "Mizani's proposal is ready. Record your own colour first.";
-  if (run.proposal) return `Proposal ready: ${run.proposal.colour}, ${colourLabel(colours, run.proposal.colour)}. Pending a nurse.`;
-  return "";
+/** The screens each role can open. The server checks the role on every request; this only
+ *  decides what is shown. A role with one screen gets no tabs. */
+function viewsFor(account: Account): View[] {
+  if (account.role === "admin")
+    return [
+      { id: "users", label: "Users" },
+      { id: "model", label: "Model" },
+    ];
+  if (account.role === "doctor")
+    return account.chief
+      ? [
+          { id: "waiting", label: "Waiting room" },
+          { id: "charts", label: "Charts" },
+        ]
+      : [{ id: "waiting", label: "Waiting room" }];
+  return [{ id: "triage", label: "Triage" }];
 }
 
 export function App() {
-  const [colours, setColours] = useState<Colour[]>([]);
-  const [queue, setQueue] = useState<QueueEntry[] | null>(null);
-  const [runId, setRunId] = useState<string | null>(runFromAddress);
-  const [complaint, setComplaint] = useState<string | null>(null);
-  const [isShadow, setIsShadow] = useState(false);
-  const [assessedFor, setAssessedFor] = useState<string | null>(null);
-  const [isAuditOpen, setIsAuditOpen] = useState(false);
-  const [offline, setOffline] = useState<string | null>(null);
-  const [intakeKey, setIntakeKey] = useState(0); // a new key empties the intake for the next patient
-  const run = useRun(runId);
-  // Shadow mode: Mizani's answer stays hidden until the nurse has recorded their own colour.
-  const isMasked = isShadow && !run?.committed && assessedFor !== run?.proposal?.triage_id;
+  const session = useSession();
+  const { account } = session;
 
-  function openRun(id: string, text: string | null) {
-    setRunId(id);
-    setComplaint(text);
-    window.history.replaceState(null, "", `#run=${id}`);
-    // On a narrow screen the proposal sits under the intake: bring it into view (no-op on a desk).
-    requestAnimationFrame(() => document.getElementById("proposal-title")?.scrollIntoView({ block: "nearest" }));
-  }
-
-  function nextPatient() {
-    setRunId(null);
-    setComplaint(null);
-    window.history.replaceState(null, "", window.location.pathname);
-    setIntakeKey((k) => k + 1);
-    requestAnimationFrame(() => document.getElementById("patient-label")?.focus());
-  }
-
-  function refreshQueue() {
-    return api.queue().then(
-      (rows) => {
-        setQueue(rows);
-        setOffline(null);
-      },
-      (err: unknown) => setOffline(err instanceof Error ? err.message : "API not reachable"),
+  if (session.isChecking) return <p className="signin-checking">Opening Mizani…</p>;
+  if (!account) return <SignIn why={session.why} onSignedIn={session.signIn} />;
+  // Signed in with a one-time password, then the page was reloaded: own password first
+  if (account.must_change)
+    return (
+      <SignIn
+        why={null}
+        pending={account}
+        onSignedIn={session.signIn}
+        onSignOut={() => void session.signOut("signed_out")}
+      />
     );
-  }
+  return (
+    <SessionContext.Provider value={account}>
+      <SignedIn
+        key={account.id}
+        account={account}
+        onSwitchUser={() => void session.signOut("switch")}
+        onSignOut={() => void session.signOut("signed_out")}
+      />
+    </SessionContext.Provider>
+  );
+}
 
-  // Colours come once, but keep asking until the API answers (it may still be starting).
+function SignedIn({ account, onSwitchUser, onSignOut }: { account: Account; onSwitchUser: () => void; onSignOut: () => void }) {
+  const views = viewsFor(account);
+  const [view, setView] = useState(views[0].id);
+  const [colours, setColours] = useState<Colour[]>([]);
+  const [isShadow, setIsShadow] = useState(false);
+  const [isAuditOpen, setIsAuditOpen] = useState(false);
+  const version = useVersion();
+  const isNurse = account.role === "nurse";
+
+  // The colours of the chart in use, asked every 5 s like the queue (background polling), so a
+  // chart the chief doctor activates reaches every screen at once (and the API may be starting).
   useEffect(() => {
-    if (colours.length > 0) return;
-    const load = () => api.colours().then(setColours, (err: unknown) => setOffline(String(err)));
+    if (account.role === "admin") return;
+    const keepIfSame = (next: Colour[]) =>
+      setColours((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+    const load = () => api.colours().then(keepIfSame, () => undefined);
     void load();
-    const id = setInterval(load, QUEUE_REFRESH_MS);
+    const id = setInterval(load, 5000);
     return () => clearInterval(id);
-  }, [colours.length]);
-
-  useEffect(() => {
-    void refreshQueue();
-    const id = setInterval(() => void refreshQueue(), QUEUE_REFRESH_MS);
-    return () => clearInterval(id);
-  }, []);
+  }, [account.role]);
 
   return (
     <div className="app">
@@ -93,62 +88,57 @@ export function App() {
           <h1 className="brand-name">Mizani</h1>
           <span className="brand-sub">Triage co-pilot for the adult SATS chart. The nurse decides.</span>
         </div>
-        <div className="toggle-wrap">
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={isShadow}
-              onChange={(e) => setIsShadow(e.target.checked)}
-              aria-describedby="shadow-help"
-            />
-            Shadow mode
-          </label>
-          <span className="info" tabIndex={0} aria-label="What is shadow mode?">
-            ?
-            <span role="tooltip" id="shadow-help" className="tip">
-              <strong>Shadow mode: you choose first.</strong> For each patient you pick a colour before you see
-              Mizani's, so it can't influence you. Then you decide as usual. Use it for training, or to check how
-              often you and Mizani agree (shown in the audit log).
+        {views.length > 1 && (
+          <nav className="views" aria-label="Screens">
+            {views.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                className="view-tab"
+                aria-current={view === v.id ? "page" : undefined}
+                onClick={() => setView(v.id)}
+              >
+                {v.label}
+              </button>
+            ))}
+          </nav>
+        )}
+        {isNurse && (
+          <div className="toggle-wrap">
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={isShadow}
+                onChange={(e) => setIsShadow(e.target.checked)}
+                aria-describedby="shadow-help"
+              />
+              Shadow mode
+            </label>
+            <span className="info" tabIndex={0} aria-label="What is shadow mode?">
+              ?
+              <span role="tooltip" id="shadow-help" className="tip">
+                <strong>Shadow mode: you choose first.</strong> For each patient you pick a colour before you see
+                Mizani's, so it can't influence you. Then you decide as usual. Use it for training, or to check how
+                often you and Mizani agree (shown in the audit log).
+              </span>
             </span>
-          </span>
-        </div>
+          </div>
+        )}
         <button type="button" className="btn btn-small" onClick={() => setIsAuditOpen(true)} aria-expanded={isAuditOpen}>
           Audit log
         </button>
+        <AccountMenu onSwitchUser={onSwitchUser} onSignOut={onSignOut} />
       </header>
-      {offline && (
-        <p className="banner" role="alert">
-          The API is not reachable ({offline}). It may still be starting; this page retries every few seconds. If it
-          stays, start it with <code>docker compose up</code>.
-        </p>
-      )}
-      <p className="visually-hidden" aria-live="polite" aria-atomic="true">
-        {announcement(run, colours, isMasked)}
-      </p>
-      <main className="workspace">
-        <IntakeForm key={intakeKey} isFirst={intakeKey === 0} isReady={colours.length > 0} onStarted={openRun} />
-        <ProposalPanel
-          run={run}
-          complaint={complaint}
-          colours={colours}
-          isShadow={isShadow}
-          assessedFor={assessedFor}
-          onAssessed={setAssessedFor}
-          onCommitted={() => void refreshQueue()}
-          onNextPatient={nextPatient}
-        />
-      </main>
-      <QueueBoard
-        colours={colours}
-        queue={queue}
-        onRetriage={(id) => openRun(id, null)}
-        onCalledIn={() => void refreshQueue()}
-      />
-      <TracePanel run={run} isMasked={isMasked} />
+      {view === "triage" && <NurseView colours={colours} isShadow={isShadow} />}
+      {view === "waiting" && <DoctorView colours={colours} />}
+      {view === "users" && <AdminUsers />}
+      {view === "model" && <AdminModel />}
+      {view === "charts" && <Charts />}
       <AuditDrawer isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />
       <footer className="foot">
-        Synthetic patients only. Mizani suggests; a named nurse approves every priority. Every number shows the rule it
-        came from. Mizani never diagnoses or prescribes.
+        Synthetic patients only. Mizani suggests; a signed-in nurse approves every priority. Every number shows the rule
+        it came from. Mizani never diagnoses or prescribes.
+        {version && <span className="foot-version">Mizani {version}</span>}
       </footer>
     </div>
   );

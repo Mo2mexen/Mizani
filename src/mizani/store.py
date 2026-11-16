@@ -3,6 +3,7 @@
 import json
 import re
 import sqlite3
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from mizani.approval import ApprovalError
@@ -21,14 +22,16 @@ def create(
     vitals: Vitals,
     proposal: Proposal,
     retriage_of: str | None = None,
+    chart: str | None = None,
 ) -> None:
-    """A re-triage keeps the patient's original arrival time: the wait doesn't restart."""
+    """A re-triage keeps the patient's original arrival time: the wait doesn't restart. `chart`
+    is the chart that scored it ("sats_adult, built in")."""
     arrived_at = now().isoformat()
     if retriage_of is not None:
         arrived_at = get(con, retriage_of)["arrived_at"]
     con.execute(
         "INSERT INTO triage (id, patient_label, complaint, vitals, proposal, status, arrived_at,"
-        " retriage_of) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
+        " retriage_of, chart) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
         (
             proposal.triage_id,
             patient_label,
@@ -37,6 +40,7 @@ def create(
             proposal.model_dump_json(),
             arrived_at,
             retriage_of,
+            chart,
         ),
     )
 
@@ -68,8 +72,16 @@ def waiting(record: dict | None) -> bool:
     )
 
 
-def commit(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
-    """Commit a pending triage with a verified approval payload. Each token works once."""
+def commit(
+    con: sqlite3.Connection,
+    triage_id: str,
+    approval: dict,
+    in_use: Callable[[], tuple[RulePack, str]] | None = None,
+) -> dict:
+    """Commit a pending triage with a verified approval payload. Each token works once.
+    `in_use` gives the chart in use and its label; it is read inside the transaction, so a chart
+    activated at the same moment cannot slip in between: a proposal scored with another chart
+    is refused, and so is a colour the chart in use does not have."""
     con.execute("BEGIN IMMEDIATE")
     try:
         record = get(con, triage_id)
@@ -90,18 +102,32 @@ def commit(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
             raise ApprovalError(
                 "a sign here is for the nurse to confirm: confirm it with the patient, or override"
             )
+        override = approval["action"] == "override"
+        colour = approval["colour"] if override else record["proposal"]["colour"]
+        if in_use is not None:
+            pack, chart = in_use()
+            if record["chart"] is not None and record["chart"] != chart:
+                raise ApprovalError(
+                    f"the chart in use changed since this proposal (it was scored with "
+                    f"{record['chart']}; {chart} is in use now): re-measure for a new proposal"
+                )
+            if colour not in {c.colour for c in pack.colours}:
+                raise ApprovalError(
+                    f"override colour '{colour}' is not a colour of the chart in use"
+                    if override
+                    else f"the proposed colour '{colour}' is not in the rule pack in use: "
+                    "re-measure for a new proposal, or override"
+                )
         try:
             con.execute("INSERT INTO used_token (nonce) VALUES (?)", (approval["nonce"],))
         except sqlite3.IntegrityError:
             raise ApprovalError("this approval token was already used") from None
-        override = approval["action"] == "override"
-        colour = approval["colour"] if override else record["proposal"]["colour"]
         decision = {k: approval[k] for k in ("action", "colour", "reason")}
         committed_at = now().isoformat()
         con.execute(
             "UPDATE triage SET status = 'committed', colour = ?, approver = ?, decision = ?,"
             " committed_at = ? WHERE id = ?",
-            (colour, approval["nurse_name"], json.dumps(decision), committed_at, triage_id),
+            (colour, approval["approver"], json.dumps(decision), committed_at, triage_id),
         )
         if record["retriage_of"] is not None:  # the approved re-triage replaces the old entry
             con.execute(
@@ -115,7 +141,7 @@ def commit(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
     return {
         "triage_id": triage_id,
         "colour": colour,
-        "approver": approval["nurse_name"],
+        "approver": approval["approver"],
         "action": approval["action"],
         "committed_at": committed_at,
     }
@@ -143,6 +169,8 @@ def queue(con: sqlite3.Connection, pack: RulePack, triage_id: str | None = None)
     A re-check is due once the time since the patient's last triage passes the target time to
     be seen for their colour (manual p6, Table 3)."""
     targets = {c.colour: c.target_minutes for c in pack.colours}
+    # A colour the chart in use lacks (its chart could no longer be loaded) goes first, due now
+    rank = {c.colour: pack.rank(c.colour) for c in pack.colours}
     sql = (
         "SELECT id, patient_label, colour, arrived_at, committed_at, recheck_raised_at"
         " FROM triage WHERE status = 'committed' AND superseded_by IS NULL"
@@ -163,13 +191,13 @@ def queue(con: sqlite3.Connection, pack: RulePack, triage_id: str | None = None)
                 "arrived_at": row["arrived_at"],
                 "waited_minutes": round(_minutes_since(row["arrived_at"]), 1),
                 "minutes_since_triage": round(since_triage, 1),
-                "target_minutes": targets[row["colour"]],
-                "recheck_due": since_triage > targets[row["colour"]],
+                "target_minutes": targets.get(row["colour"], 0),
+                "recheck_due": since_triage > targets.get(row["colour"], 0),
                 "recheck_raised": row["recheck_raised_at"] is not None
                 and row["recheck_raised_at"] >= row["committed_at"],
             }
         )
-    return sorted(out, key=lambda r: (pack.rank(r["colour"]), r["arrived_at"]))
+    return sorted(out, key=lambda r: (rank.get(r["colour"], -1), r["arrived_at"]))
 
 
 def raise_recheck(con: sqlite3.Connection, triage_id: str, pack: RulePack) -> dict:
@@ -191,7 +219,7 @@ def raise_recheck(con: sqlite3.Connection, triage_id: str, pack: RulePack) -> di
 
 
 def call_in(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
-    """A named nurse records that she called a waiting patient in to be seen. The patient leaves
+    """A nurse or doctor records that a waiting patient was called in to be seen. The patient leaves
     the waiting list; the record, its audit rows and its FHIR resources stay. Each token works
     once."""
     con.execute("BEGIN IMMEDIATE")
@@ -210,7 +238,7 @@ def call_in(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
         called_in_at = now().isoformat()
         con.execute(
             "UPDATE triage SET called_in_at = ?, called_in_by = ? WHERE id = ?",
-            (called_in_at, approval["nurse_name"], triage_id),
+            (called_in_at, approval["approver"], triage_id),
         )
         con.execute("COMMIT")
     except BaseException:
@@ -218,7 +246,7 @@ def call_in(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
         raise
     return {
         "triage_id": triage_id,
-        "approver": approval["nurse_name"],
+        "approver": approval["approver"],
         "called_in_at": called_in_at,
         "waited_minutes": round(_minutes_since(row["arrived_at"]), 1),
     }
@@ -300,7 +328,7 @@ def release_handover(
         released_at = now().isoformat()
         con.execute(
             "UPDATE handover SET released_by = ?, released_at = ? WHERE id = ?",
-            (approval["nurse_name"], released_at, draft["id"]),
+            (approval["approver"], released_at, draft["id"]),
         )
         con.execute("COMMIT")
     except BaseException:
@@ -309,7 +337,7 @@ def release_handover(
     return {
         "triage_id": triage_id,
         "text": draft["text"],
-        "approver": approval["nurse_name"],
+        "approver": approval["approver"],
         "released_at": released_at,
     }
 
@@ -317,6 +345,41 @@ def release_handover(
 def handovers(con: sqlite3.Connection, triage_id: str) -> list[dict]:
     rows = con.execute("SELECT * FROM handover WHERE triage_id = ? ORDER BY id", (triage_id,))
     return [dict(row) for row in rows]
+
+
+def released_handovers(con: sqlite3.Connection, pack: RulePack) -> list[dict]:
+    """The doctors' inbox: the latest handover a nurse released for each patient still waiting,
+    newest first, with the patient's place in the queue. A patient called in leaves it."""
+    # A committed re-triage replaces the patient's entry under a new id; a handover released
+    # before it is still this patient's. Map every earlier id of each waiting patient to them.
+    waiting = {entry["triage_id"]: entry for entry in queue(con, pack)}
+    if not waiting:
+        return []
+    chains = con.execute(  # one query for every chain: each id with the waiting entry it led to
+        "WITH RECURSIVE chain(id, now_id) AS ("
+        f" SELECT id, id FROM triage WHERE id IN ({', '.join('?' * len(waiting))})"
+        " UNION SELECT t.retriage_of, chain.now_id FROM triage t JOIN chain ON t.id = chain.id"
+        " WHERE t.retriage_of IS NOT NULL) SELECT id, now_id FROM chain",
+        list(waiting),
+    ).fetchall()
+    current = {row["id"]: waiting[row["now_id"]] for row in chains}
+    marks = ", ".join("?" * len(current))  # only the waiting patients' handovers are read
+    rows = con.execute(
+        "SELECT triage_id, text, released_by, released_at FROM handover"
+        f" WHERE released_at IS NOT NULL AND triage_id IN ({marks})"
+        " ORDER BY released_at DESC, id DESC",
+        list(current),
+    ).fetchall()
+    keep = ("triage_id", "patient_label", "colour", "waited_minutes", "target_minutes",
+            "recheck_due")  # fmt: skip
+    inbox, seen = [], set()
+    for row in rows:
+        entry = current[row["triage_id"]]
+        if entry["triage_id"] in seen:
+            continue
+        seen.add(entry["triage_id"])
+        inbox.append({**dict(row), **{k: entry[k] for k in keep}})
+    return inbox
 
 
 def record_assessment(

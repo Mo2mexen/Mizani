@@ -1,16 +1,18 @@
 # Audit log
 
-Every tool call, in order, in a log that shows if anyone edited it afterwards. It answers "why was this patient given this colour, by whom, and with which model?"
+Every tool call and every account event, in order, in a log that shows if anyone edited it afterwards. It answers "why was this patient given this colour, by whom, and with which model?" and "who signed in, and who changed which account?"
 
 ## Where it lives
 - Code: `src/mizani/audit.py`; table `audit` in the SQLite file (`src/mizani/db.py`)
-- Written by: the `audit_calls` middleware in `src/mizani/mcp_server.py`
-- Tests: `tests/test_mcp_server.py`
+- Written by: the `audit_calls` middleware in `src/mizani/mcp_server.py` (tool calls), and `auth.log` in `src/mizani/auth.py` from the API (sign-ins and account changes; auth.md)
+- Tests: `tests/test_mcp_server.py`, `tests/test_auth.py` (account events, and no password or session in the log)
 
 ## How it works
 Each row stores an `AuditEntry` (time, tool, inputs, outputs, an `error` flag for failed or refused calls, approver, model, tokens in total and split into in and out, latency in ms, cost) plus the triage id and the agent's run id, as canonical JSON. Its hash is SHA-256 of the previous row's hash plus this JSON, so the rows form a chain. Writes take an exclusive lock so the chain never forks. `verify_chain` recomputes every hash and returns the first row that doesn't match.
 
 Model, tokens, cost and `run_id` come from the `_meta` the agent sends with a tool call; malformed values are dropped, so the call and its audit row go through. Approval tokens in the inputs are stored as `***`. Each server thread has its own SQLite connection and writes take an exclusive lock, so parallel calls can't interleave inside one transaction (a test runs 8 writers at once and checks the chain). The run id (one per patient run) is what lets a patient's timeline include the checks the agent made before `propose_priority` created the triage id. Local models cost 0; the agent can also log its own model calls with `audit.record`.
+
+The API writes account events into the same chain, from its own process: `sign_in`, `sign_in_refused` (with the reason; an unknown user name is not stored, as it may be a password typed in the wrong box), `sign_out`, `password_changed`, `account_created`, `password_reset`, `role_changed`, `chief_flag_given`, `chief_flag_removed`, `account_deactivated`, `account_reactivated`, `signed_out_everywhere` and `first_admin_password`, each under the person who acted (`approver`). The exclusive write lock keeps one chain across the two processes. No password, one-time password or session value is ever written.
 
 ## Interfaces
 | Name | Input | Output | Side effects |
@@ -24,7 +26,7 @@ Model, tokens, cost and `run_id` come from the `_meta` the agent sends with a to
 - Used by: the backup (it records the latest hash and refuses a restore whose log does not match it; backup.md), the MCP server (every call), the `patient://{id}/timeline` resource, the API's `/api/audit` and the eval runner (tokens, latency, cost per run).
 
 ## Safety rules this system enforces
-- Every tool call is logged with inputs, outputs, timestamp, approver, model, tokens, latency and cost, refused calls included.
+- Every tool call is logged with inputs, outputs, timestamp, approver, model, tokens, latency and cost, refused calls included; every sign-in and account change too, never a secret.
 - Tampering is detectable: a test edits a past row and `verify_chain` finds it.
 
 ## Running and testing it alone

@@ -1,5 +1,6 @@
-"""Model client: any OpenAI-compatible endpoint, chosen by `LLM_BASE_URL` and `LLM_MODEL`
-(and `LLM_API_KEY` when the server checks keys).
+"""Model client: any OpenAI-compatible endpoint, chosen by the admin in Admin › Model, or by
+`LLM_BASE_URL` and `LLM_MODEL` (and `LLM_API_KEY` when the server checks keys) when no choice is
+saved.
 
 Thinking is off on every request and temperature is 0, so calls are fast and repeatable. Each
 call reports the model, tokens (in, out and total) and latency; they go into the audit log with
@@ -22,16 +23,27 @@ DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 DEFAULT_MODEL = "qwen3.5:4b-q4_K_M"
 
 
-def chat_model() -> ChatOpenAI:
+def chat_model(choice: dict | None = None) -> ChatOpenAI:
+    """The model the agent calls: the admin's choice in Admin › Model when one is saved
+    (`settings.model`), otherwise `.env`. A saved choice never borrows `.env`'s key, so a key
+    meant for one server is not sent to another."""
+    env = os.environ
+    if choice:
+        base_url, model, key = choice["base_url"], choice["model"], choice.get("api_key")
+        effort = choice.get("reasoning_effort")
+    else:
+        base_url = env.get("LLM_BASE_URL", DEFAULT_BASE_URL)
+        model, key = env.get("LLM_MODEL", DEFAULT_MODEL), env.get("LLM_API_KEY")
+        effort = env.get("LLM_REASONING_EFFORT", "none")
     return ChatOpenAI(
-        base_url=os.environ.get("LLM_BASE_URL", DEFAULT_BASE_URL),
-        model=os.environ.get("LLM_MODEL", DEFAULT_MODEL),
+        base_url=base_url,
+        model=model,
         # Ollama ignores the key, but the client refuses to start without one. A model server
         # that checks keys (vLLM, llama.cpp with --api-key) gets it from LLM_API_KEY.
-        api_key=os.environ.get("LLM_API_KEY") or "local",
+        api_key=key or "local",
         temperature=0,
         # Thinking off (checked on Ollama's /v1). Servers that reject the field: set it empty.
-        reasoning_effort=os.environ.get("LLM_REASONING_EFFORT", "none") or None,
+        reasoning_effort=effort or None,
         timeout=300,  # a cold model load on a slow disk or a CPU-only machine took ~2 min
         max_retries=1,
     )

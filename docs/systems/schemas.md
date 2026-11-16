@@ -19,9 +19,10 @@ Every model extends `Contract`, which rejects unknown fields (a typo like `pulse
 - `TewsComponent`, `Tews`: one scored vital and the total. `Tews` rejects a total that differs from the sum of its components.
 - `Discriminator`, `Flag`: a matched chart entry or a warning, each with its source. A `Discriminator` named from the complaint carries `quote`, the complaint's words behind it.
 - `SignClaim`: a chart sign the agent names, `{id, quote}`; the engine applies it only if the quote is in the complaint outside text addressed to the software.
-- `Proposal`: the suggested colour. Its `source` is a one-line, cited reason for the colour (the TEWS total or the discriminator that set it). `status` can only be `"pending"`; committing happens elsewhere, after a nurse decision.
-- `NurseDecision`: needs a nurse name. An override needs a colour and a reason; an approval cannot carry a colour. `confirmed` records that the nurse checked a sign with the patient; `commit_triage` asks for it before approving a red colour that rests on the complaint's words alone.
-- `AuditEntry`: one logged tool call (inputs, outputs, time, approver, model, tokens with `tokens_in` and `tokens_out`, latency, cost). `error` marks a call that failed or was refused, with the reason in the outputs. The audit store adds the hash chain.
+- `Proposal`: the suggested colour. Its `source` is a one-line, cited reason for the colour (the TEWS total or the discriminator that set it). `status` can only be `"pending"`; committing happens elsewhere, after a nurse decision. `chart` names the chart that scored it ("sats_adult, built in", "sats_kenya, version 2"), set by the MCP server.
+- `NurseDecision`: the nurse's action; it has no name field (a typed name is refused), because the name is the signed-in account's. An override needs a colour and a reason; an approval cannot carry a colour. `confirmed` records that the nurse checked a sign with the patient; `commit_triage` asks for it before approving a red colour that rests on the complaint's words alone.
+- `AuditEntry`: one logged tool call or account event (inputs, outputs, time, approver, model, tokens with `tokens_in` and `tokens_out`, latency, cost). `error` marks a call that failed or was refused, with the reason in the outputs. The audit store adds the hash chain.
+- `Role`, `Account`: a person who signs in, as the page and the admin see them (id, user name, unique full name, role `nurse` / `doctor` / `admin`, the chief flag with who gave it and when, active, `must_change` while a one-time password is in use, `locked_until`, created, last sign-in). It never carries the password hash (auth.md).
 
 ## Interfaces
 | Name | Input | Output | Side effects |
@@ -29,7 +30,8 @@ Every model extends `Contract`, which rejects unknown fields (a typo like `pulse
 | `Vitals` | nurse-entered vitals | validated model | none |
 | `Proposal` | engine result | pending proposal | none |
 | `NurseDecision` | API decision body | validated decision | none |
-| `AuditEntry` | one tool call | log record | none |
+| `AuditEntry` | one tool call or account event | log record | none |
+| `Account` | an account row | the public view of a person | none |
 
 ## Depends on / used by
 - Depends on: `pydantic`.

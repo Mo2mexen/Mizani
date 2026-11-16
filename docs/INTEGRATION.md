@@ -19,11 +19,11 @@ docker compose up
 
 To use only the triage tools, without the model, the page or FHIR, start one service: `docker compose up mizani-mcp`.
 
-All four listen on `127.0.0.1`, so only programs on the same machine can reach them, and none of them asks for a login. See [Limits](#limits) before opening them to a network.
+All four listen on `127.0.0.1`, so only programs on the same machine can reach them. The API needs a signed-in account for everything but its health check; the MCP server needs no login, but nothing it saves goes through without an approval token from a signed-in account (below). See [Limits](#limits) before opening them to a network.
 
 ## Use the triage tools from your own agent (MCP)
 
-The MCP server has 10 tools, 5 resources and 2 prompts. An agent that speaks MCP can score vitals, check chart signs and propose a priority with them, and every answer carries the rule it came from. The server does not need our agent or any language model.
+The MCP server has 11 tools, 6 resources and 2 prompts. An agent that speaks MCP can score vitals, check chart signs and propose a priority with them, and every answer carries the rule it came from. The server does not need our agent or any language model.
 
 By hand, in a browser: run `npx @modelcontextprotocol/inspector`, choose "Streamable HTTP" and enter `http://127.0.0.1:8000/mcp`.
 
@@ -99,7 +99,7 @@ TEWS 8
   mobility = with_help: 1 (sats_adult · chart: Adult TEWS, Mobility row (manual p16: a wheelchair user with permanent paralysis counts as immobile) | with_help = 1)
   trauma = False: 0 (sats_adult · chart: Adult TEWS, Trauma row (manual p16: any injury in the past 48 hours) | false = 0)
 proposal: red - TEWS 8 -> red (sats_adult · chart flowchart: Emergency, TEWS 7 or more); final colour is the higher of the TEWS colour and any discriminator colour
-commit without a nurse: Error executing tool commit_triage: commit refused: no approval token: a named nurse must approve or override first
+commit without a nurse: Error executing tool commit_triage: commit refused: no approval token: a signed-in nurse must approve or override first
 ```
 
 Your agent can call the checking tools and `propose_priority` as often as it likes; a proposal is always pending. It cannot save one. `commit_triage`, `release_handover` and `record_called_in` each need an approval token, and an agent has no way to make one. Every call, including the refused one above, is written to the audit log with its inputs, outputs and time.
@@ -108,22 +108,25 @@ The chart signs a client may name, with their ids and definitions, are in the re
 
 ## The approval step in your own system
 
-An approval token is proof that a named nurse decided on one triage. It is signed with `MIZANI_APPROVAL_SECRET`, which the MCP server and your approval service share and the agent never sees. The compose default is `local-demo-secret-change-me`; set your own in `.env`.
+An approval token is proof that a signed-in person decided on one triage. It is signed with the approval secret, which the MCP server and your approval service share and the agent never sees: each install makes its own on the first start, in the data folder beside the database (`/data/approval.secret` in Docker), unless `.env` sets `MIZANI_APPROVAL_SECRET`. The token names an account in Mizani's database, and the MCP server checks that account itself: it must be active, and its role must be allowed to do that action (a nurse commits and releases handovers; a nurse or a doctor records called in).
 
-In Mizani the API issues the token when the nurse presses Approve. If you build your own front end on the MCP server, the service behind your Approve button does it. In Python, from a clone of this repo and with `MIZANI_APPROVAL_SECRET` set to the server's value:
+In Mizani the API issues the token for the signed-in nurse when they press Approve. If you build your own front end on the MCP server, the service behind your Approve button does it, for the nurse's Mizani account (an admin adds it under Users). In Python, run next to the MCP server so it sees the same data folder: outside Docker from a clone of this repo, or inside the container with `docker compose exec -T mizani-mcp python - < approve.py`:
 
 ```python
 import asyncio
 
 from mcp.client import Client
 
-from mizani.approval import issue_approval
-from mizani.schemas import NurseDecision
+from mizani import auth
+from mizani.approval import ensure_secret, issue_approval
+from mizani.db import db
 
 URL = "http://127.0.0.1:8000/mcp"
 
 
 async def main() -> None:
+    ensure_secret()  # the secret the MCP server signs with, from the shared data folder
+    nurse = auth.find(db(), "amina.otieno")  # an active nurse's account
     async with Client(URL) as mizani:
         proposal = (
             await mizani.call_tool(
@@ -136,8 +139,7 @@ async def main() -> None:
                 },
             )
         ).structured_content
-        decision = NurseDecision(nurse_name="Nurse A", action="approve")
-        token = issue_approval(proposal["triage_id"], decision)
+        token = issue_approval(proposal["triage_id"], nurse)
         args = {"triage_id": proposal["triage_id"], "approval_token": token}
         print("commit:", (await mizani.call_tool("commit_triage", args)).structured_content)
         again = await mizani.call_tool("commit_triage", args)
@@ -148,25 +150,27 @@ asyncio.run(main())
 ```
 
 ```
-commit: {'triage_id': '752f361866fc', 'colour': 'orange', 'approver': 'Nurse A', 'action': 'approve', 'committed_at': '2026-11-13T23:47:32.445091+00:00'}
+commit: {'triage_id': '17ad86d2bc6a', 'colour': 'orange', 'approver': 'Amina Otieno', 'action': 'approve', 'committed_at': '2026-11-16T17:08:03.969379+00:00'}
 same token again: Error executing tool commit_triage: commit refused: this triage is already committed
 ```
 
-A token works for one triage, one purpose (`commit`, `handover` or `called_in`), one use, and two minutes. In another language, build it the way `src/mizani/approval.py` does: the payload as JSON, encoded as URL-safe base64, then a dot, then the HMAC-SHA256 of that base64 text in hex, keyed with the secret. The rules are in [systems/approval.md](systems/approval.md).
+A token works for one triage, one purpose (`commit`, `handover` or `called_in`), one account, one use, and two minutes. In another language, build it the way `src/mizani/approval.py` does: the payload as JSON (with `account_id`, `approver`, `role` and `chief` exactly as the account has them), encoded as URL-safe base64, then a dot, then the HMAC-SHA256 of that base64 text in hex, keyed with the secret. The rules are in [systems/approval.md](systems/approval.md).
 
 ## Send patients to Mizani's agent over HTTP
 
-A registration system or another front end can use the whole agent through the API: it reads the complaint with the model, calls the tools, and waits for the nurse. Three calls take one patient from intake to a saved triage (Bash shown; the same calls work from `http://127.0.0.1:8090/docs`):
+A registration system or another front end can use the whole agent through the API: it reads the complaint with the model, calls the tools, and waits for the nurse. The API works for a signed-in account only, so the front end signs in as the nurse (a cookie jar keeps the session) and sends `X-Mizani: 1` with every change. Four calls take one patient from sign-in to a saved triage (Bash shown):
 
 ```
+M='-b jar -c jar -H X-Mizani:1 -H content-type:application/json'
+# 0. Sign in as the nurse (an account an admin added under Users)
+curl -s $M -X POST localhost:8090/api/auth/login -d '{"username":"amina.otieno","password":"<the nurse password>"}'
 # 1. Intake: returns the run id
-curl -s -X POST localhost:8090/api/intake -H 'content-type: application/json' \
+curl -s $M -X POST localhost:8090/api/intake \
   -d '{"patient_label":"Test Patient 01","complaint":"chest pain","vitals":{"respiratory_rate":18,"heart_rate":118,"avpu":"alert"}}'
 # 2. The agent's steps as they happen, then the proposal with its triage_id. Ctrl+C after "proposal".
-curl -N localhost:8090/api/triage/<run_id>/stream
-# 3. The nurse's decision: the API signs the approval token and the agent commits
-curl -s -X POST localhost:8090/api/triage/<run_id>/decision -H 'content-type: application/json' \
-  -d '{"nurse_name":"Nurse A","action":"approve","triage_id":"<triage_id>"}'
+curl -N -b jar localhost:8090/api/triage/<run_id>/stream
+# 3. The nurse's decision: the API signs the approval token for this account and the agent commits
+curl -s $M -X POST localhost:8090/api/triage/<run_id>/decision -d '{"action":"approve","triage_id":"<triage_id>"}'
 ```
 
 The waiting list is `GET /api/queue` and the audit log is `GET /api/audit`. Every endpoint, with the re-check, handover and called-in calls, is in [systems/api.md](systems/api.md).
@@ -188,11 +192,11 @@ Mizani does not yet read an existing patient from a record system. wso2's server
 
 ## Change the model or the triage scale
 
-The model is a setting: `LLM_MODEL` and `LLM_BASE_URL` in `.env` point the agent at any OpenAI-compatible server ([REMOTE_MODEL.md](REMOTE_MODEL.md)). A triage scale is a YAML rule pack in `src/mizani/rules/`, where every rule records its source ([systems/rules-engine.md](systems/rules-engine.md)). The server loads the pack that `MIZANI_RULE_PACK` names (default `sats_adult`), and refuses one in which a clinical rule does not cite one of the pack's own references.
+The model is a setting: `LLM_MODEL` and `LLM_BASE_URL` in `.env` point the agent at any OpenAI-compatible server ([REMOTE_MODEL.md](REMOTE_MODEL.md)). A triage scale is a YAML rule pack, where every rule records its source ([systems/rules-engine.md](systems/rules-engine.md)). The server starts with the pack in `src/mizani/rules/` that `MIZANI_RULE_PACK` names (default `sats_adult`); a chief doctor can upload another in the page, evaluate it and activate it ([systems/charts.md](systems/charts.md)). A pack in which a clinical rule does not cite one of its own references is refused either way.
 
 ## Limits
 
-- Local only. Every port is bound to `127.0.0.1`. Reaching Mizani from another machine means changing the port lines in `docker-compose.yml`, and nothing behind those ports checks who is calling, so do that only on a network you trust.
-- The default approval secret is public. Anyone who knows the secret and can reach the MCP server can sign an approval, so set your own `MIZANI_APPROVAL_SECRET` on any shared machine.
+- Local only. Every port is bound to `127.0.0.1`. The API checks who is calling; the MCP server and the FHIR servers do not (the MCP server only refuses saves without a token), so keep those three on this machine and give other machines the page and the API only.
+- Anyone who can read the data folder can read the approval secret and sign an approval for an existing account, as they can read the database itself. Protect the server's disk like the patient records it holds.
 - The examples create test patients. They stay in the waiting list and the audit log until `docker compose down -v`, which deletes the stored data (and the downloaded model).
 - Synthetic data only. Mizani is a prototype that has not been connected to a real hospital system or validated in a clinic.

@@ -2,9 +2,10 @@
 #   docker compose up
 # NVIDIA GPU (Windows/Linux):
 #   docker compose -f docker-compose.yml -f docker/docker-compose.gpu.yml up
-# Then open http://127.0.0.1:8090 for the nurse's page (API and docs: /api, /docs).
+# Then open http://127.0.0.1:8090 for the page (API and docs: /api, /docs), or the same page over
+# HTTPS at https://localhost:8443 (service caddy; tablets on the hospital network: docs/INSTALL.md).
 # Every port listens on this machine only (127.0.0.1). If one is taken, set API_HOST_PORT,
-# MCP_HOST_PORT, FHIR_MCP_HOST_PORT or HAPI_HOST_PORT in .env (see .env.example).
+# MCP_HOST_PORT, FHIR_MCP_HOST_PORT, HAPI_HOST_PORT or HTTPS_HOST_PORT in .env (see .env.example).
 
 services:
   ollama:
@@ -81,7 +82,8 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     environment:
-      MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-local-demo-secret-change-me}
+      # Empty: each install makes its own secret on the first start (in the data volume).
+      MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-}
       # The names it answers to (DNS-rebinding guard): this machine, and the app by service name.
       MIZANI_ALLOWED_HOSTS: 127.0.0.1,localhost,mizani-mcp
       # The triage chart: a rule pack file in src/mizani/rules/ (default: the adult SATS chart).
@@ -149,12 +151,18 @@ services:
       LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT-none}
       LLM_API_KEY: ${LLM_API_KEY:-}  # only for a model server that checks keys; Ollama needs none
       MIZANI_SECOND_LOOK: ${MIZANI_SECOND_LOOK:-}  # 1 turns on the agent's second look
+      # The same built-in chart as mizani-mcp: the API names the chart in use and evaluates against it
+      MIZANI_RULE_PACK: ${MIZANI_RULE_PACK:-sats_adult}
       MIZANI_MCP_URL: http://mizani-mcp:8000/mcp
       MIZANI_FHIR_MCP_URL: http://fhir-mcp:8000/mcp/
-      MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-local-demo-secret-change-me}
+      MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-}  # empty: the install's own
       MIZANI_API_HOST: 0.0.0.0
-      # The names the page may be opened with (DNS-rebinding guard); a ward server adds its own.
-      MIZANI_ALLOWED_HOSTS: ${MIZANI_ALLOWED_HOSTS:-127.0.0.1,localhost}
+      # The names the page may be opened with (DNS-rebinding guard): this machine, and the name
+      # tablets use through Caddy (MIZANI_HOSTNAME). Set it in .env only to list more names.
+      MIZANI_ALLOWED_HOSTS: ${MIZANI_ALLOWED_HOSTS:-127.0.0.1,localhost,${MIZANI_HOSTNAME:-localhost}}
+      # Trust the X-Forwarded-Proto header Caddy adds, so the session cookie is marked Secure over
+      # HTTPS. The app's port is reachable only from this machine and the compose network.
+      FORWARDED_ALLOW_IPS: "*"
     volumes:
       - mizani-data:/data
     ports:
@@ -173,6 +181,25 @@ services:
         condition: service_healthy
       ollama-pull:
         condition: service_completed_successfully
+
+  # HTTPS for tablets and desk PCs: https://<MIZANI_HOSTNAME>:<HTTPS_HOST_PORT> (default
+  # https://localhost:8443). It answers on this machine only until .env opens it to the network
+  # (MIZANI_LISTEN=0.0.0.0). Certificate: Caddy's own authority by default, which each tablet trusts
+  # once, or the hospital's own (./certs, MIZANI_TLS). Steps: docs/INSTALL.md.
+  caddy:
+    image: caddy:2.11.9
+    environment:
+      MIZANI_HOSTNAME: ${MIZANI_HOSTNAME:-localhost}
+      MIZANI_TLS: ${MIZANI_TLS:-internal}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy-data:/data  # its certificate authority: keep it, or every tablet trusts a new one
+    ports:
+      - "${MIZANI_LISTEN:-127.0.0.1}:${HTTPS_HOST_PORT:-8443}:443"
+    depends_on:
+      app:
+        condition: service_healthy
 
   # Backups, run by hand and never by `docker compose up` (profile "tools"):
   #   docker compose run --rm backup                 a new backup in ./backups/<UTC time>/
@@ -202,3 +229,4 @@ volumes:
   ollama-models:
   mizani-data:
   hapi-data:
+  caddy-data:

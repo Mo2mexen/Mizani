@@ -3,8 +3,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from mcp.client import Client
+from test_agent_graph import person
 
-from mizani import approval, audit
+from mizani import approval, audit, store
 from mizani.db import db
 from mizani.mcp_server import mcp
 from mizani.schemas import NurseDecision
@@ -54,10 +55,9 @@ async def propose(client, discriminators=(), **meta):
     return data(await client.call_tool("propose_priority", args, meta=meta or None))
 
 
-def token(triage_id, **decision):
-    return approval.issue_approval(
-        triage_id, NurseDecision(nurse_name="Nurse A", **{"action": "approve", **decision})
-    )
+def token(triage_id, who="Nurse A", role="nurse", **decision):
+    decision = NurseDecision(**{"action": "approve", **decision})
+    return approval.issue_approval(triage_id, person(who, role), decision)
 
 
 async def test_tools_listed_with_read_and_action_hints():
@@ -74,6 +74,7 @@ async def test_tools_listed_with_read_and_action_hints():
         "release_handover",
         "record_called_in",
         "record_nurse_assessment",
+        "activate_chart",
     }
     assert tools["compute_tews"].annotations.read_only_hint is True
     assert tools["commit_triage"].annotations.read_only_hint is False
@@ -215,7 +216,7 @@ async def test_override_sets_the_nurses_colour():
         r = await client.call_tool(
             "commit_triage", {"triage_id": p2["triage_id"], "approval_token": bad}
         )
-    assert "not a SATS colour" in error_text(r)
+    assert "not a colour of the chart in use" in error_text(r)
 
 
 async def test_every_call_is_logged_with_model_tokens_and_latency():
@@ -377,12 +378,9 @@ HANDOVER = "\n".join(
 )
 
 
-def handover_token(triage_id, draft_id=1):
+def handover_token(triage_id, draft_id=1, who="Nurse B", role="nurse"):
     return approval.issue_approval(
-        triage_id,
-        NurseDecision(nurse_name="Nurse B", action="approve"),
-        purpose="handover",
-        draft_id=draft_id,
+        triage_id, person(who, role), purpose="handover", draft_id=draft_id
     )
 
 
@@ -425,6 +423,86 @@ async def test_handover_is_drafted_then_released_only_by_a_nurse():
     assert released[0]["approver"] == "Nurse B"
 
 
+async def test_only_a_nurse_commits_and_the_account_is_checked_as_it_is_now():
+    async with Client(mcp) as client:
+        tid = (await propose(client, ["chest_pain"]))["triage_id"]
+
+        async def commit_with(approval_token):
+            args = {"triage_id": tid, "approval_token": approval_token}
+            return await client.call_tool("commit_triage", args)
+
+        for who, role, named in [
+            ("Doctor D", "doctor", "a doctor"),
+            ("Admin E", "admin", "an admin"),
+        ]:
+            refused = error_text(await commit_with(token(tid, who, role)))
+            assert f"only a nurse may save a triage; this is from {named}" in refused
+        signed = token(tid)  # Nurse A's, who is then deactivated, then made a doctor
+        db().execute("UPDATE account SET active = 0 WHERE username = 'nurse.a'")
+        assert "not from an active account" in error_text(await commit_with(signed))
+        db().execute("UPDATE account SET active = 1, role = 'doctor' WHERE username = 'nurse.a'")
+        assert "account changed since" in error_text(await commit_with(signed))
+        db().execute("UPDATE account SET role = 'nurse' WHERE username = 'nurse.a'")
+        assert data(await commit_with(signed))["approver"] == "Nurse A"
+    rows = [e for e in audit.entries(db(), tid) if e["tool"] == "commit_triage"]
+    assert [e["error"] for e in rows] == [True, True, True, True, False]
+
+
+async def test_a_doctor_records_called_in_but_releases_no_handover_and_an_admin_neither():
+    async with Client(mcp) as client:
+        tid = (await propose(client, ["chest_pain"]))["triage_id"]
+        await commit(client, tid)
+        d = data(await client.call_tool("draft_handover", {"triage_id": tid, "text": HANDOVER}))
+        doctor_release = handover_token(tid, d["draft_id"], "Doctor D", "doctor")
+        release = {"triage_id": tid, "draft_id": d["draft_id"], "approval_token": doctor_release}
+        refused = error_text(await client.call_tool("release_handover", release))
+        assert "only a nurse may release a handover; this is from a doctor" in refused
+        admin = {"triage_id": tid, "approval_token": called_in_token(tid, "Admin E", "admin")}
+        refused = error_text(await client.call_tool("record_called_in", admin))
+        assert "only a nurse or a doctor may record that a patient was called in" in refused
+        doctor = {"triage_id": tid, "approval_token": called_in_token(tid, "Doctor D", "doctor")}
+        seen = data(await client.call_tool("record_called_in", doctor))
+    assert seen["approver"] == "Doctor D"
+
+
+async def test_the_doctors_inbox_has_the_latest_released_handover_of_each_waiting_patient():
+    async with Client(mcp) as client:
+        tid = (await propose(client, ["chest_pain"]))["triage_id"]
+        await commit(client, tid)
+        assert json.loads(await _read("handovers://released")) == []
+        for text in (HANDOVER, HANDOVER.replace("; chest pain", "; chest pain, sweating")):
+            d = data(await client.call_tool("draft_handover", {"triage_id": tid, "text": text}))
+            approval_token = handover_token(tid, d["draft_id"])
+            release = {
+                "triage_id": tid,
+                "draft_id": d["draft_id"],
+                "approval_token": approval_token,
+            }
+            data(await client.call_tool("release_handover", release))
+        (entry,) = json.loads(await _read("handovers://released"))
+        assert "sweating" in entry["text"] and entry["released_by"] == "Nurse B"
+        assert (entry["triage_id"], entry["colour"], entry["target_minutes"]) == (tid, "orange", 10)
+        seen = {"triage_id": tid, "approval_token": called_in_token(tid, "Doctor D", "doctor")}
+        data(await client.call_tool("record_called_in", seen))
+    assert json.loads(await _read("handovers://released")) == []
+
+
+async def test_a_released_handover_follows_the_patient_through_a_re_triage():
+    async with Client(mcp) as client:
+        tid = (await propose(client, ["chest_pain"]))["triage_id"]
+        await commit(client, tid)
+        d = data(await client.call_tool("draft_handover", {"triage_id": tid, "text": HANDOVER}))
+        approval_token = handover_token(tid, d["draft_id"])
+        release = {"triage_id": tid, "draft_id": d["draft_id"], "approval_token": approval_token}
+        data(await client.call_tool("release_handover", release))
+        args = dict(patient_label="Test Patient 01", complaint="chest pain since morning",
+                    vitals=VITALS, discriminators=[], retriage_of=tid)  # fmt: skip
+        new = data(await client.call_tool("propose_priority", args))["triage_id"]
+        await commit(client, new)
+    (entry,) = json.loads(await _read("handovers://released"))
+    assert entry["triage_id"] == new and entry["text"].startswith("RR 12")
+
+
 async def test_a_handover_token_cannot_commit_a_triage():
     async with Client(mcp) as client:
         p = await propose(client)
@@ -443,7 +521,7 @@ async def test_shadow_mode_records_the_nurses_colour_and_reports_agreement():
         data(await client.call_tool("record_nurse_assessment", args))
         assert "already has" in error_text(await client.call_tool("record_nurse_assessment", args))
         bad = {**args, "triage_id": b["triage_id"], "colour": "purple"}
-        assert "not a SATS colour" in error_text(
+        assert "not a colour of the chart in use" in error_text(
             await client.call_tool("record_nurse_assessment", bad)
         )
         disagree = {
@@ -633,9 +711,8 @@ async def test_an_override_needs_no_confirmation():
     assert done["colour"] == "green"
 
 
-def called_in_token(triage_id, nurse="Nurse C"):
-    decision = NurseDecision(nurse_name=nurse, action="approve")
-    return approval.issue_approval(triage_id, decision, purpose="called_in")
+def called_in_token(triage_id, nurse="Nurse C", role="nurse"):
+    return approval.issue_approval(triage_id, person(nurse, role), purpose="called_in")
 
 
 async def test_only_a_named_nurse_takes_a_patient_off_the_waiting_list():
@@ -792,13 +869,12 @@ def test_health_is_503_when_the_database_cannot_be_read(tmp_path, monkeypatch):
 def pack_without(colour):
     from mizani import mcp_server
 
-    return mcp_server.PACK.model_copy(
-        update={"colours": [c for c in mcp_server.PACK.colours if c.colour != colour]}
-    )
+    pack = mcp_server.pack()
+    return pack.model_copy(update={"colours": [c for c in pack.colours if c.colour != colour]})
 
 
-async def test_the_server_will_not_start_with_a_pack_that_lacks_a_waiting_patients_colour(
-    monkeypatch,
+async def test_the_server_warns_when_a_waiting_patients_colour_is_not_on_the_chart(
+    monkeypatch, capsys
 ):
     from mizani import mcp_server
 
@@ -808,9 +884,11 @@ async def test_the_server_will_not_start_with_a_pack_that_lacks_a_waiting_patien
             "commit_triage", {"triage_id": p["triage_id"], "approval_token": token(p["triage_id"])}
         )
     mcp_server.pack_fits_the_queue()  # the pack in use has the colour: no complaint
-    monkeypatch.setattr(mcp_server, "PACK", pack_without(p["colour"]))
-    with pytest.raises(SystemExit, match="waiting queue"):
-        mcp_server.pack_fits_the_queue()
+    assert "WARNING" not in capsys.readouterr().out
+    smaller = pack_without(p["colour"])
+    monkeypatch.setattr(mcp_server, "pack", lambda: smaller)
+    mcp_server.pack_fits_the_queue()  # the desk still starts
+    assert "listed first, due for a re-check now" in capsys.readouterr().out
 
 
 async def test_a_proposal_from_another_pack_cannot_be_approved_only_overridden(monkeypatch):
@@ -818,14 +896,36 @@ async def test_a_proposal_from_another_pack_cannot_be_approved_only_overridden(m
 
     async with Client(mcp) as client:
         p = await propose(client)
-        monkeypatch.setattr(mcp_server, "PACK", pack_without(p["colour"]))
+        smaller = pack_without(p["colour"])
+        monkeypatch.setattr(mcp_server.charts, "active", lambda con: (smaller, p["chart"]))
         r = await client.call_tool(
             "commit_triage", {"triage_id": p["triage_id"], "approval_token": token(p["triage_id"])}
         )
         assert "not in the rule pack in use" in error_text(r)
-        other = next(c.colour for c in mcp_server.PACK.colours)
+        other = next(c.colour for c in mcp_server.pack().colours)
         t = token(p["triage_id"], action="override", colour=other, reason="re-assessed")
         ok = await client.call_tool(
             "commit_triage", {"triage_id": p["triage_id"], "approval_token": t}
         )
     assert data(ok)["colour"] == other
+
+
+async def test_a_proposal_scored_with_a_chart_no_longer_in_use_cannot_be_committed(monkeypatch):
+    from mizani import mcp_server
+
+    async with Client(mcp) as client:
+        p = await propose(client)
+        same_colours = mcp_server.pack()
+        monkeypatch.setattr(
+            mcp_server.charts, "active", lambda con: (same_colours, "sats_kenya, version 1")
+        )
+        approve = await client.call_tool(
+            "commit_triage", {"triage_id": p["triage_id"], "approval_token": token(p["triage_id"])}
+        )
+        t = token(p["triage_id"], action="override", colour="red", reason="re-assessed")
+        override = await client.call_tool(
+            "commit_triage", {"triage_id": p["triage_id"], "approval_token": t}
+        )
+    for refused in (approve, override):
+        assert "the chart in use changed since this proposal" in error_text(refused)
+    assert store.get(db(), p["triage_id"])["status"] == "pending"

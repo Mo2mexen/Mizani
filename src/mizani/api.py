@@ -1,12 +1,17 @@
-"""HTTP API for the nurse's web page: intake, the live agent trace, the nurse's decision, the
-queue, colours and the audit log. Shapes follow `schemas.py`; every endpoint is described in
-docs/systems/api.md.
+"""HTTP API for the page: sign-in, intake, the live agent trace, the nurse's decision, the
+queue, the doctors' inbox, accounts, colours and the audit log. Shapes follow `schemas.py`;
+every endpoint is described in docs/systems/api.md.
+
+Every endpoint but `/api/health` and `/api/auth/login` needs a signed-in account, and each checks
+the account's role on the server (403 otherwise): nurse, doctor, admin, or a doctor with the chief
+flag. A request that changes something must carry the header `X-Mizani: 1`, which a page on
+another site cannot send.
 
 `POST /api/intake` starts one agent run and returns its id at once; the run's steps arrive on
 `GET /api/triage/{id}/stream` (server-sent events). The run pauses at the nurse. Only
-`POST /api/triage/{id}/decision` turns a named nurse's decision into an approval token, and the
-token goes straight to the agent's commit step: the model never sees it. Releasing a handover
-and recording that a patient was called in work the same way.
+`POST /api/triage/{id}/decision` turns the signed-in nurse's decision into an approval token,
+and the token goes straight to the agent's commit step: the model never sees it. Releasing a
+handover and recording that a patient was called in work the same way.
 """
 
 import asyncio
@@ -14,37 +19,206 @@ import json
 import logging
 import os
 import re
+import sys
+import time
 import uuid
 from collections.abc import AsyncIterable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
+from urllib.parse import urlparse
 
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 from mcp.client import Client
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from starlette.datastructures import Headers, MutableHeaders
 
-from mizani import audit, store
+from mizani import __version__, audit, auth, charts, settings, store
 from mizani.agent.graph import build_graph
 from mizani.agent.mcp_tools import load_tools, read_json, server_url, with_meta
 from mizani.agent.model import call_model, chat_model
 from mizani.agent.watch import watch
-from mizani.approval import issue_approval
+from mizani.approval import ensure_secret, issue_approval
 from mizani.db import db, db_path
 from mizani.fhir import fhir_url, write_committed
 from mizani.rules.engine import LABELS
-from mizani.schemas import Contract, NurseDecision, Vitals
+from mizani.rules.pack import MAX_UPLOAD
+from mizani.schemas import Account, Contract, NurseDecision, Role, Vitals
 
 log = logging.getLogger("mizani.api")
 FINAL_EVENTS = {"committed", "error"}
 MCP_CONNECT_TRIES = 30  # the MCP server may still be starting (compose)
+MODEL_TEST_SECONDS = 180  # Test connection: a model loading from a hard disk took about 120 s
+SESSION_COOKIE = "mizani_session"
+CHART_CHECK_SECONDS = 5  # how often the API checks that it still has the chart in use
+# A sign-in checks the password with scrypt, slow and memory-hard on purpose. It runs on these few
+# threads of its own, so a burst of sign-ins (anyone can send them) never takes the threads every
+# other request needs, and their memory stays bounded.
+PASSWORD_CHECKS = ThreadPoolExecutor(max_workers=4, thread_name_prefix="password-check")
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+# The page's own files only: no inline scripts, no other sites, never inside another site's frame
+CSP = (
+    "default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; "
+    "form-action 'self'; frame-ancestors 'none'"
+)
+
+
+class Guard:
+    """Refuses an API request that changes something unless it carries `X-Mizani: 1`. A page on
+    another site cannot send a custom header, so a forged form or script fails even before the
+    SameSite cookie would stop it. Adds security headers to every answer, and `no-store` to the
+    API's, so a shared tablet's browser keeps no patient data in its cache."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope["path"]
+        changes = scope["method"] not in SAFE_METHODS
+        if path.startswith("/api/") and changes and Headers(scope=scope).get("x-mizani") != "1":
+            detail = "Refused: this request did not come from the Mizani page."
+            await JSONResponse({"detail": detail}, status_code=403)(scope, receive, send)
+            return
+
+        async def with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers.setdefault("X-Content-Type-Options", "nosniff")
+                headers.setdefault("Referrer-Policy", "no-referrer")
+                headers.setdefault("X-Frame-Options", "DENY")
+                if not path.startswith(("/docs", "/redoc", "/openapi.json")):  # Swagger's CDN
+                    headers.setdefault("Content-Security-Policy", CSP)
+                if path.startswith("/api/"):
+                    headers["Cache-Control"] = "no-store"
+            await send(message)
+
+        await self.app(scope, receive, with_headers)
+
+
+def signed_in(request: Request) -> Account:
+    """The account behind the session cookie, or 401. The page's own polling sends
+    `X-Mizani-Background: 1`, which does not count as use, so an idle tablet still signs out."""
+    value = request.cookies.get(SESSION_COOKIE)
+    touch = request.headers.get("x-mizani-background") != "1"
+    account = auth.session_account(db(), value, touch) if value else None
+    if account is None:
+        raise HTTPException(401, "You are signed out. Sign in again to continue.")
+    return account
+
+
+def allow(*roles: str):
+    """A dependency: the signed-in account if it has one of `roles` and has chosen its own
+    password, 403 otherwise. "chief" is a doctor with the chief flag."""
+
+    def check(account: Annotated[Account, Depends(signed_in)]) -> Account:
+        if account.must_change:
+            raise HTTPException(403, "Choose your own password first.")
+        if not any(auth.has_role(account, role) for role in roles):
+            needed = " or ".join(auth.ROLE_NAMES[role] for role in roles)
+            raise HTTPException(
+                403, f"This needs {needed}; you are signed in as {auth.ROLE_NAMES[account.role]}."
+            )
+        return account
+
+    return check
+
+
+SignedIn = Annotated[Account, Depends(signed_in)]  # also while a one-time password is in use
+Anyone = Annotated[Account, Depends(allow(*auth.ROLES))]
+Nurse = Annotated[Account, Depends(allow("nurse"))]
+Staff = Annotated[Account, Depends(allow("nurse", "doctor"))]
+Doctor = Annotated[Account, Depends(allow("doctor"))]
+Admin = Annotated[Account, Depends(allow("admin"))]
+Chief = Annotated[Account, Depends(allow("chief"))]  # a doctor with the chief flag
+
+
+class Exact(BaseModel):
+    """For passwords: unknown fields are an error, and nothing is trimmed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class Credentials(Exact):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=auth.MAX_PASSWORD)
+
+
+class NewPassword(Exact):
+    current: str = Field(min_length=1, max_length=auth.MAX_PASSWORD)
+    new: str = Field(min_length=1, max_length=auth.MAX_PASSWORD)
+
+
+class NewAccount(Contract):
+    username: str = Field(min_length=1, max_length=32)
+    full_name: str = Field(min_length=1, max_length=80)
+    role: Role
+
+
+class RoleChange(Contract):
+    role: Role
+
+
+class ChiefFlag(Contract):
+    chief: bool
+
+
+class Activation(Contract):
+    active: bool
+
+
+class ChartUpload(Contract):
+    """A chart (a YAML rule pack) and, optionally, its test patients (YAML, as evals/cases)."""
+
+    chart_yaml: str = Field(min_length=1, max_length=MAX_UPLOAD)
+    cases_yaml: str | None = Field(default=None, max_length=MAX_UPLOAD)
+
+
+class ModelChoice(Contract):
+    """Where the model runs (Admin › Model). An empty `api_key` keeps the saved one when the
+    address is the same, so the admin never has to see or retype it."""
+
+    location: Literal["this_server", "hospital", "cloud"]
+    base_url: str | None = Field(default=None, max_length=300)
+    model: str | None = Field(default=None, max_length=200)
+    api_key: str | None = Field(default=None, max_length=500)
+    reasoning_effort: str | None = Field(default="none", max_length=20)
+    leaves_hospital_confirmed: bool = False
+
+    @model_validator(mode="after")
+    def check_the_server(self) -> "ModelChoice":
+        if self.location == "this_server":
+            return self
+        if not self.base_url or not self.model:
+            raise ValueError("give the model server's address and the model's name")
+        url = urlparse(self.base_url)
+        if url.scheme not in ("http", "https") or not url.hostname:
+            raise ValueError(
+                "the address starts with http:// or https://, e.g. https://gpu.example/v1"
+            )
+        if url.query or url.fragment or url.username or url.password:
+            # the client adds /chat/completions to the address: nothing may change where it goes
+            raise ValueError("give only the server's address and path, without ?, # or a user name")
+        if self.location == "cloud":
+            if url.scheme != "https":
+                raise ValueError(
+                    "a cloud server needs an https:// address, so complaint text and the key "
+                    "are encrypted on the way"
+                )
+            if not self.leaves_hospital_confirmed:
+                raise ValueError("confirm that complaint text will leave this hospital")
+        return self
 
 
 class Intake(Contract):
@@ -76,20 +250,15 @@ def _two_lines(content: str) -> list[str]:
 
 
 class Decision(NurseDecision):
-    """The nurse's decision on the proposal she saw. `triage_id` is that proposal's id: if the
+    """The nurse's decision on the proposal on screen. `triage_id` is that proposal's id: if the
     agent has re-scored since (re-measured vitals), the decision is refused, never moved over."""
 
     triage_id: str = Field(min_length=1)
 
 
-class NurseName(Contract):
-    """The named nurse behind an action on a waiting patient."""
-
-    nurse_name: str = Field(min_length=1)
-
-
 class Assessment(Contract):
-    nurse_name: str = Field(min_length=1)
+    """Shadow mode: the nurse's own colour, before Mizani's is shown."""
+
     colour: str = Field(min_length=1)
     reason: str | None = None
 
@@ -154,6 +323,35 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
     retriage_runs: dict[str, str] = {}  # committed triage id -> its open re-triage run
     ctx: dict[str, Any] = {}
 
+    async def load_chart() -> None:
+        """The chart in use, as the MCP server scores with it: its signs for the model, its
+        colours for the page, its name for the FHIR record. Again after a chart is activated."""
+        in_use = charts.active(db())[1]
+        rules = await read_json("rules://sats/adult", mcp_server)
+        ctx["colours"] = await read_json("rules://sats/targets", mcp_server)
+        ctx["sign_ids"] = {d["name"]: d["id"] for d in rules["discriminators"]}
+        ctx["chart_signs"] = rules["discriminators"]
+        ctx["scale"] = (rules["id"], rules["name"])
+        ctx["chart_label"] = in_use
+
+    async def follow_chart() -> None:
+        """The chart in use can change outside this process too (the MCP server takes a chart
+        that no longer loads out of use), or a reload can fail: every few seconds, reload the
+        chart's signs, colours and name, and rebuild the agent, whenever it changed."""
+        while True:
+            await asyncio.sleep(CHART_CHECK_SECONDS)
+            try:
+                if charts.active(db())[1] != ctx.get("chart_label"):
+                    await load_chart()
+                    ctx["graph"] = ctx["build"](ctx["llm"])
+            except Exception:
+                log.exception("could not reload the chart in use; trying again")
+
+    def scale_of(triage_id: str) -> tuple[str, str]:
+        """The chart that scored this triage, for its FHIR record (the chart in use if unknown)."""
+        record = store.get(db(), triage_id)
+        return charts.scale(db(), record and record["chart"]) or ctx["scale"]
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         async with AsyncExitStack() as stack:
@@ -162,35 +360,51 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
                 AsyncSqliteSaver.from_conn_string(str(db_path().with_name("checkpoints.db")))
             )
             tools = await _connect(mcp_server)
-            rules = await read_json("rules://sats/adult", mcp_server)
-            ctx["colours"] = await read_json("rules://sats/targets", mcp_server)
             ctx["tools"] = {t.name: t for t in tools}
-            ctx["sign_ids"] = {d["name"]: d["id"] for d in rules["discriminators"]}
-            ctx["llm"] = llm or chat_model()
+            await load_chart()  # the chart in use, from the MCP server
+            # The admin's model choice (Admin › Model) when one is saved, else .env
+            ctx["llm"] = llm or chat_model(settings.model(db()))
             url = fhir_url()
-            scale = (rules["id"], rules["name"])  # the rule pack the MCP server scores with
-            write_fhir = (lambda tid: write_committed(tid, url, mcp_server, scale)) if url else None
-            ctx["graph"] = build_graph(
-                ctx["llm"],
-                tools,
-                rules["discriminators"],
-                saver,
-                write_fhir,
-                second_look=os.environ.get("MIZANI_SECOND_LOOK") == "1",
+            # the record names the chart in use when it is written
+            write_fhir = (
+                (lambda tid: write_committed(tid, url, mcp_server, scale_of(tid))) if url else None
             )
+
+            def build(model) -> Any:
+                return build_graph(
+                    model,
+                    tools,
+                    ctx["chart_signs"],
+                    saver,
+                    write_fhir,
+                    second_look=os.environ.get("MIZANI_SECOND_LOOK") == "1",
+                )
+
+            ctx["build"] = build  # rebuilt when the admin changes the model or the chart
+            ctx["graph"] = build(ctx["llm"])
+            charts.interrupted(db())  # an evaluation running when the server stopped
             watcher = asyncio.create_task(watch({t.name: t for t in tools}, mcp_server))
+            follower = asyncio.create_task(follow_chart())
             try:
                 yield
             finally:
                 watcher.cancel()
+                follower.cancel()
 
     app = FastAPI(title="Mizani API", lifespan=lifespan)
+
+    @app.exception_handler(auth.AuthError)
+    async def account_refused(request: Request, exc: auth.AuthError) -> JSONResponse:
+        """A refusal from auth.py (a wrong password, a lock): its own status and words."""
+        return JSONResponse({"detail": str(exc)}, status_code=exc.status)
+
     # Only requests addressed to this machine by name: a web page elsewhere cannot reach the API
     # by pointing its own domain at 127.0.0.1 (DNS rebinding). A ward server adds its address.
     hosts = os.environ.get("MIZANI_ALLOWED_HOSTS", "127.0.0.1,localhost")
     app.add_middleware(
         TrustedHostMiddleware, allowed_hosts=[h.strip() for h in hosts.split(",") if h.strip()]
     )
+    app.add_middleware(Guard)
 
     def thread(run_id: str) -> dict:
         return {"configurable": {"thread_id": run_id}}
@@ -242,8 +456,191 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         run.task = asyncio.create_task(drive(run, entry, run_id))
         return {"triage_id": run_id}
 
+    @app.post("/api/auth/login")
+    async def login(body: Credentials, request: Request, response: Response) -> Account:
+        """Sign in. The session lives in an HttpOnly, SameSite=Strict cookie, Secure over HTTPS."""
+        value, account = await asyncio.get_running_loop().run_in_executor(
+            PASSWORD_CHECKS, lambda: auth.sign_in(db(), body.username, body.password)
+        )
+        secure = request.url.scheme == "https"
+        response.set_cookie(
+            SESSION_COOKIE, value, httponly=True, samesite="strict", secure=secure, path="/"
+        )
+        return account
+
+    @app.post("/api/auth/logout")
+    def logout(request: Request, response: Response, account: SignedIn) -> dict:
+        auth.sign_out(db(), request.cookies[SESSION_COOKIE], account)
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return {"signed_out": True}
+
+    @app.get("/api/auth/me")
+    def me(account: SignedIn) -> Account:
+        """Who is signed in; `must_change` means the page asks for a new password first."""
+        return account
+
+    @app.post("/api/auth/password")
+    def change_password(body: NewPassword, request: Request, account: SignedIn) -> Account:
+        """Change one's own password (the one-time one too). The person's other sessions end."""
+        session = request.cookies[SESSION_COOKIE]
+        return auth.change_password(db(), account, body.current, body.new, session)
+
+    @app.get("/api/admin/users")
+    def users(_: Admin) -> list[Account]:
+        return auth.accounts(db())
+
+    @app.post("/api/admin/users", status_code=201)
+    def add_user(body: NewAccount, admin: Admin) -> dict:
+        """A new account; its one-time password is in this answer only, never stored."""
+        account, otp = auth.create_account(
+            db(), admin.full_name, body.username, body.full_name, body.role
+        )
+        return {"account": account.model_dump(mode="json"), "one_time_password": otp}
+
+    @app.post("/api/admin/users/{account_id}/reset-password")
+    def reset_password(account_id: int, admin: Admin) -> dict:
+        return {"one_time_password": auth.reset_password(db(), admin.full_name, account_id)}
+
+    @app.post("/api/admin/users/{account_id}/role")
+    def set_role(account_id: int, body: RoleChange, admin: Admin) -> Account:
+        return auth.set_role(db(), admin, account_id, body.role)
+
+    @app.post("/api/admin/users/{account_id}/chief")
+    def set_chief(account_id: int, body: ChiefFlag, admin: Admin) -> Account:
+        return auth.set_chief(db(), admin, account_id, body.chief)
+
+    @app.post("/api/admin/users/{account_id}/active")
+    def set_active(account_id: int, body: Activation, admin: Admin) -> Account:
+        return auth.set_active(db(), admin, account_id, body.active)
+
+    @app.post("/api/admin/users/{account_id}/sign-out")
+    def sign_out_everywhere(account_id: int, admin: Admin) -> dict:
+        auth.sign_out_everywhere(db(), admin, account_id)
+        return {"signed_out": True}
+
+    def candidate(body: ModelChoice) -> dict | None:
+        """The choice as `chat_model` takes it; None means this server (.env). A blank key keeps
+        the saved key for the same address."""
+        if body.location == "this_server":
+            return None
+        choice = body.model_dump(exclude={"leaves_hospital_confirmed"})
+        saved = settings.model(db())
+        if not choice["api_key"] and saved and saved.get("base_url") == choice["base_url"]:
+            choice["api_key"] = saved.get("api_key")
+        return choice
+
+    @app.get("/api/admin/model")
+    def model_setting(_: Admin) -> dict:
+        """Where the model runs now; the key is never sent, only whether one is set."""
+        return settings.public_model(db())
+
+    @app.post("/api/admin/model/test")
+    async def test_model(body: ModelChoice, _: Admin) -> dict:
+        """One short call to the chosen server, timed. Nothing is saved, and no patient text is
+        sent: the question is a fixed word."""
+        started = time.perf_counter()
+        try:
+            call = await asyncio.wait_for(
+                call_model(
+                    chat_model(candidate(body)), [HumanMessage("Reply with one word: ready")]
+                ),
+                timeout=MODEL_TEST_SECONDS,
+            )
+        except TimeoutError:
+            return {"ok": False, "error": f"No answer within {MODEL_TEST_SECONDS} s."}
+        except Exception as exc:  # the server refused, the address is wrong, the key is wrong
+            return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:300]}"}
+        return {
+            "ok": True,
+            "seconds": round(time.perf_counter() - started, 1),
+            "model": call.model,
+            "reply": str(call.message.content).strip()[:80],
+        }
+
+    @app.post("/api/admin/model")
+    def save_model(body: ModelChoice, admin: Admin) -> dict:
+        """Save the choice and use it from the next model call; runs already going finish on the
+        model they started with. Audited, with where complaint text goes, never with the key."""
+        choice = candidate(body)
+        settings.save_model(db(), admin.full_name, choice or {"location": "this_server"})
+        ctx["llm"] = chat_model(choice)
+        ctx["graph"] = ctx["build"](ctx["llm"])
+        return settings.public_model(db())
+
+    @app.get("/api/charts")
+    def chart_overview(_: Chief) -> dict:
+        """The chart in use, the one before it, and every upload with its evaluation's state."""
+        return charts.overview(db())
+
+    @app.post("/api/charts", status_code=201)
+    def upload_chart(body: ChartUpload, chief: Chief) -> dict:
+        """Check and keep an uploaded chart and its test patients. It scores nobody yet."""
+        try:
+            return charts.upload(db(), chief.full_name, body.chart_yaml, body.cases_yaml)
+        except charts.ChartError as exc:
+            raise HTTPException(422, str(exc)) from None
+
+    @app.get("/api/charts/{chart_id}")
+    def chart_report(chart_id: int, _: Chief) -> dict:
+        chart = charts.get(db(), chart_id)
+        if chart is None:
+            raise HTTPException(404, f"no chart {chart_id}")
+        return chart
+
+    @app.post("/api/charts/{chart_id}/evaluate", status_code=202)
+    async def evaluate_chart(chart_id: int, chief: Chief) -> dict:
+        """Start the evaluation in a process of its own. One at a time: it uses the desk's model."""
+        chart = charts.get(db(), chart_id, full=False)
+        if chart is None:
+            raise HTTPException(404, f"no chart {chart_id}")
+        if chart["status"] in ("active", "retired"):
+            raise HTTPException(409, f"{chart['label']} has been in use; upload it again to test")
+        if not charts.start(db(), chart_id):  # one statement: it checks that none is running
+            raise HTTPException(409, "An evaluation is already running; wait for it to finish.")
+        audit.event(db(), "chart_evaluation_started", chief.full_name,
+                    {"chart": chart["label"], "model": ctx["llm"].model_name
+                     if hasattr(ctx["llm"], "model_name") else None})  # fmt: skip
+        try:
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "mizani.evals.chart", str(chart_id)
+            )
+        except OSError as exc:  # it never started: the chart must not stay "evaluating"
+            charts.ended(db(), chart_id, None)
+            raise HTTPException(503, f"The evaluation could not start: {exc}") from None
+
+        async def finished() -> None:
+            await process.wait()
+            charts.ended(db(), chart_id, process.returncode)
+
+        ctx["evaluation"] = asyncio.create_task(finished())
+        return charts.get(db(), chart_id, full=False)
+
+    async def put_in_use(ref: str, chief: Account) -> dict:
+        """Activate a chart through the MCP server with the chief doctor's token, then score every
+        new patient with it."""
+        token = issue_approval(f"chart:{ref}", chief, purpose="chart")
+        result = await call_tool("activate_chart", {"chart": ref, "approval_token": token})
+        try:
+            await load_chart()
+            ctx["graph"] = ctx["build"](ctx["llm"])
+        except Exception:  # the chart is in use; follow_chart reloads it within seconds
+            log.exception("chart activated, but reloading it failed")
+        return {**result, "overview": charts.overview(db())}
+
+    @app.post("/api/charts/{chart_id}/activate")
+    async def activate_chart(chart_id: int, chief: Chief) -> dict:
+        return await put_in_use(str(chart_id), chief)
+
+    @app.post("/api/charts/rollback")
+    async def rollback_chart(chief: Chief) -> dict:
+        """One click back to the chart in use before the current one."""
+        previous = charts.overview(db())["previous"]
+        if previous is None:
+            raise HTTPException(409, "The chart Mizani came with is in use; there is none before.")
+        return await put_in_use(previous, chief)
+
     @app.post("/api/intake", status_code=202)
-    async def intake(body: Intake) -> dict:
+    async def intake(body: Intake, _: Nurse) -> dict:
         return start_run(
             {
                 "patient_label": body.patient_label,
@@ -253,7 +650,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         )
 
     @app.post("/api/queue/{triage_id}/retriage", status_code=202)
-    async def retriage(triage_id: str, body: Remeasure) -> dict:
+    async def retriage(triage_id: str, body: Remeasure, _: Nurse) -> dict:
         """Re-score a waiting patient with fresh vitals. Starts a run like intake, without the
         model: the chart signs of the current triage are kept, so only the vitals can change the
         colour. The new proposal waits for a nurse, and replaces the old entry once committed."""
@@ -270,10 +667,15 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             return {"triage_id": open_run}  # a second click returns the re-triage already running
         # The chart signs the complaint gave this triage, with their quotes (the ones the vitals
         # prove are re-proved from the fresh vitals, so a recovered patient loses them).
-        signs = [
-            {"id": ctx["sign_ids"][d["name"]], "quote": d.get("quote") or ""}
+        worded = [
+            d
             for d in record["proposal"]["discriminators"]
             if d["source"].endswith("matched from input: complaint")
+        ]
+        signs = [
+            {"id": ctx["sign_ids"][d["name"]], "quote": d.get("quote") or ""}
+            for d in worded
+            if d["name"] in ctx["sign_ids"]
         ]
         fresh = body.vitals.model_dump(exclude_none=True)
         vitals = {**{k: v for k, v in record["vitals"].items() if v is not None}, **fresh}
@@ -285,9 +687,16 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             "signs": signs,
             "retriage_of": triage_id,
         }
-        # The complaint was never read against the chart (the model did not answer at intake):
-        # the re-check says so again instead of "no chart sign applies".
-        if any(f["kind"] == "signs_not_checked" for f in record["proposal"]["flags"]):
+        # The complaint was never read against the chart now in use: the model did not answer at
+        # intake, or the chief doctor changed the chart since (a sign may be gone, or a new one
+        # may apply). A re-check never calls the model, so it tells the nurse to check the
+        # complaint by hand instead of letting the colour read as "no chart sign applies".
+        scored_with = record["proposal"].get("chart")
+        if (
+            len(signs) < len(worded)
+            or (scored_with is not None and scored_with != charts.active(db())[1])
+            or any(f["kind"] == "signs_not_checked" for f in record["proposal"]["flags"])
+        ):
             entry["fell_back"] = True
         started = start_run(entry)
         retriage_runs[triage_id] = started["triage_id"]
@@ -295,14 +704,22 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
 
     @app.get("/api/triage/{run_id}/stream", response_class=EventSourceResponse)
     async def stream(
+        _: Nurse,
+        request: Request,
         run: Annotated[Run, Depends(get_run)],  # 404 before the stream starts
         last_event_id: Annotated[str | None, Header()] = None,
     ) -> AsyncIterable[ServerSentEvent]:
         sent = int(last_event_id) + 1 if last_event_id and last_event_id.isdigit() else 0
+        cookie = request.cookies.get(SESSION_COOKIE, "")
         while True:
             async with run.changed:
                 await run.changed.wait_for(lambda n=sent: len(run.events) > n)
                 batch = run.events[sent:]
+            # The session as it is now: signed out, deactivated or timed out since the stream
+            # opened, it gets nothing more (the page then asks to sign in again)
+            account = auth.session_account(db(), cookie, touch=False)
+            if account is None or account.role != "nurse":
+                return
             for event, data in batch:
                 yield ServerSentEvent(event=event, data=data, id=str(sent))
                 sent += 1
@@ -310,7 +727,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
                     return
 
     @app.post("/api/triage/{run_id}/decision")
-    async def decision(run_id: str, body: Decision) -> dict:
+    async def decision(run_id: str, body: Decision, nurse: Nurse) -> dict:
         run = await get_run(run_id)
         async with run.lock:
             proposal = await paused_proposal(run, run_id)
@@ -318,7 +735,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
                 raise HTTPException(
                     409, "the proposal changed (re-measured vitals); review the new one first"
                 )
-            token = issue_approval(proposal["triage_id"], body)
+            token = issue_approval(proposal["triage_id"], nurse, body)
             answer = {"action": body.action, "approval_token": token}
             await drive(run, Command(resume=answer), run_id)
             state = await ctx["graph"].aget_state(thread(run_id))
@@ -332,7 +749,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         )
 
     @app.post("/api/triage/{run_id}/vitals", status_code=202)
-    async def remeasure(run_id: str, body: Remeasure) -> dict:
+    async def remeasure(run_id: str, body: Remeasure, _: Nurse) -> dict:
         run = await get_run(run_id)
         async with run.lock:
             await paused_proposal(run, run_id)
@@ -356,13 +773,13 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         return timeline
 
     @app.get("/api/queue/{triage_id}")
-    async def patient(triage_id: str) -> dict:
+    async def patient(triage_id: str, _: Staff) -> dict:
         """One triage record and its handover drafts (the audit is at /api/audit)."""
         timeline = await committed_record(triage_id)
         return {"triage": timeline["triage"], "handovers": timeline["handovers"]}
 
     @app.post("/api/queue/{triage_id}/handover", status_code=201)
-    async def draft_handover(triage_id: str) -> dict:
+    async def draft_handover(triage_id: str, _: Nurse) -> dict:
         """The model drafts the first two lines of the doctor handover from the record; the
         third, the waiting time, comes from the queue, never from the model. The server refuses a
         draft with a number that is not in the record. It stays unreleased until a nurse reads it
@@ -437,66 +854,71 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
                 messages += [call.message, HumanMessage(f"Refused: {refused.detail}. Try again.")]
 
     @app.post("/api/queue/{triage_id}/handover/{draft_id}/release")
-    async def release_handover(triage_id: str, draft_id: int, body: NurseName) -> dict:
-        """A named nurse releases the draft she read. The token names that draft and goes
+    async def release_handover(triage_id: str, draft_id: int, nurse: Nurse) -> dict:
+        """The signed-in nurse releases the draft they read. The token names that draft and goes
         straight to the server; the model never sees it."""
-        decision = NurseDecision(nurse_name=body.nurse_name, action="approve")
-        token = issue_approval(triage_id, decision, purpose="handover", draft_id=draft_id)
+        token = issue_approval(triage_id, nurse, purpose="handover", draft_id=draft_id)
         args = {"triage_id": triage_id, "draft_id": draft_id, "approval_token": token}
         return await call_tool("release_handover", args)
 
     @app.post("/api/queue/{triage_id}/called-in")
-    async def called_in(triage_id: str, body: NurseName) -> dict:
-        """A named nurse records that she called the patient in to be seen. The card leaves the
-        waiting room and the record stays. Only a nurse does this, never the agent; the server
-        refuses it without her token."""
-        decision = NurseDecision(nurse_name=body.nurse_name, action="approve")
-        token = issue_approval(triage_id, decision, purpose="called_in")
+    async def called_in(triage_id: str, person: Staff) -> dict:
+        """A signed-in nurse or doctor records that the patient was called in to be seen ("Seeing
+        this patient" on the doctor's screen). The card leaves the waiting room and the record
+        stays. Never the agent; the server refuses it without the person's token."""
+        token = issue_approval(triage_id, person, purpose="called_in")
         args = {"triage_id": triage_id, "approval_token": token}
         return await call_tool("record_called_in", args)
 
+    @app.get("/api/handovers")
+    async def handover_inbox(_: Doctor) -> list[dict]:
+        """The doctors' inbox: the handovers nurses released, for patients still waiting."""
+        return await read_json("handovers://released", mcp_server)
+
     @app.post("/api/triage/{run_id}/assessment", status_code=201)
-    async def assessment(run_id: str, body: Assessment) -> dict:
+    async def assessment(run_id: str, body: Assessment, nurse: Nurse) -> dict:
         """Shadow mode: the nurse's own colour, sent before the page shows Mizani's."""
         run = await get_run(run_id)
         proposal = await paused_proposal(run, run_id)
-        args = {"triage_id": proposal["triage_id"], **body.model_dump()}
+        args = {"triage_id": proposal["triage_id"], "nurse_name": nurse.full_name,
+                **body.model_dump()}  # fmt: skip
         return await call_tool("record_nurse_assessment", args, {"run_id": run_id})
 
     @app.get("/api/shadow")
-    async def shadow() -> dict:
+    async def shadow(_: Nurse) -> dict:
         return await read_json("report://shadow-agreement", mcp_server)
 
     @app.get("/api/health")
     async def health() -> dict:
         """For Docker's health check: the API answers and its database can be read. The MCP
-        server, the model and FHIR have their own checks, so one broken service shows as one."""
+        server, the model and FHIR have their own checks, so one broken service shows as one.
+        It also says which version runs, without a sign-in (the page shows it, IT checks it)."""
         try:
             db().execute(
                 "SELECT id FROM audit ORDER BY id DESC LIMIT 1"
             ).fetchone()  # reads the file
         except Exception as exc:
             raise HTTPException(503, f"database: {type(exc).__name__}") from exc
-        return {"status": "ok"}
+        return {"status": "ok", "version": __version__}
 
     @app.get("/api/colours")
-    async def colours() -> list[dict]:
+    async def colours(_: Anyone) -> list[dict]:
         return [
             {k: c[k] for k in ("colour", "label", "target_minutes", "source")}
             for c in ctx["colours"]
         ]
 
     @app.get("/api/queue")
-    async def queue() -> list[dict]:
+    async def queue(_: Staff) -> list[dict]:
         # `recheck_due` / `recheck_raised` come from the re-triage watch on the MCP server.
         return await read_json("queue://current", mcp_server)
 
     @app.get("/api/audit")
-    async def audit_log(triage_id: str | None = None) -> list[dict]:
+    async def audit_log(_: Anyone, triage_id: str | None = None) -> list[dict]:
         return audit.entries(db(), triage_id)
 
     @app.get("/api/audit/verify")
-    async def audit_verify() -> dict:
+    async def audit_verify(_: Anyone) -> dict:
         broken = audit.verify_chain(db())
         return {"intact": broken is None, "first_broken_row": broken}
 
@@ -508,8 +930,26 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
     return app
 
 
+def first_sign_in(otp: str) -> str:
+    """The box printed in the server log on a start with no admin password chosen yet."""
+    lines = [
+        "First sign-in to Mizani",
+        f"  user name:          {auth.FIRST_ADMIN[0]}",
+        f"  one-time password:  {otp}",
+        "Open the page, sign in, and choose your own password.",
+        "Until then, every start prints a new one-time password.",
+    ]
+    width = max(len(line) for line in lines) + 2
+    rule = "+" + "-" * width + "+"
+    return "\n".join([rule, *(f"| {line.ljust(width - 1)}|" for line in lines), rule])
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    ensure_secret()  # this install's own, unless .env sets one
+    otp = auth.first_start(db())
+    if otp:
+        print(first_sign_in(otp), flush=True)
     uvicorn.run(
         create_app(),
         host=os.environ.get("MIZANI_API_HOST", "127.0.0.1"),

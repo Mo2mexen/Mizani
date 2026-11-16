@@ -47,6 +47,11 @@ export function clock(time: string | Date): string {
   return new Date(time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true });
 }
 
+/** A date for records about people ("16 Nov 2026"), the same whatever the browser's language. */
+export function day(time: string | Date): string {
+  return new Date(time).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
 export function short(value: unknown, max = 160): string {
   const text = typeof value === "string" ? value : JSON.stringify(value);
   if (text === undefined) return "";

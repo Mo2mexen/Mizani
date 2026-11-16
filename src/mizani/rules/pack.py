@@ -5,19 +5,32 @@ triage scale is a new file and the engine stays. Every clinical rule must cite o
 own references (`sources`), so a value cannot reach the nurse without the rule behind it.
 """
 
+import math
 import os
 import re
 from importlib.resources import files
 from importlib.resources.abc import Traversable
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 DEFAULT_PACK = "sats_adult"
 PACK_NAME = re.compile(r"[a-z0-9_]{1,64}")  # a file name only: no folders, no "..", no extension
+MAX_UPLOAD = 200_000  # characters; the adult SATS chart is about 11,000
+MAX_SPAN = 10_000  # widest plausible range checked value by value (SATS: 260 at most)
+# The coded vitals and every value the intake can send (schemas.Vitals), each needing points
+CODED = {
+    "avpu": ("alert", "confused", "voice", "pain", "unresponsive"),
+    "mobility": ("walking", "with_help", "stretcher"),
+    "trauma": ("true", "false"),
+}
 
 Source = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+# The seven TEWS rows, each scored on every patient: a chart must give all of them
+TewsField = Literal[
+    "respiratory_rate", "heart_rate", "systolic_bp", "temperature", "avpu", "mobility", "trauma"
+]
 
 
 class Rule(BaseModel):
@@ -69,6 +82,30 @@ class Band(Rule):
         )
 
 
+def _joins(bands: list[Band], low: float, high: float) -> str | None:
+    """For a value that can be any decimal (temperature): the bands, in order, must cover the
+    plausible range from `low` to `high` with no gap and no overlap, so every value falls in
+    exactly one. Returns what is wrong, or None."""
+    spans = []
+    for b in bands:
+        start, start_in = (b.gte, True) if b.gte is not None else (b.gt, False)
+        end, end_in = (b.lte, True) if b.lte is not None else (b.lt, False)
+        spans.append((-math.inf if start is None else start, not start_in,
+                      math.inf if end is None else end, end_in))  # fmt: skip
+    spans.sort()
+    first, last = spans[0], spans[-1]
+    if first[0] > low or (first[0] == low and first[1]):
+        return f"no band takes {low:g}"
+    if last[2] < high or (last[2] == high and not last[3]):
+        return f"no band takes {high:g}"
+    for (_, _, end, end_in), (start, start_open, _, _) in zip(spans, spans[1:], strict=False):
+        if end < start or (end == start and not end_in and start_open):
+            return f"no band takes {end:g} or the values just above it"
+        if end > start or (end == start and end_in and not start_open):
+            return f"two bands both take {start:g}"
+    return None
+
+
 class TewsRow(Rule):
     source: Source
     bands: list[Band] | None = None
@@ -99,7 +136,18 @@ class Investigation(Rule):
 
 class Plausible(Rule):
     source: Source
-    ranges: dict[str, tuple[float, float]]
+    # The measured vitals of schemas.Vitals: a range for anything else would crash the check
+    ranges: dict[
+        Literal["respiratory_rate", "heart_rate", "systolic_bp", "temperature", "spo2", "glucose"],
+        tuple[float, float],
+    ]
+
+    @model_validator(mode="after")
+    def low_below_high(self) -> "Plausible":
+        for field, (low, high) in self.ranges.items():
+            if not low < high:
+                raise ValueError(f"plausible.ranges.{field}: the low end must be below the high")
+        return self
 
 
 class RulePack(Rule):
@@ -109,18 +157,7 @@ class RulePack(Rule):
     sources: dict[str, str]
     colours: list[ColourLevel]
     tews_colour: list[TewsColour]
-    tews: dict[
-        Literal[
-            "respiratory_rate",
-            "heart_rate",
-            "systolic_bp",
-            "temperature",
-            "avpu",
-            "mobility",
-            "trauma",
-        ],
-        TewsRow,
-    ]
+    tews: dict[TewsField, TewsRow]
     discriminators: list[DiscriminatorRule]
     investigations: dict[str, Investigation]
     plausible: Plausible
@@ -149,6 +186,57 @@ class RulePack(Rule):
         uncited = [where for where, s in cited if not cites.match(s)]
         if not refs or uncited:
             raise ValueError(f"rules that do not cite one of sources {list(refs)}: {uncited}")
+        return self
+
+    @model_validator(mode="after")
+    def the_engine_can_run_it(self) -> "RulePack":
+        """What the engine relies on, checked before a chart scores anyone: unique sign ids,
+        TEWS colours from the highest total down to 0, every plausible value in exactly one band
+        of its row, every coded value scored, and the four investigations the engine raises."""
+        for what, values in (
+            ("ids", [d.id for d in self.discriminators]),
+            ("names", [d.name for d in self.discriminators]),  # a record keeps a sign's name
+        ):
+            if len(values) != len(set(values)):
+                repeated = sorted({v for v in values if values.count(v) > 1})
+                raise ValueError(f"chart sign {what} repeat: {repeated}")
+        missing = [field for field in get_args(TewsField) if field not in self.tews]
+        if missing:
+            raise ValueError(f"tews has no row for {missing}: TEWS needs all seven")
+        mins = [t.min_total for t in self.tews_colour]
+        if not mins or mins != sorted(mins, reverse=True) or mins[-1] != 0:
+            raise ValueError("tews_colour goes from the highest min_total down to 0")
+        for field, row in self.tews.items():
+            if field in CODED:
+                if row.values is None:
+                    raise ValueError(f"tews.{field} is coded: give its points as values, not bands")
+                missing = set(CODED[field]) - set(row.values)
+                if missing:
+                    raise ValueError(f"tews.{field} gives no points for {sorted(missing)}")
+                continue
+            if not row.bands:
+                raise ValueError(f"tews.{field} is measured: give its points as bands, not values")
+            if field not in self.plausible.ranges:
+                raise ValueError(f"plausible.ranges has no range for tews.{field}")
+            low, high = self.plausible.ranges[field]
+            if not 0 < high - low <= MAX_SPAN:
+                raise ValueError(f"plausible.ranges.{field} must be a range of at most {MAX_SPAN}")
+            if field == "temperature":  # any decimal: the bands must join, with no gap
+                problem = _joins(row.bands, low, high)
+                if problem:
+                    raise ValueError(f"tews.temperature: {problem}")
+                continue
+            for value in range(math.ceil(low), math.floor(high) + 1):  # whole numbers only
+                hits = sum(band.contains(value) for band in row.bands)
+                if hits != 1:
+                    raise ValueError(
+                        f"tews.{field}: the value {value:g} falls in {hits} bands, not exactly one"
+                    )
+        missing = {"check_spo2", "check_glucose", "check_ketones", "ecg"} - set(self.investigations)
+        if missing:
+            raise ValueError(f"investigations missing: {sorted(missing)}")
+        if self.investigations["check_ketones"].glucose_from is None:
+            raise ValueError("investigations.check_ketones needs glucose_from")
         return self
 
     def rank(self, colour: str) -> int:
@@ -180,4 +268,26 @@ def load_pack(name: str | None = None, folder: Traversable | None = None) -> Rul
     pack = RulePack.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
     if pack.id != name:
         raise ValueError(f"rule pack file {name}.yaml has id {pack.id!r}; they must match")
+    return pack
+
+
+def parse_pack(text: str) -> RulePack:
+    """A chart uploaded by the chief doctor, checked like a built-in one: safe YAML only, every
+    clinical rule citing one of its references, and everything the engine relies on."""
+    if len(text) > MAX_UPLOAD:
+        raise ValueError(f"the chart file is over {MAX_UPLOAD:,} characters")
+    try:
+        data = yaml.safe_load(text)
+    except (yaml.YAMLError, RecursionError) as exc:  # RecursionError: nesting thousands deep
+        raise ValueError(f"the chart file is not valid YAML: {exc}") from None
+    if not isinstance(data, dict):
+        raise ValueError("the chart file must be a YAML mapping (id, name, sources, colours, ...)")
+    try:
+        pack = RulePack.model_validate(data)
+    except ValueError:  # pydantic's ValidationError: each message names its place
+        raise
+    except Exception as exc:  # anything a check did not foresee is a refusal, never a crash
+        raise ValueError(f"the chart could not be checked ({type(exc).__name__}: {exc})") from None
+    if not PACK_NAME.fullmatch(pack.id):
+        raise ValueError(f"chart id {pack.id!r}: use lower-case letters, digits and _ only")
     return pack

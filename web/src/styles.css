@@ -222,6 +222,7 @@ input[type="checkbox"] { width: 1.1rem; height: 1.1rem; margin: 0; accent-color:
 .c-orange { --c: var(--sats-orange); }
 .c-yellow { --c: var(--sats-yellow); }
 .c-green { --c: var(--sats-green); }
+.c-unknown { --c: var(--line-strong); }
 
 .confirm {
   margin-top: 0.7rem; border: 2px solid var(--danger); background: var(--danger-bg);
@@ -344,6 +345,162 @@ td.src { display: table-cell; }
 .audit tr.is-error td { color: var(--danger); }
 
 .foot { margin: calc(var(--gap) * 1.5) 0 0; padding: 1rem 0 2.5rem; color: var(--ink-soft); font-size: 0.85rem; line-height: 1.6; border-top: 1px solid var(--line-strong); }
+.foot-version { display: block; font-family: var(--font-num); font-size: 0.75rem; }
+
+/* Signing in: one narrow panel in the middle of the paper, the same on a desk and a tablet. */
+.signin-checking { margin: 30vh auto 0; text-align: center; color: var(--ink-soft); }
+.signin { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 1rem; padding: var(--gap); }
+.signin-brand { display: flex; align-items: center; gap: 0.6rem; }
+.signin-panel { width: min(100vw - 2 * var(--gap), 24rem); }
+.signin-why {
+  margin: 0 0 0.8rem; padding: 0.45rem 0.6rem; font-size: 0.88rem; font-weight: 600;
+  color: var(--warn); background: var(--warn-bg); border-left: 4px solid var(--sats-orange);
+}
+.signin-go { width: 100%; padding: 0.7rem; margin-top: 0.2rem; }
+.signin-foot { margin: 0; max-width: 24rem; text-align: center; color: var(--ink-soft); font-size: 0.82rem; }
+
+/* Who is signed in, at the right of the top bar. */
+.account { display: flex; align-items: center; gap: 0.45rem; position: relative; flex-wrap: wrap; margin-left: auto; }
+.account-who { margin: 0 0.2rem 0 0; display: grid; line-height: 1.2; text-align: right; }
+.account-who strong { font-size: 0.9rem; }
+.account-who span { font-size: 0.78rem; color: var(--ink-soft); }
+.account-menu {
+  position: absolute; right: 0; top: calc(100% + 0.35rem); z-index: 30; display: grid; min-width: 12rem;
+  background: var(--panel); border: 1px solid var(--ink); border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.account-menu button {
+  text-align: left; padding: 0.6rem 0.85rem; border: 0; background: none; cursor: pointer; font-weight: 600;
+}
+.account-menu button + button { border-top: 1px solid var(--line); }
+.account-menu button:hover { background: #ece8dc; }
+.views { display: flex; gap: 0.25rem; }
+.view-tab {
+  border: 1px solid transparent; background: none; padding: 0.4rem 0.8rem; border-radius: var(--radius);
+  font-weight: 600; color: var(--ink-soft); cursor: pointer;
+}
+.view-tab:hover { color: var(--ink); }
+.view-tab[aria-current="page"] { color: var(--ink); border-color: var(--ink); background: var(--panel); }
+.dialog { width: min(26rem, 100vw - 2rem); border: 1px solid var(--line-strong); padding: 1rem 1.1rem; color: var(--ink); }
+.dialog::backdrop { background: rgba(27, 26, 23, 0.4); }
+
+/* The doctor's screen: the waiting room as one ordered list, the handovers beside it. The colour
+   is the row's left edge and its printed name, as on the nurse's waiting room. */
+.doctor {
+  display: grid; gap: var(--gap); align-items: start;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+}
+.dr-list, .inbox { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.6rem; }
+.dr-row {
+  background: var(--panel); border: 1px solid var(--line); border-left: 10px solid var(--c);
+  border-radius: var(--radius); padding: 0.55rem 0.7rem;
+}
+.dr-row-head, .inbox-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.7rem; margin: 0; }
+/* A doctor's row is wide: its confirm buttons sit side by side, unlike a narrow waiting-room card's. */
+.dr-row .card-panel .decision-row { flex-direction: row; }
+.dr-row .card-panel .decision-row > :not(.visually-hidden) { width: auto; }
+.dr-colour { font-size: 0.85rem; font-weight: 700; }
+.inbox-item { border-left: 6px solid var(--c); padding-left: 0.65rem; }
+.inbox-item .handover-text { margin: 0.35rem 0 0.25rem; }
+
+/* Admin › Users: the table of people, the form to add one beside it. */
+.admin {
+  display: grid; gap: var(--gap); align-items: start;
+  grid-template-columns: minmax(0, 2.3fr) minmax(17rem, 1fr);
+}
+.add-person .btn-primary { width: 100%; padding: 0.6rem; }
+.people { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.people th {
+  text-align: left; font-size: 0.8rem; font-weight: 600; color: var(--ink-soft);
+  border-bottom: 2px solid var(--ink); padding: 0.35rem 0.5rem;
+}
+.people td { padding: 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: break-word; }
+.people tbody.is-off td { color: var(--ink-soft); }
+.people td[data-label="User name"] { white-space: nowrap; }
+.person-manage { text-align: right; width: 1%; }
+.person-manage .btn { white-space: nowrap; }
+.person-chief { display: block; }
+.status-warn { color: var(--warn); font-weight: 600; }
+.status-off { color: var(--ink-soft); }
+.person-panel td { background: #faf8f2; border-bottom: 2px solid var(--line-strong); padding: 0.8rem; }
+.person-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.9rem 1.4rem; align-items: start; }
+.person-group > .field-label { margin: 0 0 0.25rem; }
+.person-group > .field-note { margin: 0 0 0.45rem; }
+.confirm-box {
+  margin-top: 0.8rem; padding: 0.6rem 0.75rem; background: var(--panel);
+  border: 1px solid var(--ink); border-radius: var(--radius);
+}
+.confirm-box p { margin: 0 0 0.5rem; font-weight: 600; }
+.otp { border: 2px solid var(--ink); border-radius: var(--radius); background: var(--panel); padding: 0.8rem 0.9rem; margin: 0 0 0.9rem; }
+.otp-title { margin: 0 0 0.45rem; font-weight: 700; }
+.otp-code {
+  display: inline-block; font-family: var(--font-num); font-size: 1.5rem; letter-spacing: 0.06em;
+  padding: 0.3rem 0.65rem; background: #f6f3ea; border: 1px dashed var(--line-strong); border-radius: var(--radius);
+  user-select: all;
+}
+
+/* Admin › Model: one narrow column of choices, the warning in the danger style. */
+.admin-model { max-width: 46rem; }
+.model-now { margin: 0 0 0.6rem; overflow-wrap: anywhere; }
+.model-now code { font-family: var(--font-num); font-size: 0.85rem; }
+.choices { border: 0; padding: 0; margin: 0.8rem 0; display: grid; gap: 0.5rem; }
+.choice {
+  display: flex; gap: 0.65rem; align-items: flex-start; padding: 0.65rem 0.75rem; cursor: pointer;
+  border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel);
+}
+.choice input { margin-top: 0.2rem; width: 1.05rem; height: 1.05rem; accent-color: var(--ink); flex: none; }
+.choice > span { display: grid; gap: 0.15rem; }
+.choice.is-on { border: 2px solid var(--ink); padding: calc(0.65rem - 1px) calc(0.75rem - 1px); }
+.model-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 0.9rem; align-items: start; }
+.leaves {
+  margin: 0.4rem 0 0.9rem; padding: 0.6rem 0.75rem; background: var(--danger-bg);
+  border-left: 4px solid var(--danger); border-radius: var(--radius);
+}
+.leaves p { margin: 0 0 0.4rem; }
+.leaves-title { color: var(--danger); font-weight: 800; }
+@media (max-width: 559px) {
+  .model-fields { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Charts (the chief doctor): one column, the chart in use first. A failed safety check is red. */
+.charts { display: grid; gap: var(--gap); max-width: 64rem; }
+.chart-in-use { margin: 0 0 0.3rem; font-size: 1.05rem; }
+.chart-in-use code, .chart-row-head code { font-family: var(--font-num); font-size: 0.82rem; color: var(--ink-soft); }
+.upload-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 0.9rem; align-items: start; }
+.chart-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.6rem; }
+.chart-row { border: 1px solid var(--line); border-left: 6px solid var(--line-strong); border-radius: var(--radius); padding: 0.6rem 0.75rem; background: var(--panel); }
+.chart-row.status-active { border-left-color: var(--ok); }
+.chart-row.status-evaluating { border-left-color: var(--focus); }
+.chart-row.status-failed, .chart-row.is-unsafe { border-left-color: var(--danger); }
+.chart-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.6rem; }
+.chart-state { margin-left: auto; font-size: 0.85rem; font-weight: 700; }
+.status-active .chart-state { color: var(--ok); }
+.status-failed .chart-state, .is-unsafe .chart-state { color: var(--danger); }
+.report { margin-top: 0.7rem; border-top: 1px dashed var(--line-strong); padding-top: 0.6rem; }
+.report-head { margin: 0 0 0.3rem; }
+.report .audit { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.report .audit th, .report .audit td { text-align: left; padding: 0.3rem 0.4rem; border-bottom: 1px solid var(--line); }
+.safety { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.35rem; }
+.safety li { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: 0.6rem; font-size: 0.9rem; }
+.safety-result { font-weight: 700; color: var(--ok); }
+.safety li.is-failed .safety-result { color: var(--danger); }
+
+@media (max-width: 1023px) {
+  .doctor, .admin { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 559px) {
+  .upload-fields { grid-template-columns: minmax(0, 1fr); }
+  .chart-state { margin-left: 0; }
+}
+/* On a phone the table becomes one block per person, each value under its label. */
+@media (max-width: 819px) {
+  .account-who { text-align: left; }
+  .people thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .people, .people tbody, .people tr, .people td { display: block; width: 100%; }
+  .people tbody { border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 0.6rem; background: var(--panel); }
+  .people td { border-bottom: 0; padding: 0.3rem 0.6rem; }
+  .people td[data-label]::before { content: attr(data-label); display: block; font-size: 0.72rem; color: var(--ink-soft); }
+  .person-manage { text-align: left; padding-bottom: 0.6rem !important; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .trace-wait, .working-dot { animation: none; }

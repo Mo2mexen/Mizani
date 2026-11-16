@@ -6,7 +6,7 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
-from mizani import approval, audit
+from mizani import approval, audit, auth
 from mizani.agent.graph import (
     MAX_ATTEMPTS,
     MODEL_TOOLS,
@@ -19,7 +19,6 @@ from mizani.agent.graph import (
 from mizani.agent.mcp_tools import load_tools, read_json
 from mizani.db import db
 from mizani.mcp_server import mcp
-from mizani.schemas import NurseDecision
 
 pytestmark = pytest.mark.anyio
 
@@ -117,8 +116,20 @@ def waiting(result):
     return pause.value
 
 
+def person(name="Nurse A", role="nurse", chief=False):
+    """An account in the test database, made once ("Nurse A" signs in as nurse.a). It has no
+    password: tests that sign in through the API open a session for it directly."""
+    con, username = db(), name.lower().replace(" ", ".")
+    account = auth.find(con, username) or auth.add_account(con, username, name, role)
+    if chief:
+        con.execute("UPDATE account SET chief_by = 'Admin', chief_at = '2026-11-16T09:00:00+00:00'"
+                    " WHERE id = ?", (account.id,))  # fmt: skip
+        account = auth.get(con, account.id)
+    return account
+
+
 def token(triage_id, nurse="Nurse A"):
-    return approval.issue_approval(triage_id, NurseDecision(nurse_name=nurse, action="approve"))
+    return approval.issue_approval(triage_id, person(nurse))
 
 
 async def test_stops_for_the_nurse_then_commits_with_the_nurse_token():

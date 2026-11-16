@@ -52,22 +52,22 @@ def test_proposal_is_always_pending():
         Proposal(triage_id="t1", colour="green", tews=tews, source="TEWS 0", status="committed")
 
 
-def test_decision_needs_a_named_nurse():
+def test_a_decision_takes_no_name_the_name_comes_from_the_signed_in_account():
     with pytest.raises(ValidationError):
-        NurseDecision(nurse_name=" ", action="approve")
+        NurseDecision(nurse_name="Someone Else", action="approve")
 
 
 def test_override_needs_colour_and_reason():
-    NurseDecision(nurse_name="Nurse A", action="override", colour="orange", reason="looks worse")
+    NurseDecision(action="override", colour="orange", reason="looks worse")
     with pytest.raises(ValidationError):
-        NurseDecision(nurse_name="Nurse A", action="override", colour="orange")
+        NurseDecision(action="override", colour="orange")
     with pytest.raises(ValidationError):
-        NurseDecision(nurse_name="Nurse A", action="override", reason="looks worse")
+        NurseDecision(action="override", reason="looks worse")
 
 
 def test_approve_cannot_change_colour():
     with pytest.raises(ValidationError):
-        NurseDecision(nurse_name="Nurse A", action="approve", colour="red")
+        NurseDecision(action="approve", colour="red")
 
 
 def test_audit_entry_round_trips_as_json():

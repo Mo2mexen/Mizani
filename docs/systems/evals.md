@@ -22,8 +22,11 @@ Runs Mizani's agent against a fixed set of synthetic triage tasks many times wit
 | `messy_variants(cases, seed)` | tasks | one variant per eligible task | none |
 | `run_suite(llm, cases, runs, second_look)` | chat model, tasks, the second-look switch | per-task summaries | as above |
 
+## A chart's evaluation
+The chief doctor's Charts page runs `python -m mizani.evals.chart <id>` (`src/mizani/evals/chart.py`) on an uploaded chart: its own test patients (or the built-in ones in `evals/cases`, for agreement only) 5 times each through the real agent with that chart, on the desk's model, plus the safety checks that must hold before it can be activated. It reuses this runner's checks (`triage_checks`, `commit_gate_checks`, the diagnosis words) and writes its report to the chart's row (charts.md). The Docker image carries `evals/cases` for it.
+
 ## Depends on / used by
-- Depends on: the agent (agent.md), the MCP server, the re-triage watch, the approval module.
+- Depends on: the agent (agent.md), the MCP server, the re-triage watch, the approval module, and `auth.py`: the checks approve as "Eval Nurse", an account the runner adds to each run's own database that no one can sign in to, so the server's role check sees an active nurse as it would at the desk. Measured results are unchanged by this: no task reads the account.
 - Used by: EVALS.md, and anyone comparing models or prompts (run it before and after a change).
 
 ## Safety rules this system enforces

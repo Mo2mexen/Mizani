@@ -6,12 +6,12 @@ In Docker (the `backup` service in docker-compose.yml):
     docker compose down                              # restore only with Mizani stopped
     docker compose run --rm backup restore <folder>  # then: docker compose up
 
-A backup holds the triage database (`mizani.db`: triages, waiting room, audit log), the agent's
-saved runs (`checkpoints.db`), the FHIR store's files (`hapi-data.tar.gz`), `audit-head.json`
-(the audit chain's row count and latest hash) and `manifest.json` (a SHA-256 of every file and
-the owner of each data folder). SQLite files are copied with SQLite's own backup API, so they are
-consistent even while Mizani runs; the FHIR files are only certain to be consistent with the
-stack down, and a backup made while it runs says so.
+A backup holds the triage database (`mizani.db`: triages, waiting room, accounts, audit log),
+the agent's saved runs (`checkpoints.db`), the FHIR store's files (`hapi-data.tar.gz`),
+`audit-head.json` (the audit chain's row count and latest hash) and `manifest.json` (a SHA-256 of
+every file and the owner of each data folder). SQLite files are copied with SQLite's own backup
+API, so they are consistent even while Mizani runs; the FHIR files are only certain to be
+consistent with the stack down, and a backup made while it runs says so.
 
 Copy the "audit head" line somewhere else as well (a notebook, another machine). The chain has no
 key, so someone who can write the data volume could rewrite every row; a head kept elsewhere

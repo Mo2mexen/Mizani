@@ -92,12 +92,14 @@ class Proposal(Sourced):
     tews: Tews
     discriminators: list[Discriminator] = []
     flags: list[Flag] = []
+    # The chart that scored it ("sats_adult, built in", "sats_adult, version 2"); set by the server
+    chart: str | None = None
 
 
 class NurseDecision(Contract):
-    """A named nurse approves the proposal or overrides it with a colour and a reason."""
+    """The signed-in nurse approves the proposal or overrides it with a colour and a reason. The
+    name comes from the nurse's account, never from the request."""
 
-    nurse_name: str = Field(min_length=1)
     action: Literal["approve", "override"]
     colour: str | None = None
     reason: str | None = None
@@ -129,3 +131,25 @@ class AuditEntry(Contract):
     tokens_out: int | None = Field(default=None, ge=0)  # the model's reply
     latency_ms: float = Field(ge=0)
     cost: float = Field(default=0.0, ge=0)
+
+
+Role = Literal["nurse", "doctor", "admin"]
+
+
+class Account(Contract):
+    """A person who signs in, as the page and the admin see them: never the password hash.
+    `chief` is a flag an admin gives a doctor (the chief doctor or clinical lead)."""
+
+    id: int
+    username: str
+    full_name: str  # unique, so a record's "approved by" names one person
+    role: Role
+    chief: bool = False
+    chief_by: str | None = None
+    chief_at: datetime | None = None
+    active: bool = True
+    must_change: bool = False  # signed in with a one-time password: choose your own first
+    locked_until: datetime | None = None
+    created_at: datetime
+    created_by: str | None = None
+    last_login_at: datetime | None = None

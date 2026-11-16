@@ -9,7 +9,7 @@ The part of Mizani that talks to the language model and to our MCP server, and r
 - Re-check watch: `src/mizani/agent/watch.py`
 - The rules for picking a chart sign, shared with the MCP server's `triage_intake` prompt: `src/mizani/prompts.py` (the evaluation measured this wording; a change needs a new evaluation run)
 - Tests: `tests/test_agent_graph.py`, `tests/test_agent_model.py`, `tests/test_agent_tools.py`, `tests/test_agent_watch.py`
-- Settings: `LLM_BASE_URL`, `LLM_MODEL`, `LLM_REASONING_EFFORT`, `LLM_API_KEY` (model), `MIZANI_MCP_URL` (our MCP server), `MIZANI_SECOND_LOOK` (`1` turns the second look on)
+- Settings: the admin's choice in Admin › Model when one is saved (`settings.py`), else `LLM_BASE_URL`, `LLM_MODEL`, `LLM_REASONING_EFFORT`, `LLM_API_KEY` (model), `MIZANI_MCP_URL` (our MCP server), `MIZANI_SECOND_LOOK` (`1` turns the second look on)
 
 ## The triage flow
 One LangGraph run per patient, keyed by a `thread_id`, with a checkpointer so a run survives the wait for the nurse (the API uses LangGraph's SQLite checkpointer).
@@ -36,7 +36,7 @@ Every step adds a trace row (`time`, `kind`, `name`, `input`, `output`, `latency
 Re-check runs: `watch()` asks the server every 30 s to flag patients past their SATS target time (`raise_recheck_flag`; the server checks the timer). It never changes a colour. When the nurse re-measures a flagged patient, the API starts a run with `retriage_of`, the fresh vitals and the patient's current chart signs with their quotes. That run starts at validate and never calls the model, so only the vitals can change the colour; `propose_priority(retriage_of=...)` adds a `retriage` flag saying whether it changed, and the nurse approves it like any proposal.
 
 ## Model client and MCP tools
-1. `chat_model()` builds one OpenAI-compatible chat model from `LLM_BASE_URL` and `LLM_MODEL`. Every request has thinking off (`reasoning_effort: "none"`; set `LLM_REASONING_EFFORT` empty for a server that rejects the field) and temperature 0. A model server that checks keys gets its key from `LLM_API_KEY`; Ollama needs none. Without settings it uses Ollama on the same machine with `qwen3.5:4b-q4_K_M`.
+1. `chat_model(choice)` builds one OpenAI-compatible chat model from the admin's saved choice (address, model, key, thinking; Admin › Model), or, with none saved, from `LLM_BASE_URL` and `LLM_MODEL`. A saved choice never borrows `.env`'s key. When the admin saves a new choice, the API builds the agent again with it; a run already going finishes on the model it started with. Every request has thinking off (`reasoning_effort: "none"`; set `LLM_REASONING_EFFORT` empty for a server that rejects the field) and temperature 0. A model server that checks keys gets its key from `LLM_API_KEY`; Ollama needs none. Without settings it uses Ollama on the same machine with `qwen3.5:4b-q4_K_M`.
 2. `call_model(llm, messages)` runs one model call and returns the reply with the model name, the tokens in (the prompt), out (the reply) and in total, latency in ms and cost (0 for a local model).
 3. `load_tools()` connects to `mizani-triage` with the MCP Python SDK client, lists its tools and wraps each one as a LangChain tool with the server's own argument schema. The agent binds the two it needs to the model, each cut down to the arguments the model fills in (`MODEL_TOOLS`, `_model_view`).
 4. Tools run with `tool.ainvoke(call, with_meta(meta))`. The wrapper opens a connection, calls the tool with `_meta: {model, tokens, tokens_in, tokens_out, cost, run_id}` and returns the tool's text plus its structured result. The server's audit log copies model, tokens (in, out, total) and cost into the row, so every logged call shows which model the run used and what it cost.
@@ -50,7 +50,7 @@ We use the MCP SDK client directly because `langchain-mcp-adapters` only support
 | `build_graph(llm, tools, chart, checkpointer, write_fhir, second_look)` | chat model, MCP tools, chart signs (full entries or ids), optional FHIR writer, the second-look switch | compiled flow | none |
 | run: `ainvoke({patient_label, complaint, nurse_vitals}, thread)` | the nurse's entry | state paused at the nurse: `__interrupt__` with `{proposal, error}`, `trace` | model call, tool calls, pending triage |
 | resume: `ainvoke(Command(resume=answer), thread)` | `{"action": "remeasure", "vitals": {...}}` or `{"action": "approve" \| "override", "approval_token": ...}` | paused again, or `committed` | tool calls, commit |
-| `chat_model()` | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_REASONING_EFFORT`, `LLM_API_KEY` | chat model, thinking off, temperature 0 | none |
+| `chat_model(choice)` | the admin's saved choice, else `LLM_BASE_URL`, `LLM_MODEL`, `LLM_REASONING_EFFORT`, `LLM_API_KEY` | chat model, thinking off, temperature 0 | none |
 | `call_model(llm, messages)` | bound model, messages | `ModelCall`: reply, model, tokens, tokens_in, tokens_out, latency_ms, cost | one model request |
 | `ModelCall.meta()` | | `{model, tokens, tokens_in, tokens_out, cost}` for `_meta` | none |
 | `load_tools(server)` | URL (default `MIZANI_MCP_URL`) or in-process server | one LangChain tool per MCP tool | lists tools on the server |

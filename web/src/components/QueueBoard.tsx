@@ -21,6 +21,8 @@ export function QueueBoard({ colours, queue, onRetriage, onCalledIn }: Props) {
   // Search only hides cards that don't match the label; the order is still the API's.
   const needle = search.trim().toLowerCase();
   const visible = (queue ?? []).filter((e) => !needle || e.patient_label.toLowerCase().includes(needle));
+  // A colour the chart in use lacks (the chart that gave it is no longer in use): its own column, never hidden
+  const others = visible.filter((e) => !colours.some((c) => c.colour === e.colour));
   return (
     <section className="panel queue" aria-labelledby="queue-title">
       <h2 id="queue-title" className="panel-title">
@@ -73,6 +75,24 @@ export function QueueBoard({ colours, queue, onRetriage, onCalledIn }: Props) {
               </div>
             );
           })}
+          {others.length > 0 && (
+            <div className="queue-col c-unknown">
+              <h3 className="queue-head">
+                <span className="swatch" aria-hidden="true" />
+                Not on the chart in use
+                <span className="count">{others.length}</span>
+              </h3>
+              <p className="target">
+                re-check now
+                <span className="src">The chart that gave these colours is no longer in use.</span>
+              </p>
+              <div className="queue-cards">
+                {others.map((e) => (
+                  <Card key={e.triage_id} entry={e} onRetriage={onRetriage} onCalledIn={onCalledIn} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </section>
@@ -144,8 +164,8 @@ function shown(field: string, value: string | number | boolean): string {
   return typeof value === "string" ? (SHOWN[value] ?? value) : `${value}${UNITS[field] ?? ""}`;
 }
 
-/** What was recorded for a saved patient: read-only, straight from the stored record. */
-function Details({ entry }: { entry: QueueEntry }) {
+/** What was recorded for a saved patient: read-only, straight from the stored record. Also on the doctor's screen. */
+export function Details({ entry }: { entry: QueueEntry }) {
   const [record, setRecord] = useState<PatientRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -277,11 +297,9 @@ function Recheck({ entry, onRetriage }: { entry: QueueEntry; onRetriage: (runId:
 
 function Handover({ entry }: { entry: QueueEntry }) {
   const [draft, setDraft] = useState<HandoverDraft | null>(null);
-  const [nurse, setNurse] = useState("");
   const [released, setReleased] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const nameId = `handover-name-${entry.triage_id}`;
 
   async function run(work: () => Promise<void>) {
     setIsBusy(true);
@@ -295,11 +313,10 @@ function Handover({ entry }: { entry: QueueEntry }) {
     }
   }
 
-  function release(e: React.FormEvent) {
-    e.preventDefault();
-    if (!draft || !nurse.trim() || isBusy) return;
+  function release() {
+    if (!draft || isBusy) return;
     void run(async () => {
-      const r = await api.releaseHandover(entry.triage_id, draft.draft_id, nurse.trim());
+      const r = await api.releaseHandover(entry.triage_id, draft.draft_id);
       setReleased(r.approver);
     });
   }
@@ -318,22 +335,18 @@ function Handover({ entry }: { entry: QueueEntry }) {
       )}
       {draft && (
         <>
-          <p className="hint">Draft for the doctor. Read it; it reaches the doctor only when you release it.</p>
+          <p className="hint">
+            Draft for the doctor. Read it; it reaches the doctors' inbox only when you release it, under your name.
+          </p>
           <p className="handover-text" dir="auto">
             {draft.text}
           </p>
           {released ? (
             <p className="ok">Released to the doctor by {released}</p>
           ) : (
-            <form className="decision-row" onSubmit={release}>
-              <label className="visually-hidden" htmlFor={nameId}>
-                Your name
-              </label>
-              <input id={nameId} dir="auto" placeholder="your name" value={nurse} onChange={(e) => setNurse(e.target.value)} />
-              <button type="submit" className="btn btn-primary" disabled={!nurse.trim() || isBusy}>
-                {isBusy ? "Releasing…" : "Release to doctor"}
-              </button>
-            </form>
+            <button type="button" className="btn btn-primary btn-small" disabled={isBusy} onClick={release}>
+              {isBusy ? "Releasing…" : "Release to doctor"}
+            </button>
           )}
         </>
       )}
@@ -346,22 +359,20 @@ function Handover({ entry }: { entry: QueueEntry }) {
   );
 }
 
-/** The nurse records that she called the patient in. Only a named nurse does this; the server
- *  refuses it otherwise. The card leaves the waiting room when the queue reloads. */
+/** The signed-in nurse records that the patient was called in; the server refuses it without
+ *  their token. The card leaves the waiting room when the queue reloads. */
 function CalledIn({ entry, onDone }: { entry: QueueEntry; onDone: () => void }) {
-  const [nurse, setNurse] = useState("");
   const [savedBy, setSavedBy] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const nameId = `called-in-name-${entry.triage_id}`;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!nurse.trim() || isBusy) return;
+    if (isBusy) return;
     setIsBusy(true);
     setError(null);
     try {
-      const saved = await api.calledIn(entry.triage_id, nurse.trim());
+      const saved = await api.calledIn(entry.triage_id);
       setSavedBy(saved.approver);
       onDone();
     } catch (err) {
@@ -383,15 +394,9 @@ function CalledIn({ entry, onDone }: { entry: QueueEntry; onDone: () => void }) 
       <p className="hint">
         The patient has gone in to be seen. The card leaves the waiting room; the record and the audit log stay.
       </p>
-      <div className="decision-row">
-        <label className="visually-hidden" htmlFor={nameId}>
-          Your name
-        </label>
-        <input id={nameId} dir="auto" placeholder="your name" value={nurse} onChange={(e) => setNurse(e.target.value)} />
-        <button type="submit" className="btn btn-primary" disabled={!nurse.trim() || isBusy}>
-          {isBusy ? "Saving…" : "Record called in"}
-        </button>
-      </div>
+      <button type="submit" className="btn btn-primary btn-small" disabled={isBusy}>
+        {isBusy ? "Saving…" : "Record called in"}
+      </button>
       {error && (
         <p className="error" role="alert">
           {error}
