@@ -161,7 +161,7 @@ git pull
 docker compose up -d --build
 ```
 
-Then check the version: the page shows it at the bottom, and so does the health address, which needs no sign-in:
+Then check the version: the sign-in screen and the settings menu (the gear next to your name) show it, and so does the health address, which needs no sign-in:
 
 ```
 curl -k https://<MIZANI_HOSTNAME>/api/health      # {"status":"ok","version":"1.0.0"}
