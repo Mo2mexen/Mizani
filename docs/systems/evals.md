@@ -23,7 +23,7 @@ Runs Mizani's agent against a fixed set of synthetic triage tasks many times wit
 | `run_suite(llm, cases, runs, second_look)` | chat model, tasks, the second-look switch | per-task summaries | as above |
 
 ## Depends on / used by
-- Depends on: the agent (agent.md), the MCP server, the re-triage watch, the approval module.
+- Depends on: the agent (agent.md), the MCP server, the re-triage watch, the approval module, and `auth.py`: the checks approve as "Eval Nurse", an account the runner adds to each run's own database that no one can sign in to, so the server's role check sees an active nurse as it would at the desk. Measured results are unchanged by this: no task reads the account.
 - Used by: EVALS.md, and anyone comparing models or prompts (run it before and after a change).
 
 ## Safety rules this system enforces

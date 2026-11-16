@@ -81,7 +81,8 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     environment:
-      MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-local-demo-secret-change-me}
+      # Empty: each install makes its own secret on the first start (in the data volume).
+      MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-}
       # The names it answers to (DNS-rebinding guard): this machine, and the app by service name.
       MIZANI_ALLOWED_HOSTS: 127.0.0.1,localhost,mizani-mcp
       # The triage chart: a rule pack file in src/mizani/rules/ (default: the adult SATS chart).
@@ -151,7 +152,7 @@ services:
       MIZANI_SECOND_LOOK: ${MIZANI_SECOND_LOOK:-}  # 1 turns on the agent's second look
       MIZANI_MCP_URL: http://mizani-mcp:8000/mcp
       MIZANI_FHIR_MCP_URL: http://fhir-mcp:8000/mcp/
-      MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-local-demo-secret-change-me}
+      MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-}  # empty: the install's own
       MIZANI_API_HOST: 0.0.0.0
       # The names the page may be opened with (DNS-rebinding guard); a ward server adds its own.
       MIZANI_ALLOWED_HOSTS: ${MIZANI_ALLOWED_HOSTS:-127.0.0.1,localhost}

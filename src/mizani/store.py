@@ -101,7 +101,7 @@ def commit(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
         con.execute(
             "UPDATE triage SET status = 'committed', colour = ?, approver = ?, decision = ?,"
             " committed_at = ? WHERE id = ?",
-            (colour, approval["nurse_name"], json.dumps(decision), committed_at, triage_id),
+            (colour, approval["approver"], json.dumps(decision), committed_at, triage_id),
         )
         if record["retriage_of"] is not None:  # the approved re-triage replaces the old entry
             con.execute(
@@ -115,7 +115,7 @@ def commit(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
     return {
         "triage_id": triage_id,
         "colour": colour,
-        "approver": approval["nurse_name"],
+        "approver": approval["approver"],
         "action": approval["action"],
         "committed_at": committed_at,
     }
@@ -191,7 +191,7 @@ def raise_recheck(con: sqlite3.Connection, triage_id: str, pack: RulePack) -> di
 
 
 def call_in(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
-    """A named nurse records that she called a waiting patient in to be seen. The patient leaves
+    """A nurse or doctor records that a waiting patient was called in to be seen. The patient leaves
     the waiting list; the record, its audit rows and its FHIR resources stay. Each token works
     once."""
     con.execute("BEGIN IMMEDIATE")
@@ -210,7 +210,7 @@ def call_in(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
         called_in_at = now().isoformat()
         con.execute(
             "UPDATE triage SET called_in_at = ?, called_in_by = ? WHERE id = ?",
-            (called_in_at, approval["nurse_name"], triage_id),
+            (called_in_at, approval["approver"], triage_id),
         )
         con.execute("COMMIT")
     except BaseException:
@@ -218,7 +218,7 @@ def call_in(con: sqlite3.Connection, triage_id: str, approval: dict) -> dict:
         raise
     return {
         "triage_id": triage_id,
-        "approver": approval["nurse_name"],
+        "approver": approval["approver"],
         "called_in_at": called_in_at,
         "waited_minutes": round(_minutes_since(row["arrived_at"]), 1),
     }
@@ -300,7 +300,7 @@ def release_handover(
         released_at = now().isoformat()
         con.execute(
             "UPDATE handover SET released_by = ?, released_at = ? WHERE id = ?",
-            (approval["nurse_name"], released_at, draft["id"]),
+            (approval["approver"], released_at, draft["id"]),
         )
         con.execute("COMMIT")
     except BaseException:
@@ -309,7 +309,7 @@ def release_handover(
     return {
         "triage_id": triage_id,
         "text": draft["text"],
-        "approver": approval["nurse_name"],
+        "approver": approval["approver"],
         "released_at": released_at,
     }
 
@@ -317,6 +317,25 @@ def release_handover(
 def handovers(con: sqlite3.Connection, triage_id: str) -> list[dict]:
     rows = con.execute("SELECT * FROM handover WHERE triage_id = ? ORDER BY id", (triage_id,))
     return [dict(row) for row in rows]
+
+
+def released_handovers(con: sqlite3.Connection, pack: RulePack) -> list[dict]:
+    """The doctors' inbox: the latest handover a nurse released for each patient still waiting,
+    newest first, with the patient's place in the queue. A patient called in leaves it."""
+    waiting = {entry["triage_id"]: entry for entry in queue(con, pack)}
+    rows = con.execute(
+        "SELECT triage_id, text, released_by, released_at FROM handover"
+        " WHERE released_at IS NOT NULL ORDER BY released_at DESC, id DESC"
+    ).fetchall()
+    keep = ("patient_label", "colour", "waited_minutes", "target_minutes", "recheck_due")
+    inbox, seen = [], set()
+    for row in rows:
+        entry = waiting.get(row["triage_id"])
+        if entry is None or row["triage_id"] in seen:
+            continue
+        seen.add(row["triage_id"])
+        inbox.append({**dict(row), **{k: entry[k] for k in keep}})
+    return inbox
 
 
 def record_assessment(

@@ -2,6 +2,7 @@
 // FAKE DATA: every colour, target time, rule and patient below is made up for the mock only.
 // The real values come from the API (rule pack and engine); the UI never hard-codes them.
 import type {
+  Account,
   AuditRow,
   CalledIn,
   Colour,
@@ -9,14 +10,54 @@ import type {
   Decision,
   HandoverDraft,
   HandoverReleased,
+  InboxEntry,
+  NewAccount,
   PatientRecord,
   Proposal,
   QueueEntry,
+  Role,
   Shadow,
   TraceStep,
   Vitals,
 } from "../types";
-import type { StreamHandlers } from "../api";
+import { ApiError, type StreamHandlers } from "../api";
+
+// FAKE accounts. Sign in with any password; the user name picks the role: "doctor…", "chief…"
+// (a doctor with the chief flag), "admin…", anything else is a nurse. "new…" asks for a new password.
+function fakeAccount(id: number, username: string, full_name: string, role: Role, chief = false): Account {
+  return {
+    id,
+    username,
+    full_name,
+    role,
+    chief,
+    chief_by: chief ? "FAKE Admin" : null,
+    chief_at: chief ? new Date().toISOString() : null,
+    active: true,
+    must_change: false,
+    locked_until: null,
+    created_at: new Date().toISOString(),
+    created_by: "FAKE Admin",
+    last_login_at: null,
+  };
+}
+let people: Account[] = [
+  fakeAccount(1, "admin", "FAKE Admin", "admin"),
+  fakeAccount(2, "nurse.a", "FAKE Nurse A", "nurse"),
+  fakeAccount(3, "doctor.d", "FAKE Doctor D", "doctor"),
+  fakeAccount(4, "chief.c", "FAKE Chief C", "doctor", true),
+];
+let signedIn: Account | null = null;
+
+function update(id: number, change: Partial<Account>): Account {
+  people = people.map((p) => (p.id === id ? { ...p, ...change } : p));
+  return people.find((p) => p.id === id)!;
+}
+
+function whoAmI(): Account {
+  if (!signedIn) throw new ApiError(401, "You are signed out. Sign in again to continue.");
+  return signedIn;
+}
 
 const FAKE_COLOURS: Colour[] = [
   { colour: "red", label: "Emergency", target_minutes: 0, source: "FAKE mock target" },
@@ -68,6 +109,54 @@ const FAKE_PROPOSAL_FOR_RECORD: PatientRecord["proposal"] = {
 };
 
 export const api = {
+  me: async () => whoAmI(),
+  login: async (username: string, _password: string): Promise<Account> => {
+    void _password;
+    const name = username.trim().toLowerCase();
+    const role: Role = name.startsWith("admin") ? "admin" : name.startsWith("doctor") || name.startsWith("chief") ? "doctor" : "nurse";
+    signedIn = {
+      ...fakeAccount(99, name, `FAKE ${name}`, role, name.startsWith("chief")),
+      must_change: name.startsWith("new"),
+    };
+    return signedIn;
+  },
+  logout: async () => {
+    signedIn = null;
+    return { signed_out: true };
+  },
+  changePassword: async (_current: string, next: string): Promise<Account> => {
+    void _current;
+    if (next.length < 10) throw new ApiError(400, "Choose a password of at least 10 characters.");
+    signedIn = { ...whoAmI(), must_change: false };
+    return signedIn;
+  },
+  users: async () => people,
+  addUser: async (username: string, full_name: string, role: Role): Promise<NewAccount> => {
+    const account = { ...fakeAccount(people.length + 10, username, full_name, role), must_change: true };
+    people = [...people, account];
+    return { account, one_time_password: "fake-mock-pass" };
+  },
+  resetPassword: async (id: number) => {
+    update(id, { must_change: true, locked_until: null });
+    return { one_time_password: "fake-mock-pass" };
+  },
+  setRole: async (id: number, role: Role) => update(id, { role, ...(role === "doctor" ? {} : { chief: false, chief_by: null, chief_at: null }) }),
+  setChief: async (id: number, chief: boolean) =>
+    update(id, { chief, chief_by: chief ? whoAmI().full_name : null, chief_at: chief ? now() : null }),
+  setActive: async (id: number, active: boolean) => update(id, { active }),
+  signOutEverywhere: async () => ({ signed_out: true }),
+  handovers: async (): Promise<InboxEntry[]> =>
+    queue.slice(0, 1).map((e) => ({
+      triage_id: e.triage_id,
+      text: "FAKE mock handover: findings line\nwhat set the colour\nWaited 0 min since arrival",
+      released_by: "FAKE Nurse A",
+      released_at: now(),
+      patient_label: e.patient_label,
+      colour: e.colour,
+      waited_minutes: e.waited_minutes,
+      target_minutes: e.target_minutes,
+      recheck_due: e.recheck_due,
+    })),
   colours: async () => FAKE_COLOURS,
   intake: async (patient_label: string, _complaint: string, _vitals: Vitals) => {
     void _complaint;
@@ -78,7 +167,7 @@ export const api = {
     const committed: Committed = {
       triage_id: `mock-${runId}`,
       colour: decision.action === "override" ? (decision.colour ?? "orange") : "orange",
-      approver: decision.nurse_name,
+      approver: whoAmI().full_name,
       action: decision.action,
       committed_at: now(),
     };
@@ -133,13 +222,13 @@ export const api = {
     status: "awaiting_release",
     text: "FAKE mock handover: findings line\nwhat set the colour\ntime waited",
   }),
-  releaseHandover: async (triageId: string, _draftId: number, nurse_name: string): Promise<HandoverReleased> => {
+  releaseHandover: async (triageId: string, _draftId: number): Promise<HandoverReleased> => {
     void _draftId;
-    return { triage_id: triageId, text: "FAKE mock handover", approver: nurse_name, released_at: now() };
+    return { triage_id: triageId, text: "FAKE mock handover", approver: whoAmI().full_name, released_at: now() };
   },
-  calledIn: async (triageId: string, nurse_name: string): Promise<CalledIn> => {
+  calledIn: async (triageId: string): Promise<CalledIn> => {
     queue = queue.filter((e) => e.triage_id !== triageId);
-    return { triage_id: triageId, approver: nurse_name, called_in_at: now(), waited_minutes: 0 };
+    return { triage_id: triageId, approver: whoAmI().full_name, called_in_at: now(), waited_minutes: 0 };
   },
   audit: async () => audit,
   verify: async () => ({ intact: true, first_broken_row: null }),

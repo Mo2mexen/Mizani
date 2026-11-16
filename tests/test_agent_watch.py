@@ -1,13 +1,13 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from test_agent_graph import person
 
 from mizani import approval, audit
 from mizani.agent.mcp_tools import load_tools, read_json
 from mizani.agent.watch import raise_due_rechecks
 from mizani.db import db
 from mizani.mcp_server import mcp
-from mizani.schemas import NurseDecision
 
 pytestmark = pytest.mark.anyio
 
@@ -47,7 +47,7 @@ async def committed(tools, signs):
     tid = (await tools["propose_priority"].ainvoke(call("propose_priority", args))).artifact[
         "triage_id"
     ]
-    token = approval.issue_approval(tid, NurseDecision(nurse_name="Nurse A", action="approve"))
+    token = approval.issue_approval(tid, person("Nurse A"))
     await tools["commit_triage"].ainvoke(
         call("commit_triage", {"triage_id": tid, "approval_token": token})
     )

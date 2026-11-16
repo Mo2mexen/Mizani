@@ -22,6 +22,10 @@ model and the container images, about 7 GB (41 minutes on a 27 Mbit/s line);
 later starts take about 25 seconds and need no internet.
 
 Backups need nothing more: `docker compose run --rm backup` (README, Running it).
+Accounts need nothing more either: the first admin's one-time password is in
+`docker compose logs app`, and `docker compose run --rm --no-deps app mizani-admin`
+creates an admin or resets a password from the server's console. Sign-in uses
+the Python standard library only (scrypt, secrets).
 
 
 2. DEVELOPING IT (the team)

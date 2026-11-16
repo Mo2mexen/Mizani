@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from mcp.client import Client
+from test_agent_graph import person
 
 from mizani import approval, audit
 from mizani.db import db
@@ -54,10 +55,9 @@ async def propose(client, discriminators=(), **meta):
     return data(await client.call_tool("propose_priority", args, meta=meta or None))
 
 
-def token(triage_id, **decision):
-    return approval.issue_approval(
-        triage_id, NurseDecision(nurse_name="Nurse A", **{"action": "approve", **decision})
-    )
+def token(triage_id, who="Nurse A", role="nurse", **decision):
+    decision = NurseDecision(**{"action": "approve", **decision})
+    return approval.issue_approval(triage_id, person(who, role), decision)
 
 
 async def test_tools_listed_with_read_and_action_hints():
@@ -377,12 +377,9 @@ HANDOVER = "\n".join(
 )
 
 
-def handover_token(triage_id, draft_id=1):
+def handover_token(triage_id, draft_id=1, who="Nurse B", role="nurse"):
     return approval.issue_approval(
-        triage_id,
-        NurseDecision(nurse_name="Nurse B", action="approve"),
-        purpose="handover",
-        draft_id=draft_id,
+        triage_id, person(who, role), purpose="handover", draft_id=draft_id
     )
 
 
@@ -423,6 +420,67 @@ async def test_handover_is_drafted_then_released_only_by_a_nurse():
     assert timeline["handovers"][0]["released_by"] == "Nurse B"
     released = [e for e in timeline["audit"] if e["tool"] == "release_handover" and not e["error"]]
     assert released[0]["approver"] == "Nurse B"
+
+
+async def test_only_a_nurse_commits_and_the_account_is_checked_as_it_is_now():
+    async with Client(mcp) as client:
+        tid = (await propose(client, ["chest_pain"]))["triage_id"]
+
+        async def commit_with(approval_token):
+            args = {"triage_id": tid, "approval_token": approval_token}
+            return await client.call_tool("commit_triage", args)
+
+        for who, role in [("Doctor D", "doctor"), ("Admin E", "admin")]:
+            refused = error_text(await commit_with(token(tid, who, role)))
+            assert f"only a nurse may save a triage; this is from a {role}" in refused
+        signed = token(tid)  # Nurse A's, who is then deactivated, then made a doctor
+        db().execute("UPDATE account SET active = 0 WHERE username = 'nurse.a'")
+        assert "not from an active account" in error_text(await commit_with(signed))
+        db().execute("UPDATE account SET active = 1, role = 'doctor' WHERE username = 'nurse.a'")
+        assert "account changed since" in error_text(await commit_with(signed))
+        db().execute("UPDATE account SET role = 'nurse' WHERE username = 'nurse.a'")
+        assert data(await commit_with(signed))["approver"] == "Nurse A"
+    rows = [e for e in audit.entries(db(), tid) if e["tool"] == "commit_triage"]
+    assert [e["error"] for e in rows] == [True, True, True, True, False]
+
+
+async def test_a_doctor_records_called_in_but_releases_no_handover_and_an_admin_neither():
+    async with Client(mcp) as client:
+        tid = (await propose(client, ["chest_pain"]))["triage_id"]
+        await commit(client, tid)
+        d = data(await client.call_tool("draft_handover", {"triage_id": tid, "text": HANDOVER}))
+        doctor_release = handover_token(tid, d["draft_id"], "Doctor D", "doctor")
+        release = {"triage_id": tid, "draft_id": d["draft_id"], "approval_token": doctor_release}
+        refused = error_text(await client.call_tool("release_handover", release))
+        assert "only a nurse may release a handover; this is from a doctor" in refused
+        admin = {"triage_id": tid, "approval_token": called_in_token(tid, "Admin E", "admin")}
+        refused = error_text(await client.call_tool("record_called_in", admin))
+        assert "only a nurse or a doctor may record that a patient was called in" in refused
+        doctor = {"triage_id": tid, "approval_token": called_in_token(tid, "Doctor D", "doctor")}
+        seen = data(await client.call_tool("record_called_in", doctor))
+    assert seen["approver"] == "Doctor D"
+
+
+async def test_the_doctors_inbox_has_the_latest_released_handover_of_each_waiting_patient():
+    async with Client(mcp) as client:
+        tid = (await propose(client, ["chest_pain"]))["triage_id"]
+        await commit(client, tid)
+        assert json.loads(await _read("handovers://released")) == []
+        for text in (HANDOVER, HANDOVER.replace("; chest pain", "; chest pain, sweating")):
+            d = data(await client.call_tool("draft_handover", {"triage_id": tid, "text": text}))
+            approval_token = handover_token(tid, d["draft_id"])
+            release = {
+                "triage_id": tid,
+                "draft_id": d["draft_id"],
+                "approval_token": approval_token,
+            }
+            data(await client.call_tool("release_handover", release))
+        (entry,) = json.loads(await _read("handovers://released"))
+        assert "sweating" in entry["text"] and entry["released_by"] == "Nurse B"
+        assert (entry["triage_id"], entry["colour"], entry["target_minutes"]) == (tid, "orange", 10)
+        seen = {"triage_id": tid, "approval_token": called_in_token(tid, "Doctor D", "doctor")}
+        data(await client.call_tool("record_called_in", seen))
+    assert json.loads(await _read("handovers://released")) == []
 
 
 async def test_a_handover_token_cannot_commit_a_triage():
@@ -633,9 +691,8 @@ async def test_an_override_needs_no_confirmation():
     assert done["colour"] == "green"
 
 
-def called_in_token(triage_id, nurse="Nurse C"):
-    decision = NurseDecision(nurse_name=nurse, action="approve")
-    return approval.issue_approval(triage_id, decision, purpose="called_in")
+def called_in_token(triage_id, nurse="Nurse C", role="nurse"):
+    return approval.issue_approval(triage_id, person(nurse, role), purpose="called_in")
 
 
 async def test_only_a_named_nurse_takes_a_patient_off_the_waiting_list():

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { clock } from "../format";
+import { useAccount } from "../session";
 import type { AuditRow, Shadow } from "../types";
 
 type Props = { isOpen: boolean; onClose: () => void };
@@ -17,8 +18,10 @@ function modelUse(rows: AuditRow[]) {
   return { runs, tokensIn, tokensOut, cost };
 }
 
-/** Every logged tool call, newest first, and whether the hash chain is intact. Escape closes it. */
+/** Every logged tool call and account event (sign-ins, account changes), newest first, and
+ *  whether the hash chain is intact. Escape closes it. */
 export function AuditDrawer({ isOpen, onClose }: Props) {
+  const isNurse = useAccount().role === "nurse"; // the shadow-mode report is the nurses'
   const [rows, setRows] = useState<AuditRow[] | null>(null);
   const [isIntact, setIsIntact] = useState<boolean | null>(null);
   const [shadow, setShadow] = useState<Shadow | null>(null);
@@ -29,7 +32,7 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
 
   function load() {
-    return Promise.all([api.audit(), api.verify(), api.shadow()])
+    return Promise.all([api.audit(), api.verify(), isNurse ? api.shadow() : null])
       .then(
         ([audit, verify, agreement]) => {
           setRows(audit);
@@ -67,7 +70,7 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
     <aside className="drawer" role="dialog" aria-modal="false" aria-labelledby="audit-title">
       <header className="drawer-head">
         <h2 id="audit-title" className="panel-title">
-          Audit log {rows && <span className="count">{rows.length} tool calls</span>}
+          Audit log {rows && <span className="count">{rows.length} entries</span>}
         </h2>
         {isIntact !== null && (
           <span className={isIntact ? "chain ok" : "chain broken"}>
@@ -100,7 +103,9 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
       )}
       <div className="drawer-body" tabIndex={0} aria-label="Audit rows, newest first">
         {rows === null && !error && <p className="empty">Loading the audit log…</p>}
-        {rows?.length === 0 && <p className="empty">No tool calls yet. Every call of every run is logged here.</p>}
+        {rows?.length === 0 && (
+          <p className="empty">Nothing logged yet. Every tool call and every sign-in is logged here.</p>
+        )}
         {rows && rows.length > 0 && (
           <table className="audit">
             <thead>

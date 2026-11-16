@@ -15,7 +15,7 @@ Two features on the server side. The handover is a short note for the doctor, dr
 3. The agent calls `release_handover(triage_id, draft_id, token)`. The server checks the signature, triage, expiry, approver name, purpose (a commit token is refused, and a handover token can't commit) and that the token names this exact draft, so a newer draft can't ride on her approval of an older one. It refuses drafts for a triage a re-triage has replaced, marks the draft released by that nurse, and uses the token up.
 
 ### Shadow mode
-Before the UI shows Mizani's colour, the nurse picks her own. `record_nurse_assessment(triage_id, nurse_name, colour, reason)` stores it once per triage; it never changes the proposal or the queue. `report://shadow-agreement` returns the number assessed, the number that agreed, the agreement rate, and every disagreement with Mizani's cited reason and the nurse's.
+Before the UI shows Mizani's colour, the nurse picks their own. `record_nurse_assessment(triage_id, nurse_name, colour, reason)` stores it once per triage (the API passes the signed-in nurse's name); it never changes the proposal or the queue. `report://shadow-agreement` returns the number assessed, the number that agreed, the agreement rate, and every disagreement with Mizani's cited reason and the nurse's.
 
 ## Interfaces
 | Name | Input | Output | Side effects |
@@ -30,7 +30,7 @@ Before the UI shows Mizani's colour, the nurse picks her own. `record_nurse_asse
 - Used by: the API (handover draft and release, shadow-mode assessment), and the page's handover view and agreement report.
 
 ## Safety rules this system enforces
-- Consequential release needs a named nurse: no handover reaches the doctor without a handover-purpose approval token.
+- Consequential release needs a signed-in nurse: no handover reaches the doctors' inbox without a handover-purpose approval token from a nurse's account (a doctor's or an admin's is refused). Released handovers of waiting patients are in `handovers://released` and on the doctor's screen.
 - Findings only: the prompt asks for findings and forbids diagnosis or treatment advice; the server caps the size and checks every number against the record, and the nurse reads it before release.
 - Shadow mode observes; it never moves a patient or changes a colour.
 
