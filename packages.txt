@@ -21,6 +21,8 @@ MacBook Air M4) and keep about 16 GB of disk free. The first run downloads the
 model and the container images, about 7 GB (41 minutes on a 27 Mbit/s line);
 later starts take about 25 seconds and need no internet.
 
+Backups need nothing more: `docker compose run --rm backup` (README, Running it).
+
 
 2. DEVELOPING IT (the team)
 ---------------------------

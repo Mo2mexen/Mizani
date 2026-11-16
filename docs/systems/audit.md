@@ -21,7 +21,7 @@ Model, tokens, cost and `run_id` come from the `_meta` the agent sends with a to
 
 ## Depends on / used by
 - Depends on: `schemas.AuditEntry`, SQLite.
-- Used by: the MCP server (every call), the `patient://{id}/timeline` resource, the API's `/api/audit` and the eval runner (tokens, latency, cost per run).
+- Used by: the backup (it records the latest hash and refuses a restore whose log does not match it; backup.md), the MCP server (every call), the `patient://{id}/timeline` resource, the API's `/api/audit` and the eval runner (tokens, latency, cost per run).
 
 ## Safety rules this system enforces
 - Every tool call is logged with inputs, outputs, timestamp, approver, model, tokens, latency and cost, refused calls included.
@@ -33,7 +33,7 @@ uv run pytest tests/test_mcp_server.py -k audit
 ```
 
 ## Known limitations
-- The chain shows tampering; it doesn't stop someone with file access from rewriting the whole chain. Publishing the latest hash elsewhere (printed shift report, second machine) would close that gap.
+- The chain shows tampering; it doesn't stop someone with file access from rewriting the whole chain. Every backup records and prints the latest hash (backup.md); keeping that line elsewhere (a printed shift report, a second machine) shows a later rewrite. Mizani does not send it anywhere by itself.
 
 ## Extending it
 New fields go in `AuditEntry` (schemas.py) and are hashed automatically. Changing the JSON layout breaks old hashes, so add fields; don't rename them.
