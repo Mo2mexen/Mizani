@@ -1,6 +1,7 @@
 """The chief doctor's charts: upload checks, the evaluation, activation with a chief's token,
 the chart on every proposal and record, and going back."""
 
+import json
 from importlib.resources import files
 
 import pytest
@@ -10,7 +11,7 @@ from mcp.client import Client
 from test_agent_graph import NORMAL, FakeModel, person, reply
 from test_api import committed_patient, events, intake, session, signed_in
 
-from mizani import approval, charts, store
+from mizani import approval, audit, charts, store
 from mizani.api import SESSION_COOKIE, create_app
 from mizani.db import db
 from mizani.evals import chart as chart_eval
@@ -327,3 +328,40 @@ async def test_a_chart_token_is_used_only_by_an_activation_that_happens():
         db().execute("UPDATE chart SET status = 'evaluated' WHERE id = ?", (chart["id"],))
         again = await activate(token)
     assert "already used" in again.content[0].text
+
+
+async def test_a_chart_in_use_that_no_longer_loads_gives_way_to_the_built_in_one():
+    chart = charts.upload(db(), "Dr Chief", KENYA, CASES)
+    evaluated(chart["id"])
+    charts.activate(db(), str(chart["id"]), "Dr Chief", "nonce-1")
+    async with Client(mcp) as client:
+        args = dict(
+            patient_label="Test Patient 01", complaint="cough", vitals=NORMAL, discriminators=[]
+        )
+        p = (await client.call_tool("propose_priority", args)).structured_content
+        token = approval.issue_approval(p["triage_id"], person("Nurse A"))
+        await client.call_tool(
+            "commit_triage", {"triage_id": p["triage_id"], "approval_token": token}
+        )
+        # An update adds a check this stored chart fails, and a waiting patient's colour is gone
+        stricter = edited(lambda d: d["tews"].pop("trauma"))
+        db().execute("UPDATE chart SET yaml = ? WHERE id = ?", (stricter, chart["id"]))
+        db().execute("UPDATE triage SET colour = 'blue' WHERE id = ?", (p["triage_id"],))
+        charts._cache.clear()  # as after a restart
+        queue = json.loads((await client.read_resource("queue://current")).contents[0].text)
+    assert charts.active(db())[1] == "sats_adult, built in"
+    after = charts.get(db(), chart["id"])
+    assert after["status"] == "failed" and "tews has no row for ['trauma']" in after["progress"]
+    assert [r["tool"] for r in audit.entries(db())].count("chart_unloadable") == 1
+    (entry,) = queue  # still listed, first and due now, instead of a crash
+    assert (entry["colour"], entry["target_minutes"], entry["recheck_due"]) == ("blue", 0, True)
+
+
+def test_the_fhir_record_names_the_chart_that_scored_the_triage():
+    chart = charts.upload(db(), "Dr Chief", KENYA, None)
+    name = parse_pack(KENYA).name
+    assert charts.scale(db(), "sats_kenya, version 1") == ("sats_kenya", name)
+    assert charts.scale(db(), "sats_adult, built in") == ("sats_adult", charts.built_in().name)
+    for unknown in (None, "sats_kenya, version 9", "sats_kenya, version x", "other, built in"):
+        assert charts.scale(db(), unknown) is None
+    assert chart["label"] == "sats_kenya, version 1"

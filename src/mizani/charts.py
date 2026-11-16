@@ -9,6 +9,7 @@ records the chart that scored it, and proposals show it.
 """
 
 import json
+import logging
 import sqlite3
 from datetime import UTC, datetime
 
@@ -23,6 +24,7 @@ from mizani.rules.pack import RulePack, load_pack, parse_pack
 BUILT_IN = "built-in"
 MAX_CASES = 60  # test patients per upload; each runs 5 times on the desk's model
 
+log = logging.getLogger(__name__)
 _cache: dict = {}
 override: RulePack | None = None  # the chart under evaluation, in the evaluation's own process
 
@@ -47,22 +49,73 @@ def label(pack_id: str, version: int | None) -> str:
 
 
 def active(con: sqlite3.Connection) -> tuple[RulePack, str]:
-    """The chart in use and its label. Read each call, parsed only after a change."""
+    """The chart in use and its label. Read each call, parsed only after a change.
+
+    An activated chart that this version of Mizani can no longer load (a check added by an
+    update) is taken out of use, with the reason on the Charts page and in the audit log, and the
+    built-in chart scores from then on: the desk keeps working, and each proposal names it."""
     if override is not None:
         return override, label(override.id, None) + " (under evaluation)"
     row = con.execute(
         "SELECT id, pack_id, version, activated_at FROM chart WHERE status = 'active'"
     ).fetchone()
     key = (str(db_path()), row["id"] if row else None, row["activated_at"] if row else None)
-    if _cache.get("key") != key:
+    cached = _cache.get("active")  # (key, pack, label): one value, so threads never mix them
+    if cached is None or cached[0] != key:
         if row is None:
             pack = built_in()
-            _cache["active"] = (pack, label(pack.id, None))
+            cached = (key, pack, label(pack.id, None))
         else:
             text = con.execute("SELECT yaml FROM chart WHERE id = ?", (row["id"],)).fetchone()[0]
-            _cache["active"] = (parse_pack(text), label(row["pack_id"], row["version"]))
-        _cache["key"] = key
-    return _cache["active"]
+            try:
+                cached = (key, parse_pack(text), label(row["pack_id"], row["version"]))
+            except ValueError as exc:
+                _unloadable(con, row, exc)
+                return active(con)
+        _cache["active"] = cached
+    return cached[1], cached[2]
+
+
+def _why(exc: ValueError) -> str:
+    """What is wrong with a chart, in a line: each of pydantic's messages with its place."""
+    if not isinstance(exc, ValidationError):
+        return str(exc).splitlines()[0]
+    problems = [
+        f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}".removeprefix(": ")
+        for e in exc.errors()[:5]
+    ]
+    return "; ".join(p.replace("Value error, ", "") for p in problems)
+
+
+def _unloadable(con: sqlite3.Connection, row: sqlite3.Row, exc: ValueError) -> None:
+    """Take a chart out of use that no longer loads; the built-in chart is in use after it."""
+    chart = label(row["pack_id"], row["version"])
+    why = _why(exc)
+    log.error("%s no longer loads (%s); the built-in chart is in use", chart, why)
+    con.execute(
+        "UPDATE chart SET status = 'failed', progress = ? WHERE id = ? AND status = 'active'",
+        (f"taken out of use: this version of Mizani cannot load it ({why}); the built-in chart"
+         " is in use. Fix the chart and upload it again.", row["id"]),
+    )  # fmt: skip
+    audit.event(con, "chart_unloadable", "Mizani", {"chart": chart}, {"reason": why}, error=True)
+
+
+def scale(con: sqlite3.Connection, chart_label: str | None) -> tuple[str, str] | None:
+    """The id and name of the chart a triage record names ("sats_kenya, version 2"), for the
+    FHIR record of that triage; None when no such chart is known."""
+    if not chart_label:
+        return None
+    pack_id, _, which = chart_label.partition(", ")
+    if which == "built in":
+        pack = built_in()
+        return (pack.id, pack.name) if pack.id == pack_id else None
+    version = which.removeprefix("version ")
+    if not version.isdigit():
+        return None
+    row = con.execute(
+        "SELECT name FROM chart WHERE pack_id = ? AND version = ?", (pack_id, int(version))
+    ).fetchone()
+    return (pack_id, row["name"]) if row else None
 
 
 def parse_cases(text: str, pack: RulePack) -> list[dict]:
@@ -111,12 +164,7 @@ def upload(con: sqlite3.Connection, actor: str, chart_text: str, cases_text: str
     try:
         pack = parse_pack(chart_text)
     except ValidationError as exc:  # the chart's shape or rules; each message names its place
-        problems = [
-            f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}".removeprefix(": ")
-            for e in exc.errors()[:5]
-        ]
-        reasons = "; ".join(p.replace("Value error, ", "") for p in problems)
-        raise ChartError(f"The chart was refused: {reasons}") from None
+        raise ChartError(f"The chart was refused: {_why(exc)}") from None
     except ValueError as exc:
         raise ChartError(str(exc)) from None
     cases = parse_cases(cases_text, pack) if cases_text and cases_text.strip() else []

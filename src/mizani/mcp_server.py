@@ -254,23 +254,10 @@ def commit_triage(triage_id: str, approval_token: str) -> Committed:
     a sign for the nurse to confirm (`confirm_sign`), the nurse confirmed it or overrode. Only the
     API issues tokens; the agent cannot."""
     try:
-        approval = verify_approval(approval_token, triage_id, db())
-        colours = {c.colour for c in pack().colours}
-        if approval["action"] == "override" and approval["colour"] not in colours:
-            raise ApprovalError(
-                f"override colour '{approval['colour']}' is not a colour of the chart in use"
-            )
-        record = store.get(db(), triage_id)
-        if (
-            approval["action"] == "approve"
-            and record
-            and record["proposal"]["colour"] not in colours
-        ):
-            raise ApprovalError(  # proposed under another rule pack, before a restart
-                f"the proposed colour '{record['proposal']['colour']}' is not in the rule pack in "
-                "use: re-measure for a new proposal, or override"
-            )
-        return Committed(**store.commit(db(), triage_id, approval))
+        con = db()
+        approval = verify_approval(approval_token, triage_id, con)
+        # The chart in use is read inside the commit's transaction (see store.commit)
+        return Committed(**store.commit(con, triage_id, approval, lambda: charts.active(con)))
     except ApprovalError as exc:
         raise ToolError(f"commit refused: {exc}") from None
 
@@ -279,11 +266,13 @@ def commit_triage(triage_id: str, approval_token: str) -> Committed:
 def raise_recheck_flag(triage_id: str) -> Flag:
     """Flag a waiting patient for re-check when their SATS target time has passed. Refused if
     the timer has not run out. It only alerts the nurse: no colour or queue change."""
+    chart = pack()
     try:
-        entry = store.raise_recheck(db(), triage_id, pack())
+        entry = store.raise_recheck(db(), triage_id, chart)
     except ValueError as exc:
         raise ToolError(f"re-check not raised: {exc}") from None
-    target = next(c for c in pack().colours if c.colour == entry["colour"])
+    target = next((c for c in chart.colours if c.colour == entry["colour"]), None)
+    rule = chart.cite(target.source) if target else f"{entry['colour']} is not on the chart in use"
     return Flag(
         kind="recheck_due",
         message=(
@@ -291,7 +280,7 @@ def raise_recheck_flag(triage_id: str) -> Flag:
             f"{entry['minutes_since_triage']:.0f} min ago, target {entry['target_minutes']} min. "
             "Re-check vitals and re-triage."
         ),
-        source=f"{pack().cite(target.source)}; input: committed_at",
+        source=f"{rule}; input: committed_at",
     )
 
 
@@ -468,22 +457,26 @@ DEMO_SECRET = "local-demo-secret-change-me"
 
 
 def pack_fits_the_queue() -> None:
-    """Refuse to start with a rule pack that lacks the colour of a patient still waiting: the
-    queue and the re-check timer could not handle them. (A proposal still pending from the old
-    pack is refused at commit instead; the nurse re-measures or overrides.)"""
-    missing = store.waiting_colours(db()) - {c.colour for c in pack().colours}
+    """Warn at start when the chart in use lacks the colour of a patient still waiting (another
+    MIZANI_RULE_PACK, or an uploaded chart this version can no longer load). Those patients stay
+    on the waiting list, first and due for a re-check now, until a nurse re-checks or calls them
+    in. (A proposal still pending from the old chart is refused at commit; the nurse
+    re-measures.)"""
+    chart = pack()
+    missing = store.waiting_colours(db()) - {c.colour for c in chart.colours}
     if missing:
-        raise SystemExit(
-            f"Chart {pack().id!r} has no colour {sorted(missing)}, which patients in the waiting "
-            "queue have. Call them in under the old chart first, or keep the old chart."
+        print(
+            f"WARNING: chart {chart.id!r} has no colour {sorted(missing)}, which patients in the "
+            "waiting queue have. They are listed first, due for a re-check now: re-check them or "
+            "call them in.",
+            flush=True,
         )
 
 
 def main() -> None:
-    print(
-        f"Rule pack: {pack().id} ({pack().name}), {len(pack().discriminators)} chart signs",
-        flush=True,
-    )
+    chart = pack()
+    signs = len(chart.discriminators)
+    print(f"Rule pack: {chart.id} ({chart.name}), {signs} chart signs", flush=True)
     pack_fits_the_queue()
     ensure_secret()  # this install's own, unless .env sets one
     if os.environ["MIZANI_APPROVAL_SECRET"] == DEMO_SECRET:

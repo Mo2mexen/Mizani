@@ -23,6 +23,7 @@ import sys
 import time
 import uuid
 from collections.abc import AsyncIterable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -58,6 +59,10 @@ FINAL_EVENTS = {"committed", "error"}
 MCP_CONNECT_TRIES = 30  # the MCP server may still be starting (compose)
 MODEL_TEST_SECONDS = 180  # Test connection: a model loading from a hard disk took about 120 s
 SESSION_COOKIE = "mizani_session"
+# A sign-in checks the password with scrypt, slow and memory-hard on purpose. It runs on these few
+# threads of its own, so a burst of sign-ins (anyone can send them) never takes the threads every
+# other request needs, and their memory stays bounded.
+PASSWORD_CHECKS = ThreadPoolExecutor(max_workers=4, thread_name_prefix="password-check")
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 ROLE_NAMES = {
     "nurse": "a nurse",
@@ -336,6 +341,11 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         ctx["chart_signs"] = rules["discriminators"]
         ctx["scale"] = (rules["id"], rules["name"])
 
+    def scale_of(triage_id: str) -> tuple[str, str]:
+        """The chart that scored this triage, for its FHIR record (the chart in use if unknown)."""
+        record = store.get(db(), triage_id)
+        return charts.scale(db(), record and record["chart"]) or ctx["scale"]
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         async with AsyncExitStack() as stack:
@@ -351,7 +361,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             url = fhir_url()
             # the record names the chart in use when it is written
             write_fhir = (
-                (lambda tid: write_committed(tid, url, mcp_server, ctx["scale"])) if url else None
+                (lambda tid: write_committed(tid, url, mcp_server, scale_of(tid))) if url else None
             )
 
             def build(model) -> Any:
@@ -433,10 +443,12 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         return {"triage_id": run_id}
 
     @app.post("/api/auth/login")
-    def login(body: Credentials, request: Request, response: Response) -> Account:
+    async def login(body: Credentials, request: Request, response: Response) -> Account:
         """Sign in. The session lives in an HttpOnly, SameSite=Strict cookie, Secure over HTTPS."""
         try:
-            value, account = auth.sign_in(db(), body.username, body.password)
+            value, account = await asyncio.get_running_loop().run_in_executor(
+                PASSWORD_CHECKS, lambda: auth.sign_in(db(), body.username, body.password)
+            )
         except auth.AuthError as exc:
             raise refused(exc) from None
         secure = request.url.scheme == "https"
@@ -591,12 +603,9 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         chart = charts.get(db(), chart_id, full=False)
         if chart is None:
             raise HTTPException(404, f"no chart {chart_id}")
-        running = db().execute("SELECT id FROM chart WHERE status = 'evaluating'").fetchone()
-        if running:
-            raise HTTPException(409, "An evaluation is already running; wait for it to finish.")
         if chart["status"] in ("active", "retired"):
             raise HTTPException(409, f"{chart['label']} has been in use; upload it again to test")
-        if not charts.start(db(), chart_id):  # another click got there first
+        if not charts.start(db(), chart_id):  # one statement: it checks that none is running
             raise HTTPException(409, "An evaluation is already running; wait for it to finish.")
         audit.event(db(), "chart_evaluation_started", chief.full_name,
                     {"chart": chart["label"], "model": ctx["llm"].model_name
