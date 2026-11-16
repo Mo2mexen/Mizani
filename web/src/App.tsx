@@ -8,7 +8,7 @@ import { Charts } from "./components/Charts";
 import { DoctorView } from "./components/DoctorView";
 import { NurseView } from "./components/NurseView";
 import { SignIn } from "./components/SignIn";
-import { SessionContext, useSession } from "./session";
+import { SessionContext, useSession, useVersion } from "./session";
 import type { Account, Colour } from "./types";
 
 type View = { id: string; label: string };
@@ -55,6 +55,7 @@ function SignedIn({ account, onSwitchUser, onSignOut }: { account: Account; onSw
   const [colours, setColours] = useState<Colour[]>([]);
   const [isShadow, setIsShadow] = useState(false);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
+  const version = useVersion();
   const isNurse = account.role === "nurse";
 
   // Colours come once, but keep asking until the API answers (it may still be starting).
@@ -124,6 +125,7 @@ function SignedIn({ account, onSwitchUser, onSignOut }: { account: Account; onSw
       <footer className="foot">
         Synthetic patients only. Mizani suggests; a signed-in nurse approves every priority. Every number shows the rule
         it came from. Mizani never diagnoses or prescribes.
+        {version && <span className="foot-version">Mizani {version}</span>}
       </footer>
     </div>
   );

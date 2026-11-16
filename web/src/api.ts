@@ -78,6 +78,8 @@ function readableError(data: unknown): string | null {
 export const api = USE_MOCK
   ? mock.api
   : {
+      // Open without a sign-in: the version that runs
+      health: () => call<{ status: string; version: string }>("GET", "/api/health", undefined, true),
       // Signing in and the account
       me: () => call<Account>("GET", "/api/auth/me"),
       login: (username: string, password: string) => call<Account>("POST", "/api/auth/login", { username, password }),

@@ -41,7 +41,7 @@ from mcp.client import Client
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.datastructures import Headers, MutableHeaders
 
-from mizani import audit, auth, charts, settings, store
+from mizani import __version__, audit, auth, charts, settings, store
 from mizani.agent.graph import build_graph
 from mizani.agent.mcp_tools import load_tools, read_json, server_url, with_meta
 from mizani.agent.model import call_model, chat_model
@@ -864,14 +864,15 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
     @app.get("/api/health")
     async def health() -> dict:
         """For Docker's health check: the API answers and its database can be read. The MCP
-        server, the model and FHIR have their own checks, so one broken service shows as one."""
+        server, the model and FHIR have their own checks, so one broken service shows as one.
+        It also says which version runs, without a sign-in (the page shows it, IT checks it)."""
         try:
             db().execute(
                 "SELECT id FROM audit ORDER BY id DESC LIMIT 1"
             ).fetchone()  # reads the file
         except Exception as exc:
             raise HTTPException(503, f"database: {type(exc).__name__}") from exc
-        return {"status": "ok"}
+        return {"status": "ok", "version": __version__}
 
     @app.get("/api/colours")
     async def colours(_: Anyone) -> list[dict]:

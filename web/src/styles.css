@@ -344,6 +344,7 @@ td.src { display: table-cell; }
 .audit tr.is-error td { color: var(--danger); }
 
 .foot { margin: calc(var(--gap) * 1.5) 0 0; padding: 1rem 0 2.5rem; color: var(--ink-soft); font-size: 0.85rem; line-height: 1.6; border-top: 1px solid var(--line-strong); }
+.foot-version { display: block; font-family: var(--font-num); font-size: 0.75rem; }
 
 /* Signing in: one narrow panel in the middle of the paper, the same on a desk and a tablet. */
 .signin-checking { margin: 30vh auto 0; text-align: center; color: var(--ink-soft); }

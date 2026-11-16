@@ -61,7 +61,7 @@ Roles: N nurse, D doctor (the chief doctor too), A admin, chief = a doctor with 
 | `POST /api/queue/{triage_id}/called-in` | N, D | | 200 `{triage_id, approver, called_in_at, waited_minutes}`; 409 not on the waiting list | called-in token for the account; the patient leaves the queue |
 | `POST /api/triage/{id}/assessment` | N | `{colour, reason?}` | 201 `{triage_id, approver, colour}`; 409 already recorded or not waiting | stored assessment |
 | `GET /api/shadow` | N | | `{assessed, agreed, agreement_rate, disagreements[]}` | none |
-| `GET /api/health` | anyone | | 200 `{status: "ok"}` when the API answers and its database can be read (the audit log's last row); 503 otherwise | none (Docker's health check; compose.md) |
+| `GET /api/health` | anyone | | 200 `{status: "ok", version}` (the version in `pyproject.toml`) when the API answers and its database can be read (the audit log's last row); 503 otherwise | none (Docker's health check; compose.md) |
 | `GET /api/colours` | all | | `[{colour, label, target_minutes, source}]` from the rule pack | none |
 | `GET /api/queue` | N, D | | waiting patients by colour then arrival (`queue://current`), with `waited_minutes`, `minutes_since_triage`, `target_minutes`, `recheck_due`, `recheck_raised` | none |
 | `GET /api/audit` | all | optional `triage_id` | every logged tool call and account event, oldest first | none |
