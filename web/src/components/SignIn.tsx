@@ -5,8 +5,7 @@ import type { Account } from "../types";
 
 const WHY: Record<Exclude<SignedOutWhy, null>, string> = {
   idle: `You were signed out after ${IDLE_MINUTES} minutes without use. Sign in to continue.`,
-  switch: "Signed out. The next person can sign in.",
-  signed_out: "You signed out.",
+  signed_out: "Signed out. The next person can sign in.",
   ended: "Your session ended (the time limit, or an admin signed you out). Sign in again to continue.",
 };
 

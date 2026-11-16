@@ -52,14 +52,13 @@ export function App() {
       <SignedIn
         key={account.id}
         account={account}
-        onSwitchUser={() => void session.signOut("switch")}
         onSignOut={() => void session.signOut("signed_out")}
       />
     </SessionContext.Provider>
   );
 }
 
-function SignedIn({ account, onSwitchUser, onSignOut }: { account: Account; onSwitchUser: () => void; onSignOut: () => void }) {
+function SignedIn({ account, onSignOut }: { account: Account; onSignOut: () => void }) {
   const views = viewsFor(account);
   const [view, setView] = useState(views[0].id);
   const [colours, setColours] = useState<Colour[]>([]);
@@ -103,31 +102,33 @@ function SignedIn({ account, onSwitchUser, onSignOut }: { account: Account; onSw
             ))}
           </nav>
         )}
-        {isNurse && (
-          <div className="toggle-wrap">
-            <label className="toggle">
-              <input
-                type="checkbox"
-                checked={isShadow}
-                onChange={(e) => setIsShadow(e.target.checked)}
-                aria-describedby="shadow-help"
-              />
-              Shadow mode
-            </label>
-            <span className="info" tabIndex={0} aria-label="What is shadow mode?">
-              ?
-              <span role="tooltip" id="shadow-help" className="tip">
-                <strong>Shadow mode: you choose first.</strong> For each patient you pick a colour before you see
-                Mizani's, so it can't influence you. Then you decide as usual. Use it for training, or to check how
-                often you and Mizani agree (shown in the audit log).
+        <div className="tools">
+          {isNurse && (
+            <div className="toggle-wrap">
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={isShadow}
+                  onChange={(e) => setIsShadow(e.target.checked)}
+                  aria-describedby="shadow-help"
+                />
+                Shadow mode
+              </label>
+              <span className="info" tabIndex={0} aria-label="What is shadow mode?">
+                ?
+                <span role="tooltip" id="shadow-help" className="tip">
+                  <strong>Shadow mode: you choose first.</strong> For each patient you pick a colour before you see
+                  Mizani's, so it can't influence you. Then you decide as usual. Use it for training, or to check how
+                  often you and Mizani agree (shown in the audit log).
+                </span>
               </span>
-            </span>
-          </div>
-        )}
-        <button type="button" className="btn btn-small" onClick={() => setIsAuditOpen(true)} aria-expanded={isAuditOpen}>
-          Audit log
-        </button>
-        <AccountMenu onSwitchUser={onSwitchUser} onSignOut={onSignOut} />
+            </div>
+          )}
+          <button type="button" className="btn btn-small" onClick={() => setIsAuditOpen(true)} aria-expanded={isAuditOpen}>
+            Audit log
+          </button>
+        </div>
+        <AccountMenu onSignOut={onSignOut} />
       </header>
       {view === "triage" && <NurseView colours={colours} isShadow={isShadow} />}
       {view === "waiting" && <DoctorView colours={colours} />}
