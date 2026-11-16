@@ -13,6 +13,7 @@ export function DoctorView({ colours }: { colours: Colour[] }) {
   const [queue, setQueue] = useState<QueueEntry[] | null>(null);
   const [inbox, setInbox] = useState<InboxEntry[] | null>(null);
   const [offline, setOffline] = useState<string | null>(null);
+  const hasInbox = inbox !== null && inbox.length > 0;
 
   function refresh() {
     return Promise.all([api.queue(), api.handovers()]).then(
@@ -38,13 +39,16 @@ export function DoctorView({ colours }: { colours: Colour[] }) {
           The waiting room could not be loaded ({offline}). This page tries again every few seconds.
         </p>
       )}
-      <main className="doctor">
+      <main className={hasInbox ? "doctor" : "doctor is-solo"}>
         <section className="panel" aria-labelledby="dr-queue-title">
           <h2 id="dr-queue-title" className="panel-title">
             Waiting room
             {queue && <span className="count">{queue.length} waiting</span>}
           </h2>
-          <p className="hint">Most urgent first, then the longest wait. The colours are the ones nurses approved.</p>
+          <p className="hint">
+            Most urgent first, then the longest wait. The colours are the ones nurses approved.
+            {inbox?.length === 0 && " No handovers from nurses yet: they appear beside this list when a nurse releases one."}
+          </p>
           {queue === null && <p className="empty">Loading the waiting room…</p>}
           {queue?.length === 0 && <p className="empty">Nobody is waiting. Patients appear here once a nurse saves their colour.</p>}
           {queue && queue.length > 0 && (
@@ -55,16 +59,12 @@ export function DoctorView({ colours }: { colours: Colour[] }) {
             </ol>
           )}
         </section>
-        <section className="panel" aria-labelledby="inbox-title">
-          <h2 id="inbox-title" className="panel-title">
-            Handovers from nurses
-            {inbox && <span className="count">{inbox.length}</span>}
-          </h2>
-          {inbox === null && <p className="empty">Loading handovers…</p>}
-          {inbox?.length === 0 && (
-            <p className="empty">No handovers yet. When a nurse releases one for a waiting patient, it appears here.</p>
-          )}
-          {inbox && inbox.length > 0 && (
+        {hasInbox && (
+          <section className="panel" aria-labelledby="inbox-title">
+            <h2 id="inbox-title" className="panel-title">
+              Handovers from nurses
+              <span className="count">{inbox.length}</span>
+            </h2>
             <ul className="inbox">
               {inbox.map((h) => (
                 <li key={h.triage_id} className={`inbox-item c-${h.colour}`}>
@@ -83,8 +83,8 @@ export function DoctorView({ colours }: { colours: Colour[] }) {
                 </li>
               ))}
             </ul>
-          )}
-        </section>
+          </section>
+        )}
       </main>
     </>
   );

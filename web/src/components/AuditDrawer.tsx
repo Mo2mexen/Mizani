@@ -6,6 +6,21 @@ import type { AuditRow, Shadow } from "../types";
 
 type Props = { isOpen: boolean; onClose: () => void };
 
+const HEIGHT_KEY = "mizani.auditHeight"; // a per-person convenience in this browser only
+const MIN_HEIGHT = 160;
+const maxHeight = () => Math.round(window.innerHeight * 0.85);
+const clampHeight = (h: number) => Math.min(Math.max(h, MIN_HEIGHT), maxHeight());
+
+function savedHeight(): number {
+  try {
+    const saved = Number(localStorage.getItem(HEIGHT_KEY));
+    if (saved > 0) return clampHeight(saved);
+  } catch {
+    // storage can be blocked: the default height is fine
+  }
+  return clampHeight(Math.round(window.innerHeight * 0.45));
+}
+
 const PAGE = 100; // a busy desk logs thousands of calls; drawing them all at once is slow
 
 /** What the model used across the log: tokens in and out, per agent run, and the cost. */
@@ -28,6 +43,22 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
+  const [height, setHeight] = useState(savedHeight);
+  const dragging = useRef(false);
+
+  // Keep the page's last rows reachable above the drawer, and remember the height
+  useEffect(() => {
+    if (!isOpen) return;
+    document.documentElement.style.setProperty("--audit-drawer", `${height}px`);
+    try {
+      localStorage.setItem(HEIGHT_KEY, String(height));
+    } catch {
+      // not saved: it still works for this visit
+    }
+    return () => {
+      document.documentElement.style.removeProperty("--audit-drawer");
+    };
+  }, [isOpen, height]);
   const [shown, setShown] = useState(PAGE); // newest rows first, a page at a time
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -67,7 +98,35 @@ export function AuditDrawer({ isOpen, onClose }: Props) {
   if (!isOpen) return null;
   const use = rows && modelUse(rows);
   return (
-    <aside className="drawer" role="dialog" aria-modal="false" aria-labelledby="audit-title">
+    <aside className="drawer" role="dialog" aria-modal="false" aria-labelledby="audit-title" style={{ height }}>
+      <div
+        className="drawer-resize"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize the audit log: drag, or use the up and down arrow keys"
+        aria-valuemin={MIN_HEIGHT}
+        aria-valuemax={maxHeight()}
+        aria-valuenow={height}
+        tabIndex={0}
+        onPointerDown={(e) => {
+          dragging.current = true;
+          e.currentTarget.setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          if (dragging.current) setHeight(clampHeight(window.innerHeight - e.clientY));
+        }}
+        onPointerUp={() => {
+          dragging.current = false;
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            setHeight((h) => clampHeight(h + (e.key === "ArrowUp" ? 48 : -48)));
+          }
+        }}
+      >
+        <span className="drawer-grip" aria-hidden="true" />
+      </div>
       <header className="drawer-head">
         <h2 id="audit-title" className="panel-title">
           Audit log {rows && <span className="count">{rows.length} entries</span>}
