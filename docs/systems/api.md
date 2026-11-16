@@ -34,7 +34,7 @@ The HTTP API the nurse's web page talks to. It starts one agent run per patient,
 | `POST /api/queue/{triage_id}/called-in` | `{nurse_name}` | 200 `{triage_id, approver, called_in_at, waited_minutes}`; 409 not on the waiting list; 422 no name | called-in token; the patient leaves the queue |
 | `POST /api/triage/{id}/assessment` | `{nurse_name, colour, reason?}` | 201 `{triage_id, approver, colour}`; 409 already recorded or not waiting | stored assessment |
 | `GET /api/shadow` | | `{assessed, agreed, agreement_rate, disagreements[]}` | none |
-| `GET /api/health` | | 200 `{status: "ok"}` when the API answers and its database can be read; 503 otherwise | none (Docker's health check; compose.md) |
+| `GET /api/health` | | 200 `{status: "ok"}` when the API answers and its database can be read (the audit log's last row); 503 otherwise | none (Docker's health check; compose.md) |
 | `GET /api/colours` | | `[{colour, label, target_minutes, source}]` from the rule pack | none |
 | `GET /api/queue` | | waiting patients by colour then arrival (`queue://current`), with `waited_minutes`, `minutes_since_triage`, `target_minutes`, `recheck_due`, `recheck_raised` | none |
 | `GET /api/audit` | optional `triage_id` | every logged tool call, oldest first | none |

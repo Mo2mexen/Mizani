@@ -787,3 +787,45 @@ def test_health_is_503_when_the_database_cannot_be_read(tmp_path, monkeypatch):
     with TestClient(mcp.streamable_http_app(), base_url="http://127.0.0.1:8000") as http:
         r = http.get("/health")
     assert r.status_code == 503 and r.json()["status"] == "error"
+
+
+def pack_without(colour):
+    from mizani import mcp_server
+
+    return mcp_server.PACK.model_copy(
+        update={"colours": [c for c in mcp_server.PACK.colours if c.colour != colour]}
+    )
+
+
+async def test_the_server_will_not_start_with_a_pack_that_lacks_a_waiting_patients_colour(
+    monkeypatch,
+):
+    from mizani import mcp_server
+
+    async with Client(mcp) as client:
+        p = await propose(client)
+        await client.call_tool(
+            "commit_triage", {"triage_id": p["triage_id"], "approval_token": token(p["triage_id"])}
+        )
+    mcp_server.pack_fits_the_queue()  # the pack in use has the colour: no complaint
+    monkeypatch.setattr(mcp_server, "PACK", pack_without(p["colour"]))
+    with pytest.raises(SystemExit, match="waiting queue"):
+        mcp_server.pack_fits_the_queue()
+
+
+async def test_a_proposal_from_another_pack_cannot_be_approved_only_overridden(monkeypatch):
+    from mizani import mcp_server
+
+    async with Client(mcp) as client:
+        p = await propose(client)
+        monkeypatch.setattr(mcp_server, "PACK", pack_without(p["colour"]))
+        r = await client.call_tool(
+            "commit_triage", {"triage_id": p["triage_id"], "approval_token": token(p["triage_id"])}
+        )
+        assert "not in the rule pack in use" in error_text(r)
+        other = next(c.colour for c in mcp_server.PACK.colours)
+        t = token(p["triage_id"], action="override", colour=other, reason="re-assessed")
+        ok = await client.call_tool(
+            "commit_triage", {"triage_id": p["triage_id"], "approval_token": t}
+        )
+    assert data(ok)["colour"] == other

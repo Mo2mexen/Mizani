@@ -75,6 +75,8 @@ services:
   # Reachable from other services at http://mizani-mcp:8000/mcp, and from this machine only
   # at http://127.0.0.1:8000/mcp (for MCP Inspector).
   mizani-mcp:
+    # One image for mizani-mcp, app and backup, so `docker compose up --build` refreshes all three.
+    image: mizani:local
     build:  # built from the repo root; the Dockerfile and its ignore file live in docker/
       context: .
       dockerfile: docker/Dockerfile
@@ -136,6 +138,7 @@ services:
   # The nurse's page, the API and the agent. Shares mizani-data with the MCP server to read
   # the audit log; agent checkpoints go to /data/checkpoints.db. Reachable from this machine only.
   app:
+    image: mizani:local
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -178,6 +181,7 @@ services:
   # Root, because HAPI's volume is private to its own user; restored files go back to each
   # volume's owner. Details: docs/systems/backup.md.
   backup:
+    image: mizani:local  # the image `docker compose up --build` builds; built here if missing
     build:
       context: .
       dockerfile: docker/Dockerfile

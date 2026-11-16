@@ -1,9 +1,10 @@
 """FHIR R4 records for a committed triage, written through wso2's fhir-mcp-server.
 
 Only committed triages are written. Each becomes a Patient (the synthetic label only), an
-Encounter with status "triaged" and the SATS colour as its priority, and Observations: the
+Encounter with status "triaged" and the triage colour as its priority, and Observations: the
 vital signs with their FHIR R4 vital-signs LOINC codes, plus the TEWS score and the remaining
-SATS inputs under a local code system, since they have no standard code.
+chart inputs under a local code system named after the rule pack in use (`urn:mizani:sats-adult`
+for the default), since they have no standard code.
 """
 
 import json
@@ -20,7 +21,8 @@ from mizani.schemas import AuditEntry
 
 LOINC = "http://loinc.org"
 UCUM = "http://unitsofmeasure.org"
-SATS = "urn:mizani:sats-adult"  # local codes for SATS concepts without a standard code
+# The rule pack that scored the triage: (id, name), from `rules://sats/adult` in the API.
+DEFAULT_SCALE = ("sats_adult", "South African Triage Scale (SATS), adult")
 CATEGORY = "http://terminology.hl7.org/CodeSystem/observation-category"
 
 # FHIR R4 vital signs profile (hl7.org/fhir/R4/observation-vitalsigns.html); glucose: LOINC
@@ -39,6 +41,11 @@ SATS_INPUTS = {
 }
 
 
+def _system(scale: tuple[str, str]) -> str:
+    """Local codes for the chart's concepts without a standard code, e.g. urn:mizani:sats-adult."""
+    return f"urn:mizani:{scale[0].replace('_', '-')}"
+
+
 def _category(code: str) -> list[dict]:
     return [{"coding": [{"system": CATEGORY, "code": code}]}]
 
@@ -52,7 +59,7 @@ def patient(record: dict) -> dict:
     }
 
 
-def encounter(record: dict, patient_ref: str) -> dict:
+def encounter(record: dict, patient_ref: str, scale: tuple[str, str] = DEFAULT_SCALE) -> dict:
     decision = record["decision"]
     return {
         "resourceType": "Encounter",
@@ -64,8 +71,11 @@ def encounter(record: dict, patient_ref: str) -> dict:
             "display": "emergency",
         },
         "priority": {
-            "coding": [{"system": f"{SATS}:colour", "code": record["colour"]}],
-            "text": f"SATS {record['colour']} ({decision['action']} by {record['approver']})",
+            "coding": [{"system": f"{_system(scale)}:colour", "code": record["colour"]}],
+            "text": (
+                f"{record['colour']} on the {scale[1]} "
+                f"({decision['action']} by {record['approver']})"
+            ),
         },
         "subject": {"reference": patient_ref},
         "period": {"start": record["arrived_at"]},
@@ -86,7 +96,9 @@ def _observation(code: dict, value: dict, refs: tuple[str, str], when: str, cate
     }
 
 
-def observations(record: dict, patient_ref: str, encounter_ref: str) -> list[dict]:
+def observations(
+    record: dict, patient_ref: str, encounter_ref: str, scale: tuple[str, str] = DEFAULT_SCALE
+) -> list[dict]:
     vitals, proposal = record["vitals"], record["proposal"]
     refs, when = (patient_ref, encounter_ref), record["committed_at"]
     out = []
@@ -104,13 +116,13 @@ def observations(record: dict, patient_ref: str, encounter_ref: str) -> list[dic
         out.append(_observation(panel, {"component": [systolic]}, refs, when, "vital-signs"))
     for field, text in SATS_INPUTS.items():
         if vitals.get(field) is not None:
-            code = {"coding": [{"system": SATS, "code": field}], "text": text}
+            code = {"coding": [{"system": _system(scale), "code": field}], "text": text}
             value = {"valueString": str(vitals[field]).lower()}
             out.append(_observation(code, value, refs, when, "survey"))
     tews = proposal["tews"]
     out.append(
         _observation(
-            {"coding": [{"system": SATS, "code": "tews"}], "text": "SATS adult TEWS"},
+            {"coding": [{"system": _system(scale), "code": "tews"}], "text": f"TEWS ({scale[1]})"},
             {
                 "valueInteger": tews["total"],
                 "note": [
@@ -137,7 +149,7 @@ def _created_id(result: Any) -> str:
     return data["id"]
 
 
-async def write_triage(client, record: dict) -> dict:
+async def write_triage(client, record: dict, scale: tuple[str, str] = DEFAULT_SCALE) -> dict:
     """Write one committed triage through an MCP client connected to wso2's fhir-mcp-server.
     Returns the FHIR ids. Refuses anything that a nurse hasn't committed."""
     if record["status"] != "committed":
@@ -147,12 +159,12 @@ async def write_triage(client, record: dict) -> dict:
         await client.call_tool("create", {"type": "Patient", "payload": patient(record)})
     )
     created["Patient"] = pid
-    enc = encounter(record, f"Patient/{pid}")
+    enc = encounter(record, f"Patient/{pid}", scale)
     eid = _created_id(await client.call_tool("create", {"type": "Encounter", "payload": enc}))
     created["Encounter"] = eid
     created["Observation"] = [
         _created_id(await client.call_tool("create", {"type": "Observation", "payload": obs}))
-        for obs in observations(record, f"Patient/{pid}", f"Encounter/{eid}")
+        for obs in observations(record, f"Patient/{pid}", f"Encounter/{eid}", scale)
     ]
     return created
 
@@ -162,7 +174,9 @@ def fhir_url() -> str | None:
     return os.environ.get("MIZANI_FHIR_MCP_URL") or None
 
 
-async def write_committed(triage_id: str, url: str, mizani_server: Any = None) -> dict:
+async def write_committed(
+    triage_id: str, url: str, mizani_server: Any = None, scale: tuple[str, str] = DEFAULT_SCALE
+) -> dict:
     """The agent's commit step: write a committed triage to FHIR and log the call.
 
     The write goes to the borrowed MCP server, so our server's middleware never sees it; this
@@ -174,7 +188,7 @@ async def write_committed(triage_id: str, url: str, mizani_server: Any = None) -
     try:
         timeline = await read_json(f"patient://{triage_id}/timeline", mizani_server)
         async with Client(url, mode="legacy") as client:  # wso2 runs MCP SDK 1.x
-            ids = await write_triage(client, timeline["triage"])
+            ids = await write_triage(client, timeline["triage"], scale)
     except Exception as exc:
         error = f"FHIR write failed: {exc}"
     audit.record(

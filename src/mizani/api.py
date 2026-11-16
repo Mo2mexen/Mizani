@@ -168,7 +168,8 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             ctx["sign_ids"] = {d["name"]: d["id"] for d in rules["discriminators"]}
             ctx["llm"] = llm or chat_model()
             url = fhir_url()
-            write_fhir = (lambda tid: write_committed(tid, url, mcp_server)) if url else None
+            scale = (rules["id"], rules["name"])  # the rule pack the MCP server scores with
+            write_fhir = (lambda tid: write_committed(tid, url, mcp_server, scale)) if url else None
             ctx["graph"] = build_graph(
                 ctx["llm"],
                 tools,
@@ -471,7 +472,9 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         """For Docker's health check: the API answers and its database can be read. The MCP
         server, the model and FHIR have their own checks, so one broken service shows as one."""
         try:
-            db().execute("SELECT 1").fetchone()
+            db().execute(
+                "SELECT id FROM audit ORDER BY id DESC LIMIT 1"
+            ).fetchone()  # reads the file
         except Exception as exc:
             raise HTTPException(503, f"database: {type(exc).__name__}") from exc
         return {"status": "ok"}
