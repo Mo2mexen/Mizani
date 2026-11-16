@@ -59,15 +59,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .topbar .tools { grid-area: tools; justify-self: end; }
 .topbar .account { grid-area: person; justify-self: end; }
 .tools { display: flex; align-items: center; gap: 0.6rem var(--gap); }
-@media (max-width: 1279px) { .brand-sub { display: none; } }
 @media (max-width: 1023px) {
   .topbar { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand person" "views tools"; }
 }
-/* Name and tagline share a baseline; the logo is centred on the name. */
+/* The logo is centred on the name. */
 .brand { display: flex; align-items: baseline; gap: 0.2rem 0.65rem; flex-wrap: wrap; min-width: 0; }
 .brand-logo { display: block; width: 30px; height: 30px; border-radius: 6px; flex: none; align-self: center; }
 .brand-name { margin: 0; font-size: 1.6rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
-.brand-sub { color: var(--ink-soft); font-size: 0.9rem; }
 .toggle { display: flex; gap: 0.4rem; align-items: center; font-size: 0.9rem; cursor: pointer; }
 .toggle-note { color: var(--ink-soft); font-size: 0.8rem; }
 .toggle-wrap { display: flex; align-items: center; gap: 0.4rem; position: relative; }

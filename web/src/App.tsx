@@ -44,7 +44,7 @@ export function App() {
         why={null}
         pending={account}
         onSignedIn={session.signIn}
-        onSignOut={() => void session.signOut("signed_out")}
+        onSignOut={() => void session.signOut()}
       />
     );
   return (
@@ -52,7 +52,7 @@ export function App() {
       <SignedIn
         key={account.id}
         account={account}
-        onSignOut={() => void session.signOut("signed_out")}
+        onSignOut={() => void session.signOut()}
       />
     </SessionContext.Provider>
   );
@@ -85,7 +85,6 @@ function SignedIn({ account, onSignOut }: { account: Account; onSignOut: () => v
         <div className="brand">
           <img className="brand-logo" src="/favicon.svg" alt="" width="30" height="30" />
           <h1 className="brand-name">Mizani</h1>
-          <span className="brand-sub">Triage co-pilot for the adult SATS chart. The nurse decides.</span>
         </div>
         {views.length > 1 && (
           <nav className="views" aria-label="Screens">

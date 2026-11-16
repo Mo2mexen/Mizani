@@ -33,8 +33,8 @@ export function roleName(account: Account): string {
   return account.role === "admin" ? "Admin" : "Nurse";
 }
 
-/** Why the sign-in screen is showing; null on a first visit. */
-export type SignedOutWhy = "idle" | "signed_out" | "ended" | null;
+/** Why Mizani signed the person out by itself; null when they signed out or on a first visit. */
+export type SignedOutWhy = "idle" | "ended" | null;
 
 export function useSession() {
   const [account, setAccount] = useState<Account | null>(null);
@@ -62,7 +62,7 @@ export function useSession() {
     return () => window.removeEventListener(SIGNED_OUT_EVENT, ended);
   }, []);
 
-  const signOut = useCallback(async (reason: Exclude<SignedOutWhy, null>) => {
+  const signOut = useCallback(async (reason: SignedOutWhy = null) => {
     leaving.current = true;
     try {
       await api.logout();
