@@ -161,6 +161,34 @@ export type Account = {
 /** POST /api/admin/users: the one-time password is in this answer only. */
 export type NewAccount = { account: Account; one_time_password: string };
 
+/** Where the model runs (Admin › Model). "this_server" is the model that came with Mizani (.env). */
+export type ModelLocation = "this_server" | "hospital" | "cloud";
+
+/** GET /api/admin/model: the key itself never comes back, only whether one is set. */
+export type ModelSetting = {
+  location: ModelLocation;
+  base_url: string;
+  model: string;
+  reasoning_effort: string | null;
+  has_key: boolean;
+  updated_at: string | null;
+  updated_by: string | null;
+  /** The model .env sets up on this server, shown for the "This server" choice. */
+  this_server: { base_url: string; model: string };
+};
+
+/** POST /api/admin/model and /api/admin/model/test. An empty api_key keeps the saved key for the same address. */
+export type ModelChoice = {
+  location: ModelLocation;
+  base_url?: string;
+  model?: string;
+  api_key?: string;
+  reasoning_effort?: string;
+  leaves_hospital_confirmed?: boolean;
+};
+
+export type ModelTest = { ok: true; seconds: number; model: string; reply: string } | { ok: false; error: string };
+
 /** One row of the doctors' inbox (GET /api/handovers): the latest handover a nurse released, for a patient still waiting. */
 export type InboxEntry = {
   triage_id: string;

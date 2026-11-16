@@ -1,8 +1,13 @@
 # Running the model on another machine
 
-Mizani's agent reaches the language model through one OpenAI-compatible address, set by `LLM_BASE_URL` and `LLM_MODEL`. By default that address is Ollama on the same machine. You can point it at a stronger machine on your network instead: a desktop with a bigger GPU that several developers share, or one GPU server for every triage desk in a department. The code stays the same.
+Mizani's agent reaches the language model through one OpenAI-compatible address. By default that address is Ollama on the same machine. You can point it at a stronger machine instead: a GPU server on the hospital network, a desktop with a bigger GPU that several developers share, or a GPU rented in the cloud for evaluations. The code stays the same.
 
 The default setup still runs everything on one machine with `docker compose up`. A remote model is optional.
+
+## Two ways to choose the model
+
+- **In the page, Admin › Model** (since the production build of 16 Nov 2026). An admin picks "This server", "A GPU server in this hospital" or "A cloud GPU server", gives the address, the model name and, if the server asks for one, an API key, and presses "Test connection", which sends one short fixed question (no patient text) and shows how long the answer took. Save applies it to the next patient without a restart; a patient already being read finishes on the model it started with. The choice is stored on the server, in the triage database; the key is never shown again and never written to the audit log. A cloud server must use `https://`, and the admin must tick "I understand that complaint text will leave this hospital"; every change is in the audit log, with where complaint text goes. "This server" goes back to the `.env` settings below.
+- **In `.env`**: `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` and `LLM_REASONING_EFFORT`. They decide when no choice is saved in the page, and they are what `docker compose up` uses to download and load the model that came with Mizani.
 
 ## Speed
 
@@ -24,7 +29,7 @@ ipconfig
 
 `-Profile Private` opens the port only on networks Windows marks as private, never on public Wi-Fi. Note the IPv4 address that `ipconfig` prints. On macOS or Linux, set `OLLAMA_HOST` as described in the [Ollama FAQ](https://docs.ollama.com/faq).
 
-On each machine that runs Mizani, in `.env`:
+On each machine that runs Mizani, choose "A GPU server in this hospital" in Admin › Model with the address `http://<model-machine-ip>:11434/v1` and the model `qwen3.5:9b-q4_K_M`, or put the same in `.env`:
 
 ```
 LLM_BASE_URL=http://<model-machine-ip>:11434/v1
@@ -38,6 +43,10 @@ To check the connection, `curl.exe http://<model-machine-ip>:11434/api/tags` sho
 Install [Tailscale](https://tailscale.com/download) (free for personal use) on the model machine and on each machine that runs Mizani, and sign them in to the same tailnet. Use the model machine's Tailscale address (it starts with `100.`) in `LLM_BASE_URL`. If requests time out, check that the firewall rule above applies to the network profile Windows gave the Tailscale adapter.
 
 Do not forward port 11434 on a router or expose it to the internet in any other way. Ollama has no authentication, so anyone who finds the port can use the GPU and read every prompt sent to it, which in Mizani includes complaint text.
+
+## A cloud GPU
+
+A server outside the hospital is chosen as "A cloud GPU server" in Admin › Model. It must answer on `https://` with an API key (for example vLLM or Ollama behind a reverse proxy that checks a key); Mizani refuses an `http://` address for it, because the complaint text and the key would cross the internet unencrypted. Every patient's complaint and vitals go to that server, so use one only where the hospital's data-protection rules allow it, and until then with synthetic patients only. Start it for demos and evaluations and stop it after: a GPU left running is billed by the hour.
 
 ## What stays the same
 

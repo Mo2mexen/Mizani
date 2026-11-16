@@ -11,6 +11,9 @@ import type {
   HandoverDraft,
   HandoverReleased,
   InboxEntry,
+  ModelChoice,
+  ModelSetting,
+  ModelTest,
   NewAccount,
   PatientRecord,
   QueueEntry,
@@ -56,7 +59,14 @@ function readableError(data: unknown): string | null {
   const detail = (data as { detail?: unknown } | null)?.detail;
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) {
-    return detail.map((d: { loc?: unknown[]; msg?: string }) => `${(d.loc ?? []).slice(1).join(".")}: ${d.msg}`).join("; ");
+    return detail
+      .map((d: { loc?: unknown[]; msg?: string }) => {
+        const where = (d.loc ?? []).slice(1).join(".");
+        // A check on the whole request has no field; pydantic prefixes its own message with "Value error, ".
+        const text = (d.msg ?? "").replace(/^Value error, /, "");
+        return where ? `${where}: ${text}` : text.charAt(0).toUpperCase() + text.slice(1);
+      })
+      .join("; ");
   }
   return null;
 }
@@ -80,6 +90,10 @@ export const api = USE_MOCK
       setChief: (id: number, chief: boolean) => call<Account>("POST", `/api/admin/users/${id}/chief`, { chief }),
       setActive: (id: number, active: boolean) => call<Account>("POST", `/api/admin/users/${id}/active`, { active }),
       signOutEverywhere: (id: number) => call<{ signed_out: boolean }>("POST", `/api/admin/users/${id}/sign-out`),
+      // Admin › Model
+      modelSetting: () => call<ModelSetting>("GET", "/api/admin/model"),
+      testModel: (choice: ModelChoice) => call<ModelTest>("POST", "/api/admin/model/test", choice),
+      saveModel: (choice: ModelChoice) => call<ModelSetting>("POST", "/api/admin/model", choice),
       // The desk
       colours: () => call<Colour[]>("GET", "/api/colours", undefined, true),
       intake: (patient_label: string, complaint: string, vitals: Vitals) =>

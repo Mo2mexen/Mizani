@@ -4,6 +4,7 @@ or deleting any past row breaks the chain from that point on."""
 import hashlib
 import json
 import sqlite3
+from datetime import UTC, datetime
 
 from mizani.schemas import AuditEntry
 
@@ -51,6 +52,31 @@ def record(
         con.execute("ROLLBACK")
         raise
     return digest
+
+
+def event(
+    con: sqlite3.Connection,
+    name: str,
+    actor: str | None,
+    inputs: dict,
+    outputs: dict | None = None,
+    error: bool = False,
+) -> str:
+    """A row for something done in the page rather than through an MCP tool (a sign-in, an
+    account change, the admin's model choice), in the same chain as the tool calls. Never pass a
+    password, a session or a key."""
+    return record(
+        con,
+        AuditEntry(
+            time=datetime.now(UTC),
+            tool=name,
+            inputs=inputs,
+            outputs=outputs or {},
+            error=error,
+            approver=actor,
+            latency_ms=0,
+        ),
+    )
 
 
 def verify_chain(con: sqlite3.Connection) -> int | None:

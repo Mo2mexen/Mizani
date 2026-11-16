@@ -76,6 +76,12 @@ CREATE TABLE IF NOT EXISTS session (
     last_seen TEXT NOT NULL,
     ended INTEGER NOT NULL DEFAULT 0  -- signed out, timed out, or ended by an admin
 );
+CREATE TABLE IF NOT EXISTS setting (
+    key TEXT PRIMARY KEY,             -- e.g. "model": where the model runs (Admin › Model)
+    value TEXT NOT NULL,              -- JSON; a model server's key is here, never sent or logged
+    updated_at TEXT NOT NULL,
+    updated_by TEXT NOT NULL
+);
 """
 ADDED_COLUMNS = [
     ("triage", "run_id"),

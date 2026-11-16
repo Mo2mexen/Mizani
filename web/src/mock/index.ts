@@ -11,6 +11,9 @@ import type {
   HandoverDraft,
   HandoverReleased,
   InboxEntry,
+  ModelChoice,
+  ModelSetting,
+  ModelTest,
   NewAccount,
   PatientRecord,
   Proposal,
@@ -48,6 +51,16 @@ let people: Account[] = [
   fakeAccount(4, "chief.c", "FAKE Chief C", "doctor", true),
 ];
 let signedIn: Account | null = null;
+const FAKE_LOCAL = { base_url: "http://ollama:11434/v1", model: "FAKE qwen3.5:4b-q4_K_M" };
+let modelNow: ModelSetting = {
+  location: "this_server",
+  ...FAKE_LOCAL,
+  reasoning_effort: "none",
+  has_key: false,
+  updated_at: null,
+  updated_by: null,
+  this_server: FAKE_LOCAL,
+};
 
 function update(id: number, change: Partial<Account>): Account {
   people = people.map((p) => (p.id === id ? { ...p, ...change } : p));
@@ -145,6 +158,27 @@ export const api = {
     update(id, { chief, chief_by: chief ? whoAmI().full_name : null, chief_at: chief ? now() : null }),
   setActive: async (id: number, active: boolean) => update(id, { active }),
   signOutEverywhere: async () => ({ signed_out: true }),
+  modelSetting: async (): Promise<ModelSetting> => modelNow,
+  testModel: async (choice: ModelChoice): Promise<ModelTest> =>
+    choice.location !== "this_server" && !choice.base_url
+      ? { ok: false, error: "FAKE mock: no address" }
+      : { ok: true, seconds: 1.8, model: choice.model || modelNow.this_server.model, reply: "ready" },
+  saveModel: async (choice: ModelChoice): Promise<ModelSetting> => {
+    modelNow =
+      choice.location === "this_server"
+        ? { ...modelNow, location: "this_server", ...modelNow.this_server, has_key: false }
+        : {
+            ...modelNow,
+            location: choice.location,
+            base_url: choice.base_url ?? "",
+            model: choice.model ?? "",
+            reasoning_effort: choice.reasoning_effort ?? null,
+            has_key: Boolean(choice.api_key) || modelNow.has_key,
+            updated_at: now(),
+            updated_by: whoAmI().full_name,
+          };
+    return modelNow;
+  },
   handovers: async (): Promise<InboxEntry[]> =>
     queue.slice(0, 1).map((e) => ({
       triage_id: e.triage_id,

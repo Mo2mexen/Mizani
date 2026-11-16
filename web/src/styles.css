@@ -358,7 +358,7 @@ td.src { display: table-cell; }
 .signin-foot { margin: 0; max-width: 24rem; text-align: center; color: var(--ink-soft); font-size: 0.82rem; }
 
 /* Who is signed in, at the right of the top bar. */
-.account { display: flex; align-items: center; gap: 0.45rem; position: relative; flex-wrap: wrap; }
+.account { display: flex; align-items: center; gap: 0.45rem; position: relative; flex-wrap: wrap; margin-left: auto; }
 .account-who { margin: 0 0.2rem 0 0; display: grid; line-height: 1.2; text-align: right; }
 .account-who strong { font-size: 0.9rem; }
 .account-who span { font-size: 0.78rem; color: var(--ink-soft); }
@@ -434,6 +434,29 @@ td.src { display: table-cell; }
   display: inline-block; font-family: var(--font-num); font-size: 1.5rem; letter-spacing: 0.06em;
   padding: 0.3rem 0.65rem; background: #f6f3ea; border: 1px dashed var(--line-strong); border-radius: var(--radius);
   user-select: all;
+}
+
+/* Admin › Model: one narrow column of choices, the warning in the danger style. */
+.admin-model { max-width: 46rem; }
+.model-now { margin: 0 0 0.6rem; overflow-wrap: anywhere; }
+.model-now code { font-family: var(--font-num); font-size: 0.85rem; }
+.choices { border: 0; padding: 0; margin: 0.8rem 0; display: grid; gap: 0.5rem; }
+.choice {
+  display: flex; gap: 0.65rem; align-items: flex-start; padding: 0.65rem 0.75rem; cursor: pointer;
+  border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel);
+}
+.choice input { margin-top: 0.2rem; width: 1.05rem; height: 1.05rem; accent-color: var(--ink); flex: none; }
+.choice > span { display: grid; gap: 0.15rem; }
+.choice.is-on { border: 2px solid var(--ink); padding: calc(0.65rem - 1px) calc(0.75rem - 1px); }
+.model-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 0.9rem; align-items: start; }
+.leaves {
+  margin: 0.4rem 0 0.9rem; padding: 0.6rem 0.75rem; background: var(--danger-bg);
+  border-left: 4px solid var(--danger); border-radius: var(--radius);
+}
+.leaves p { margin: 0 0 0.4rem; }
+.leaves-title { color: var(--danger); font-weight: 800; }
+@media (max-width: 559px) {
+  .model-fields { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 1023px) {
