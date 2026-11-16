@@ -70,6 +70,9 @@ def active(con: sqlite3.Connection) -> tuple[RulePack, str]:
             try:
                 cached = (key, parse_pack(text), label(row["pack_id"], row["version"]))
             except ValueError as exc:
+                if con.in_transaction:  # inside a commit: write nothing; the next call marks it
+                    pack = built_in()
+                    return pack, label(pack.id, None)
                 _unloadable(con, row, exc)
                 return active(con)
         _cache["active"] = cached
@@ -240,7 +243,13 @@ def target(con: sqlite3.Connection, ref: str) -> tuple[RulePack, dict | None]:
     if not ref.isdigit() or (chart := get(con, int(ref))) is None:
         raise ChartError(f"no chart {ref}")
     text = con.execute("SELECT yaml FROM chart WHERE id = ?", (int(ref),)).fetchone()[0]
-    return parse_pack(text), chart
+    try:
+        return parse_pack(text), chart
+    except ValueError as exc:  # stored before a check this version adds
+        raise ChartError(
+            f"{chart['label']} cannot be activated: this version of Mizani cannot load it "
+            f"({_why(exc)}); fix it and upload it again"
+        ) from None
 
 
 def activate(con: sqlite3.Connection, ref: str, approver: str, nonce: str) -> dict:
@@ -261,7 +270,7 @@ def activate(con: sqlite3.Connection, ref: str, approver: str, nonce: str) -> di
             why = {
                 "uploaded": "it has not been evaluated yet",
                 "evaluating": "its evaluation is still running",
-                "failed": "its evaluation stopped before the end",
+                "failed": chart["progress"] or "its evaluation stopped before the end",
             }[chart["status"]]
             raise ChartError(f"{chart['label']} cannot be activated: {why}")
         if chart is not None and not chart["safety_ok"]:

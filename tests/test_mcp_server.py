@@ -431,9 +431,12 @@ async def test_only_a_nurse_commits_and_the_account_is_checked_as_it_is_now():
             args = {"triage_id": tid, "approval_token": approval_token}
             return await client.call_tool("commit_triage", args)
 
-        for who, role in [("Doctor D", "doctor"), ("Admin E", "admin")]:
+        for who, role, named in [
+            ("Doctor D", "doctor", "a doctor"),
+            ("Admin E", "admin", "an admin"),
+        ]:
             refused = error_text(await commit_with(token(tid, who, role)))
-            assert f"only a nurse may save a triage; this is from a {role}" in refused
+            assert f"only a nurse may save a triage; this is from {named}" in refused
         signed = token(tid)  # Nurse A's, who is then deactivated, then made a doctor
         db().execute("UPDATE account SET active = 0 WHERE username = 'nurse.a'")
         assert "not from an active account" in error_text(await commit_with(signed))

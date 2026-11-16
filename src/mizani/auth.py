@@ -20,6 +20,9 @@ from mizani import audit
 from mizani.schemas import Account
 
 ROLES = ("nurse", "doctor", "admin")
+# How messages name a role ("chief" is a doctor with the chief flag)
+ROLE_NAMES = {"nurse": "a nurse", "doctor": "a doctor", "admin": "an admin",
+              "chief": "the chief doctor"}  # fmt: skip
 IDLE = timedelta(minutes=15)  # a shared tablet signs out after 15 minutes without use
 LONGEST = timedelta(hours=12)  # and after one shift, used or not
 MAX_MISSES, LOCKED_FOR = 5, timedelta(minutes=15)
@@ -214,9 +217,13 @@ def create_account(
 
 
 def open_session(con: sqlite3.Connection, account: Account) -> str:
-    """A new session for this account. Returns the cookie's value; only its hash is stored."""
+    """A new session for this account. Returns the cookie's value; only its hash is stored.
+    Sessions that ended or passed the 12-hour limit are deleted here, so the table stays small."""
     value = secrets.token_urlsafe(32)
     stamp = now().isoformat()
+    con.execute(
+        "DELETE FROM session WHERE ended = 1 OR created_at < ?", ((now() - LONGEST).isoformat(),)
+    )
     con.execute(
         "INSERT INTO session (id_hash, account_id, created_at, last_seen) VALUES (?, ?, ?, ?)",
         (_session_hash(value), account.id, stamp, stamp),
@@ -269,13 +276,14 @@ def sign_in(con: sqlite3.Connection, username: str, password: str) -> tuple[str,
             "to reset it.",
             429,
         )
+    if not account.active:  # whatever the password, so the answer never confirms a guess
+        password_matches(password, _dummy_hash())
+        refuse(account.username, "deactivated")
+        raise AuthError("This account is deactivated. Ask an admin if you need it again.", 403)
     if not password_matches(password, row["password_hash"]):
         locked = _count_miss(con, account.id)
         refuse(account.username, "wrong password" + (", locked for 15 minutes" if locked else ""))
         raise wrong
-    if not account.active:
-        refuse(account.username, "deactivated")
-        raise AuthError("This account is deactivated. Ask an admin if you need it again.", 403)
     # The right password, unless the account was locked while it was being checked (guesses sent
     # at the same moment): then it is refused like any sign-in to a locked account.
     moment = now().isoformat()

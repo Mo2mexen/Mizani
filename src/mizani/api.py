@@ -64,12 +64,6 @@ SESSION_COOKIE = "mizani_session"
 # other request needs, and their memory stays bounded.
 PASSWORD_CHECKS = ThreadPoolExecutor(max_workers=4, thread_name_prefix="password-check")
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-ROLE_NAMES = {
-    "nurse": "a nurse",
-    "doctor": "a doctor",
-    "admin": "an admin",
-    "chief": "the chief doctor",
-}
 # The page's own files only: no inline scripts, no other sites, never inside another site's frame
 CSP = (
     "default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; "
@@ -131,9 +125,9 @@ def allow(*roles: str):
         if account.must_change:
             raise HTTPException(403, "Choose your own password first.")
         if not any(auth.has_role(account, role) for role in roles):
-            needed = " or ".join(ROLE_NAMES[role] for role in roles)
+            needed = " or ".join(auth.ROLE_NAMES[role] for role in roles)
             raise HTTPException(
-                403, f"This needs {needed}; you are signed in as {ROLE_NAMES[account.role]}."
+                403, f"This needs {needed}; you are signed in as {auth.ROLE_NAMES[account.role]}."
             )
         return account
 
@@ -224,10 +218,6 @@ class ModelChoice(Contract):
             if not self.leaves_hospital_confirmed:
                 raise ValueError("confirm that complaint text will leave this hospital")
         return self
-
-
-def refused(exc: auth.AuthError) -> HTTPException:
-    return HTTPException(exc.status, str(exc))
 
 
 class Intake(Contract):
@@ -384,6 +374,12 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
                 watcher.cancel()
 
     app = FastAPI(title="Mizani API", lifespan=lifespan)
+
+    @app.exception_handler(auth.AuthError)
+    async def account_refused(request: Request, exc: auth.AuthError) -> JSONResponse:
+        """A refusal from auth.py (a wrong password, a lock): its own status and words."""
+        return JSONResponse({"detail": str(exc)}, status_code=exc.status)
+
     # Only requests addressed to this machine by name: a web page elsewhere cannot reach the API
     # by pointing its own domain at 127.0.0.1 (DNS rebinding). A ward server adds its address.
     hosts = os.environ.get("MIZANI_ALLOWED_HOSTS", "127.0.0.1,localhost")
@@ -445,12 +441,9 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
     @app.post("/api/auth/login")
     async def login(body: Credentials, request: Request, response: Response) -> Account:
         """Sign in. The session lives in an HttpOnly, SameSite=Strict cookie, Secure over HTTPS."""
-        try:
-            value, account = await asyncio.get_running_loop().run_in_executor(
-                PASSWORD_CHECKS, lambda: auth.sign_in(db(), body.username, body.password)
-            )
-        except auth.AuthError as exc:
-            raise refused(exc) from None
+        value, account = await asyncio.get_running_loop().run_in_executor(
+            PASSWORD_CHECKS, lambda: auth.sign_in(db(), body.username, body.password)
+        )
         secure = request.url.scheme == "https"
         response.set_cookie(
             SESSION_COOKIE, value, httponly=True, samesite="strict", secure=secure, path="/"
@@ -472,10 +465,7 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
     def change_password(body: NewPassword, request: Request, account: SignedIn) -> Account:
         """Change one's own password (the one-time one too). The person's other sessions end."""
         session = request.cookies[SESSION_COOKIE]
-        try:
-            return auth.change_password(db(), account, body.current, body.new, session)
-        except auth.AuthError as exc:
-            raise refused(exc) from None
+        return auth.change_password(db(), account, body.current, body.new, session)
 
     @app.get("/api/admin/users")
     def users(_: Admin) -> list[Account]:
@@ -484,48 +474,30 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
     @app.post("/api/admin/users", status_code=201)
     def add_user(body: NewAccount, admin: Admin) -> dict:
         """A new account; its one-time password is in this answer only, never stored."""
-        try:
-            account, otp = auth.create_account(
-                db(), admin.full_name, body.username, body.full_name, body.role
-            )
-        except auth.AuthError as exc:
-            raise refused(exc) from None
+        account, otp = auth.create_account(
+            db(), admin.full_name, body.username, body.full_name, body.role
+        )
         return {"account": account.model_dump(mode="json"), "one_time_password": otp}
 
     @app.post("/api/admin/users/{account_id}/reset-password")
     def reset_password(account_id: int, admin: Admin) -> dict:
-        try:
-            return {"one_time_password": auth.reset_password(db(), admin.full_name, account_id)}
-        except auth.AuthError as exc:
-            raise refused(exc) from None
+        return {"one_time_password": auth.reset_password(db(), admin.full_name, account_id)}
 
     @app.post("/api/admin/users/{account_id}/role")
     def set_role(account_id: int, body: RoleChange, admin: Admin) -> Account:
-        try:
-            return auth.set_role(db(), admin, account_id, body.role)
-        except auth.AuthError as exc:
-            raise refused(exc) from None
+        return auth.set_role(db(), admin, account_id, body.role)
 
     @app.post("/api/admin/users/{account_id}/chief")
     def set_chief(account_id: int, body: ChiefFlag, admin: Admin) -> Account:
-        try:
-            return auth.set_chief(db(), admin, account_id, body.chief)
-        except auth.AuthError as exc:
-            raise refused(exc) from None
+        return auth.set_chief(db(), admin, account_id, body.chief)
 
     @app.post("/api/admin/users/{account_id}/active")
     def set_active(account_id: int, body: Activation, admin: Admin) -> Account:
-        try:
-            return auth.set_active(db(), admin, account_id, body.active)
-        except auth.AuthError as exc:
-            raise refused(exc) from None
+        return auth.set_active(db(), admin, account_id, body.active)
 
     @app.post("/api/admin/users/{account_id}/sign-out")
     def sign_out_everywhere(account_id: int, admin: Admin) -> dict:
-        try:
-            auth.sign_out_everywhere(db(), admin, account_id)
-        except auth.AuthError as exc:
-            raise refused(exc) from None
+        auth.sign_out_everywhere(db(), admin, account_id)
         return {"signed_out": True}
 
     def candidate(body: ModelChoice) -> dict | None:
