@@ -34,7 +34,7 @@ export function roleName(account: Account): string {
 }
 
 /** Why the sign-in screen is showing; null on a first visit. */
-export type SignedOutWhy = "idle" | "switch" | "signed_out" | "ended" | null;
+export type SignedOutWhy = "idle" | "signed_out" | "ended" | null;
 
 export function useSession() {
   const [account, setAccount] = useState<Account | null>(null);

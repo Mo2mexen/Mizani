@@ -9,7 +9,7 @@ The production release: Mizani as software a hospital runs on its own server, fo
 **Accounts and roles**
 - Everyone signs in with their own account; there is no signup. An admin adds each person with a one-time password, which they replace at their first sign-in.
 - Roles: nurse (the triage desk), doctor (the waiting room by priority, the handovers nurses release, "Seeing this patient"), admin (accounts and settings, nothing clinical), and a chief flag an admin gives one doctor.
-- Passwords hashed with scrypt; five wrong passwords lock an account for 15 minutes; a page signs out after 15 minutes without use, and "Switch user" hands a shared tablet over in one click.
+- Passwords hashed with scrypt; five wrong passwords lock an account for 15 minutes; a page signs out after 15 minutes without use, and "Sign out" in the header hands a shared tablet over in one click; the settings button next to the name has Change password.
 - The API checks the role on every request, and the MCP server checks it again behind every approval. The name on every decision is the signed-in person's; nothing is typed.
 - The first admin's one-time password is printed in the server log on the first start; `mizani-admin` creates an admin or resets a password from the server's console.
 - Every sign-in, refused sign-in and account change is in the hash-chained audit log.

@@ -2,14 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { roleName, useAccount } from "../session";
 
-type Props = {
-  onSwitchUser: () => void;
-  onSignOut: () => void;
-};
-
-/** Who is signed in, a one-click "Switch user" for a shared tablet, and a small menu with
- *  "Change password" and "Sign out". */
-export function AccountMenu({ onSwitchUser, onSignOut }: Props) {
+/** Who is signed in, a settings button (a small menu: Change password) and Sign out, which also
+ *  hands a shared tablet to the next person in one click. */
+export function AccountMenu({ onSignOut }: { onSignOut: () => void }) {
   const account = useAccount();
   const [isOpen, setIsOpen] = useState(false);
   const [isChanging, setIsChanging] = useState(false);
@@ -34,20 +29,28 @@ export function AccountMenu({ onSwitchUser, onSignOut }: Props) {
         <strong>{account.full_name}</strong>
         <span>{roleName(account)}</span>
       </p>
-      <button type="button" className="btn btn-small" onClick={onSwitchUser}>
-        Switch user
-      </button>
       <button
         type="button"
-        className="btn btn-small"
+        className="btn btn-small btn-icon"
+        aria-label="Account settings"
+        title="Account settings"
         aria-expanded={isOpen}
         aria-controls="account-menu"
         onClick={() => setIsOpen(!isOpen)}
       >
-        Account
+        <GearIcon />
+      </button>
+      <button type="button" className="btn btn-small" onClick={onSignOut}>
+        Sign out
       </button>
       {isOpen && (
         <div id="account-menu" className="account-menu">
+          <p className="account-menu-who">
+            <strong>{account.full_name}</strong>
+            <span>
+              {roleName(account)}, signed in as {account.username}
+            </span>
+          </p>
           <button
             type="button"
             onClick={() => {
@@ -57,13 +60,30 @@ export function AccountMenu({ onSwitchUser, onSignOut }: Props) {
           >
             Change password
           </button>
-          <button type="button" onClick={onSignOut}>
-            Sign out
-          </button>
         </div>
       )}
       {isChanging && <ChangePassword onClose={() => setIsChanging(false)} />}
     </div>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
   );
 }
 

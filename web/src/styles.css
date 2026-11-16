@@ -46,13 +46,25 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .app { max-width: 1600px; margin: 0 auto; padding: 0 var(--gap) var(--gap); }
 
-/* Top bar */
+/* Top bar: on a desk one row (the brand, the role's screens, the page's tools, the person);
+   below 1024 px two rows, the brand and the person above, the screens and the tools below. */
 .topbar {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem var(--gap);
+  display: grid; align-items: center; gap: 0.6rem var(--gap);
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "brand views tools person";
   padding: 0.7rem 0; border-bottom: 2px solid var(--ink); margin-bottom: var(--gap);
 }
+.topbar .brand { grid-area: brand; }
+.topbar .views { grid-area: views; }
+.topbar .tools { grid-area: tools; justify-self: end; }
+.topbar .account { grid-area: person; justify-self: end; }
+.tools { display: flex; align-items: center; gap: 0.6rem var(--gap); }
+@media (max-width: 1279px) { .brand-sub { display: none; } }
+@media (max-width: 1023px) {
+  .topbar { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand person" "views tools"; }
+}
 /* Name and tagline share a baseline; the logo is centred on the name. */
-.brand { display: flex; align-items: baseline; gap: 0.2rem 0.65rem; flex: 1 1 20rem; flex-wrap: wrap; min-width: 0; }
+.brand { display: flex; align-items: baseline; gap: 0.2rem 0.65rem; flex-wrap: wrap; min-width: 0; }
 .brand-logo { display: block; width: 30px; height: 30px; border-radius: 6px; flex: none; align-self: center; }
 .brand-name { margin: 0; font-size: 1.6rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
 .brand-sub { color: var(--ink-soft); font-size: 0.9rem; }
@@ -359,8 +371,11 @@ td.src { display: table-cell; }
 .signin-go { width: 100%; padding: 0.7rem; margin-top: 0.2rem; }
 .signin-foot { margin: 0; max-width: 24rem; text-align: center; color: var(--ink-soft); font-size: 0.82rem; }
 
-/* Who is signed in, at the right of the top bar. */
-.account { display: flex; align-items: center; gap: 0.45rem; position: relative; flex-wrap: wrap; margin-left: auto; }
+/* Who is signed in, at the right of the top bar: the name, the settings button, Sign out. */
+.account { display: flex; align-items: center; gap: 0.45rem; position: relative; justify-content: flex-end; }
+.btn-icon { display: inline-grid; place-items: center; padding: 0.3rem; line-height: 0; }
+.account-menu-who { margin: 0; padding: 0.6rem 0.85rem; display: grid; line-height: 1.3; border-bottom: 1px solid var(--line); }
+.account-menu-who span { font-size: 0.8rem; color: var(--ink-soft); }
 .account-who { margin: 0 0.2rem 0 0; display: grid; line-height: 1.2; text-align: right; }
 .account-who strong { font-size: 0.9rem; }
 .account-who span { font-size: 0.78rem; color: var(--ink-soft); }
@@ -492,8 +507,10 @@ td.src { display: table-cell; }
   .chart-state { margin-left: 0; }
 }
 /* On a phone the table becomes one block per person, each value under its label. */
+@media (max-width: 559px) {
+  .account-who { display: none; } /* the settings menu names the person */
+}
 @media (max-width: 819px) {
-  .account-who { text-align: left; }
   .people thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .people, .people tbody, .people tr, .people td { display: block; width: 100%; }
   .people tbody { border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 0.6rem; background: var(--panel); }

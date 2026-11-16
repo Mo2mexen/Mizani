@@ -132,7 +132,7 @@ To check a device before the nurses use it, open `https://<MIZANI_HOSTNAME>` (ad
 ## 5. Tablets and desk PCs
 
 - Open `https://<MIZANI_HOSTNAME>`; on a tablet, "Add to home screen" makes it an icon.
-- Each person signs in with their own account. A page left alone for 15 minutes signs out by itself; "Switch user" in the header hands a shared tablet to the next person in one click. A session ends after 12 hours in any case.
+- Each person signs in with their own account. A page left alone for 15 minutes signs out by itself; "Sign out" in the header hands a shared tablet to the next person in one click. A session ends after 12 hours in any case.
 - Five wrong passwords lock an account for 15 minutes; an admin's password reset lifts the lock.
 - The browser keeps no patient data: every answer from the server is marked not to be cached.
 
