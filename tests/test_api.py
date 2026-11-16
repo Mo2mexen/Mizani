@@ -468,6 +468,14 @@ def test_the_admin_moves_the_model_without_a_restart_and_the_key_never_comes_bac
         assert unconfirmed.status_code == 422 and "leave this hospital" in unconfirmed.text
         plain = {**CLOUD, "base_url": "http://gpu.example/v1", "leaves_hospital_confirmed": True}
         assert api.post("/api/admin/model", json=plain).status_code == 422  # https only
+        for odd in (
+            "http://ollama:11434/api/pull?x=",
+            "https://u:p@gpu.example/v1",
+            "https://g/v1#x",
+        ):
+            odd_test = {"location": "hospital", "base_url": odd, "model": "m"}
+            refused = api.post("/api/admin/model/test", json=odd_test)
+            assert refused.status_code == 422 and "without ?, #" in refused.text
         saved = api.post("/api/admin/model", json={**CLOUD, "leaves_hospital_confirmed": True})
         assert saved.json()["location"] == "cloud" and saved.json()["has_key"] is True
         assert "sk-secret-123" not in saved.text + api.get("/api/admin/model").text
