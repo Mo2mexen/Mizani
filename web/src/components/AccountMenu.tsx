@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { roleName, useAccount } from "../session";
+import { roleName, useAccount, useVersion } from "../session";
 
 /** Who is signed in, and a settings button whose menu names the person and has Change password
  *  and Sign out (which also hands a shared tablet to the next person). */
 export function AccountMenu({ onSignOut }: { onSignOut: () => void }) {
   const account = useAccount();
+  const version = useVersion();
   const [isOpen, setIsOpen] = useState(false);
   const [isChanging, setIsChanging] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -60,6 +61,7 @@ export function AccountMenu({ onSignOut }: { onSignOut: () => void }) {
           <button type="button" onClick={onSignOut}>
             Sign out
           </button>
+          {version && <p className="account-menu-version">Mizani {version}</p>}
         </div>
       )}
       {isChanging && <ChangePassword onClose={() => setIsChanging(false)} />}

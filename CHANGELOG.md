@@ -1,10 +1,11 @@
 # Changelog
 
-What changed in each version of Mizani. The version is in `pyproject.toml`; the page shows it in its footer and `GET /api/health` returns it. To update an installation, see [docs/INSTALL.md](docs/INSTALL.md), section 7.
+What changed in each version of Mizani. The version is in `pyproject.toml`; the sign-in screen and the settings menu (the gear next to the name) show it, and `GET /api/health` returns it. To update an installation, see [docs/INSTALL.md](docs/INSTALL.md), section 7.
 
 ## 1.0.2 (17 November 2026)
 
 - The header is the logo and "Mizani" only (the tagline is gone), and the browser tab reads "Mizani - Triage co-pilot".
+- No footer and no line at the end of the screens; the version is in the settings menu (and on the sign-in screen).
 - After Sign out, the sign-in screen asks for the next sign-in without a message; it still says why when Mizani signed someone out on its own.
 
 ## 1.0.1 (17 November 2026)

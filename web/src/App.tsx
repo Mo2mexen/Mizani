@@ -8,7 +8,7 @@ import { Charts } from "./components/Charts";
 import { DoctorView } from "./components/DoctorView";
 import { NurseView } from "./components/NurseView";
 import { SignIn } from "./components/SignIn";
-import { SessionContext, useSession, useVersion } from "./session";
+import { SessionContext, useSession } from "./session";
 import type { Account, Colour } from "./types";
 
 type View = { id: string; label: string };
@@ -64,7 +64,6 @@ function SignedIn({ account, onSignOut }: { account: Account; onSignOut: () => v
   const [colours, setColours] = useState<Colour[]>([]);
   const [isShadow, setIsShadow] = useState(false);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
-  const version = useVersion();
   const isNurse = account.role === "nurse";
 
   // The colours of the chart in use, asked every 5 s like the queue (background polling), so a
@@ -135,11 +134,6 @@ function SignedIn({ account, onSignOut }: { account: Account; onSignOut: () => v
       {view === "model" && <AdminModel />}
       {view === "charts" && <Charts />}
       <AuditDrawer isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />
-      <footer className="foot">
-        Synthetic patients only. Mizani suggests; a signed-in nurse approves every priority. Every number shows the rule
-        it came from. Mizani never diagnoses or prescribes.
-        {version && <span className="foot-version">Mizani {version}</span>}
-      </footer>
     </div>
   );
 }
