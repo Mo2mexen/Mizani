@@ -337,7 +337,9 @@ def shadow_agreement() -> str:
 
 @mcp.resource("rules://sats/adult", mime_type="application/json")
 def rules_sats_adult() -> str:
-    """The SATS adult rule pack: TEWS bands, discriminators with ids, investigations, sources."""
+    """The rule pack in use (`MIZANI_RULE_PACK`, default the SATS adult chart; its `id` says
+    which): TEWS bands, discriminators with ids, investigations, sources. The address keeps its
+    name so agents written against it keep working."""
     return PACK.model_dump_json(indent=1)
 
 
@@ -416,6 +418,7 @@ DEMO_SECRET = "local-demo-secret-change-me"
 
 
 def main() -> None:
+    print(f"Rule pack: {PACK.id} ({PACK.name}), {len(PACK.discriminators)} chart signs", flush=True)
     if os.environ.get("MIZANI_APPROVAL_SECRET") in (None, "", DEMO_SECRET):
         print(
             "WARNING: MIZANI_APPROVAL_SECRET is unset or the public demo value; anyone who "

@@ -188,7 +188,7 @@ Mizani does not yet read an existing patient from a record system. wso2's server
 
 ## Change the model or the triage scale
 
-The model is a setting: `LLM_MODEL` and `LLM_BASE_URL` in `.env` point the agent at any OpenAI-compatible server ([REMOTE_MODEL.md](REMOTE_MODEL.md)). A triage scale is a YAML rule pack in `src/mizani/rules/`, where every rule records its source ([systems/rules-engine.md](systems/rules-engine.md)). The server loads the adult SATS pack; choosing another pack by a setting is not built yet.
+The model is a setting: `LLM_MODEL` and `LLM_BASE_URL` in `.env` point the agent at any OpenAI-compatible server ([REMOTE_MODEL.md](REMOTE_MODEL.md)). A triage scale is a YAML rule pack in `src/mizani/rules/`, where every rule records its source ([systems/rules-engine.md](systems/rules-engine.md)). The server loads the pack that `MIZANI_RULE_PACK` names (default `sats_adult`), and refuses one in which a clinical rule does not cite one of the pack's own references.
 
 ## Limits
 

@@ -26,7 +26,7 @@ The agent reads the rules (`rules://sats/adult`), checks vitals, names chart dis
 | `record_called_in` | tool, action, gated | `triage_id`, `approval_token` (purpose `called_in`) | `{triage_id, approver, called_in_at, waited_minutes}` | the patient leaves the waiting queue and the re-check timer stops; the record stays; token used; audit row |
 | `record_nurse_assessment` | tool, action | `triage_id`, `nurse_name`, `colour`, `reason` | stored assessment | one per triage; audit row |
 | `raise_recheck_flag` | tool, action | `triage_id` | `recheck_due` flag citing the target time | refused unless the timer ran out; records the flag; audit row |
-| `rules://sats/adult` | resource | | the rule pack (JSON) | none |
+| `rules://sats/adult` | resource | | the rule pack in use (JSON; `MIZANI_RULE_PACK`, default the adult SATS chart; its `id` says which). The address keeps its name so agents written against it keep working | none |
 | `rules://sats/targets` | resource | | colours and target minutes | none |
 | `queue://current` | resource | | waiting patients by colour, then arrival, with time waited, `recheck_due` and `recheck_raised` (retriage-watch.md) | none |
 | `patient://{triage_id}/timeline` | resource | | the triage, its handover drafts and its audit rows | none |

@@ -1,12 +1,23 @@
-"""Load and validate a rule pack. A rule without a source fails here, before anything runs."""
+"""Load and validate a rule pack. A rule without a source fails here, before anything runs.
 
+`MIZANI_RULE_PACK` names the pack (default `sats_adult`): a YAML file in this folder, so a new
+triage scale is a new file and the engine stays. Every clinical rule must cite one of the pack's
+own references (`sources`), so a value cannot reach the nurse without the rule behind it.
+"""
+
+import os
+import re
 from importlib.resources import files
+from importlib.resources.abc import Traversable
 from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-Source = Annotated[str, Field(min_length=1)]
+DEFAULT_PACK = "sats_adult"
+PACK_NAME = re.compile(r"[a-z0-9_]{1,64}")  # a file name only: no folders, no "..", no extension
+
+Source = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class Rule(BaseModel):
@@ -122,6 +133,24 @@ class RulePack(Rule):
             raise ValueError(f"colours not in the colour list: {sorted(used - known)}")
         return self
 
+    @model_validator(mode="after")
+    def rules_cite_the_references(self) -> "RulePack":
+        """Each clinical rule's source starts with one of `sources` ("manual p6 ...", "chart: ...").
+        The plausible ranges are a data-entry check, not a clinical rule, so they are left out."""
+        cited = [
+            *(("colours", c.source) for c in self.colours),
+            *(("tews_colour", t.source) for t in self.tews_colour),
+            *((f"tews.{k}", r.source) for k, r in self.tews.items()),
+            *((f"discriminators.{d.id}", d.source) for d in self.discriminators),
+            *((f"investigations.{k}", i.source) for k, i in self.investigations.items()),
+        ]
+        refs = tuple(self.sources)  # a source starts with a whole key: "manual p6", not "manuals"
+        cites = re.compile("|".join(re.escape(r) + r"\b" for r in refs))
+        uncited = [where for where, s in cited if not cites.match(s)]
+        if not refs or uncited:
+            raise ValueError(f"rules that do not cite one of sources {list(refs)}: {uncited}")
+        return self
+
     def rank(self, colour: str) -> int:
         """0 is the most urgent colour."""
         return [c.colour for c in self.colours].index(colour)
@@ -131,6 +160,24 @@ class RulePack(Rule):
         return f"{self.id} · {source}"
 
 
-def load_pack(name: str = "sats_adult") -> RulePack:
-    text = files("mizani.rules").joinpath(f"{name}.yaml").read_text(encoding="utf-8")
-    return RulePack.model_validate(yaml.safe_load(text))
+def available_packs(folder: Traversable | None = None) -> list[str]:
+    folder = folder or files("mizani.rules")
+    return sorted(
+        f.name.removesuffix(".yaml") for f in folder.iterdir() if f.name.endswith(".yaml")
+    )
+
+
+def load_pack(name: str | None = None, folder: Traversable | None = None) -> RulePack:
+    """The pack `name`, else `MIZANI_RULE_PACK`, else `sats_adult`. Refuses a name that is not a
+    plain file name, a pack that is not in the folder, and a pack whose `id` is not its name."""
+    name = name or os.environ.get("MIZANI_RULE_PACK", "").strip() or DEFAULT_PACK
+    if not PACK_NAME.fullmatch(name):
+        raise ValueError(f"rule pack name {name!r}: use lower-case letters, digits and _ only")
+    folder = folder or files("mizani.rules")
+    path = folder.joinpath(f"{name}.yaml")
+    if not path.is_file():
+        raise ValueError(f"no rule pack {name!r}; available: {available_packs(folder)}")
+    pack = RulePack.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+    if pack.id != name:
+        raise ValueError(f"rule pack file {name}.yaml has id {pack.id!r}; they must match")
+    return pack

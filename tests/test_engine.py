@@ -360,3 +360,63 @@ def test_a_proposal_made_without_chart_signs_from_the_model_says_so():
     assert "Check the complaint against the chart by hand" in flag.message
     assert flag.source == "input: complaint"
     assert not [f for f in said(complaint).flags if f.kind == "signs_not_checked"]
+
+
+# --- Choosing the pack (MIZANI_RULE_PACK) and refusing a pack that does not cite its rules ---
+
+SATS = yaml.safe_load(
+    (Path(__file__).parents[1] / "src/mizani/rules/sats_adult.yaml").read_text(encoding="utf-8")
+)
+
+
+def write_pack(folder: Path, name: str, **changes) -> Path:
+    data = {**yaml.safe_load(yaml.safe_dump(SATS)), "id": name, **changes}
+    path = folder / f"{name}.yaml"
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return path
+
+
+def test_the_setting_picks_another_pack_and_the_default_is_sats(tmp_path, monkeypatch):
+    colours = [{**c} for c in SATS["colours"]]
+    colours[1]["target_minutes"] = 15  # a local variant: orange within 15 minutes
+    colours[1]["source"] = "manual p6 Table 3, local variant for this test"
+    write_pack(tmp_path, "local_variant", colours=colours)
+    monkeypatch.setenv("MIZANI_RULE_PACK", "local_variant")
+    pack = load_pack(folder=tmp_path)
+    assert pack.id == "local_variant" and pack.colours[1].target_minutes == 15
+    assert pack.cite(pack.colours[1].source).startswith("local_variant · manual p6")
+    monkeypatch.delenv("MIZANI_RULE_PACK")
+    assert load_pack().id == "sats_adult"
+
+
+@pytest.mark.parametrize(
+    "name", ["../sats_adult", "SATS_ADULT", "sats_adult.yaml", "a b", "x" * 65]
+)
+def test_a_pack_name_must_be_a_plain_file_name(name):
+    with pytest.raises(ValueError, match="lower-case letters"):
+        load_pack(name)
+
+
+def test_an_unknown_pack_is_refused_with_the_ones_there_are(tmp_path):
+    write_pack(tmp_path, "one_pack")
+    with pytest.raises(ValueError, match=r"no rule pack 'missing'; available: \['one_pack'\]"):
+        load_pack("missing", folder=tmp_path)
+
+
+def test_a_pack_whose_id_is_not_its_file_name_is_refused(tmp_path):
+    write_pack(tmp_path, "file_name").rename(tmp_path / "other_name.yaml")
+    with pytest.raises(ValueError, match="has id 'file_name'"):
+        load_pack("other_name", folder=tmp_path)
+
+
+@pytest.mark.parametrize("source", ["", "   ", "my own idea", "manuals p6"])
+def test_a_rule_without_a_cited_source_is_refused(tmp_path, source):
+    signs = [{**d} for d in SATS["discriminators"]]
+    signs[0]["source"] = source
+    write_pack(tmp_path, "uncited", discriminators=signs)
+    with pytest.raises(ValueError):
+        load_pack("uncited", folder=tmp_path)
+
+
+def test_the_plausible_ranges_are_a_data_check_and_need_no_chart_reference():
+    assert not PACK.plausible.source.startswith(tuple(PACK.sources))  # and the pack still loads

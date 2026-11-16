@@ -82,6 +82,8 @@ services:
       MIZANI_APPROVAL_SECRET: ${MIZANI_APPROVAL_SECRET:-local-demo-secret-change-me}
       # The names it answers to (DNS-rebinding guard): this machine, and the app by service name.
       MIZANI_ALLOWED_HOSTS: 127.0.0.1,localhost,mizani-mcp
+      # The triage chart: a rule pack file in src/mizani/rules/ (default: the adult SATS chart).
+      MIZANI_RULE_PACK: ${MIZANI_RULE_PACK:-sats_adult}
     volumes:
       - mizani-data:/data
     ports:
