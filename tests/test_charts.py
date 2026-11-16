@@ -2,6 +2,7 @@
 the chart on every proposal and record, and going back."""
 
 import json
+import time
 from importlib.resources import files
 
 import pytest
@@ -148,6 +149,10 @@ def test_the_engine_checks_refuse_what_would_crash_scoring_or_tie_up_the_server(
     assert "two bands both take" in bad(overlap)
     no_bands = edited(lambda d: d["tews"]["temperature"].update(bands=[]))
     assert "give its points as bands" in bad(no_bands)  # not an IndexError
+    typo = edited(lambda d: d["plausible"]["ranges"].update(heartrate=[20, 250]))
+    assert "plausible.ranges.heartrate" in bad(typo)  # not an AttributeError at every patient
+    upside_down = edited(lambda d: d["plausible"]["ranges"].update(spo2=[100, 50]))
+    assert "low end must be below the high" in bad(upside_down)
     same_name = edited(lambda d: d["discriminators"][1].update(name="Chest pain"))
     assert "chart sign names repeat: ['Chest pain']" in bad(same_name)  # a re-check maps names
     no_row = edited(lambda d: d["tews"].pop("trauma"))
@@ -363,6 +368,22 @@ async def test_a_chart_in_use_that_no_longer_loads_gives_way_to_the_built_in_one
             "activate_chart", {"chart": ref, "approval_token": await chief_token(ref)}
         )
     assert "cannot be activated: this version of Mizani cannot load it" in again.content[0].text
+
+
+def test_the_api_follows_a_chart_change_made_outside_it(monkeypatch):
+    monkeypatch.setattr("mizani.api.CHART_CHECK_SECONDS", 0.05)
+    renamed = KENYA.replace("label: Routine,", "label: Routine (Kenya),")
+    chart = charts.upload(db(), "Dr Chief", renamed, None)
+    evaluated(chart["id"])
+    app = create_app(FakeModel(messages=iter([])), mcp, InMemorySaver())
+    with signed_in(app) as api:
+        charts.activate(db(), str(chart["id"]), "Dr Chief", "nonce-1")  # not through this API
+        for _ in range(100):  # the API notices within a few checks
+            labels = [c["label"] for c in api.get("/api/colours").json()]
+            if "Routine (Kenya)" in labels:
+                break
+            time.sleep(0.05)
+    assert "Routine (Kenya)" in labels
 
 
 def test_inside_a_commit_the_chart_check_writes_nothing():

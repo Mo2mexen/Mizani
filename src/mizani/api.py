@@ -59,6 +59,7 @@ FINAL_EVENTS = {"committed", "error"}
 MCP_CONNECT_TRIES = 30  # the MCP server may still be starting (compose)
 MODEL_TEST_SECONDS = 180  # Test connection: a model loading from a hard disk took about 120 s
 SESSION_COOKIE = "mizani_session"
+CHART_CHECK_SECONDS = 5  # how often the API checks that it still has the chart in use
 # A sign-in checks the password with scrypt, slow and memory-hard on purpose. It runs on these few
 # threads of its own, so a burst of sign-ins (anyone can send them) never takes the threads every
 # other request needs, and their memory stays bounded.
@@ -325,11 +326,26 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
     async def load_chart() -> None:
         """The chart in use, as the MCP server scores with it: its signs for the model, its
         colours for the page, its name for the FHIR record. Again after a chart is activated."""
+        in_use = charts.active(db())[1]
         rules = await read_json("rules://sats/adult", mcp_server)
         ctx["colours"] = await read_json("rules://sats/targets", mcp_server)
         ctx["sign_ids"] = {d["name"]: d["id"] for d in rules["discriminators"]}
         ctx["chart_signs"] = rules["discriminators"]
         ctx["scale"] = (rules["id"], rules["name"])
+        ctx["chart_label"] = in_use
+
+    async def follow_chart() -> None:
+        """The chart in use can change outside this process too (the MCP server takes a chart
+        that no longer loads out of use), or a reload can fail: every few seconds, reload the
+        chart's signs, colours and name, and rebuild the agent, whenever it changed."""
+        while True:
+            await asyncio.sleep(CHART_CHECK_SECONDS)
+            try:
+                if charts.active(db())[1] != ctx.get("chart_label"):
+                    await load_chart()
+                    ctx["graph"] = ctx["build"](ctx["llm"])
+            except Exception:
+                log.exception("could not reload the chart in use; trying again")
 
     def scale_of(triage_id: str) -> tuple[str, str]:
         """The chart that scored this triage, for its FHIR record (the chart in use if unknown)."""
@@ -368,10 +384,12 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
             ctx["graph"] = build(ctx["llm"])
             charts.interrupted(db())  # an evaluation running when the server stopped
             watcher = asyncio.create_task(watch({t.name: t for t in tools}, mcp_server))
+            follower = asyncio.create_task(follow_chart())
             try:
                 yield
             finally:
                 watcher.cancel()
+                follower.cancel()
 
     app = FastAPI(title="Mizani API", lifespan=lifespan)
 
@@ -602,8 +620,11 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
         new patient with it."""
         token = issue_approval(f"chart:{ref}", chief, purpose="chart")
         result = await call_tool("activate_chart", {"chart": ref, "approval_token": token})
-        await load_chart()
-        ctx["graph"] = ctx["build"](ctx["llm"])
+        try:
+            await load_chart()
+            ctx["graph"] = ctx["build"](ctx["llm"])
+        except Exception:  # the chart is in use; follow_chart reloads it within seconds
+            log.exception("chart activated, but reloading it failed")
         return {**result, "overview": charts.overview(db())}
 
     @app.post("/api/charts/{chart_id}/activate")
@@ -684,14 +705,21 @@ def create_app(llm=None, mcp_server: Any = None, checkpointer=None) -> FastAPI:
     @app.get("/api/triage/{run_id}/stream", response_class=EventSourceResponse)
     async def stream(
         _: Nurse,
+        request: Request,
         run: Annotated[Run, Depends(get_run)],  # 404 before the stream starts
         last_event_id: Annotated[str | None, Header()] = None,
     ) -> AsyncIterable[ServerSentEvent]:
         sent = int(last_event_id) + 1 if last_event_id and last_event_id.isdigit() else 0
+        cookie = request.cookies.get(SESSION_COOKIE, "")
         while True:
             async with run.changed:
                 await run.changed.wait_for(lambda n=sent: len(run.events) > n)
                 batch = run.events[sent:]
+            # The session as it is now: signed out, deactivated or timed out since the stream
+            # opened, it gets nothing more (the page then asks to sign in again)
+            account = auth.session_account(db(), cookie, touch=False)
+            if account is None or account.role != "nurse":
+                return
             for event, data in batch:
                 yield ServerSentEvent(event=event, data=data, id=str(sent))
                 sent += 1

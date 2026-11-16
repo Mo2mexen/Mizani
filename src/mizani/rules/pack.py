@@ -136,7 +136,18 @@ class Investigation(Rule):
 
 class Plausible(Rule):
     source: Source
-    ranges: dict[str, tuple[float, float]]
+    # The measured vitals of schemas.Vitals: a range for anything else would crash the check
+    ranges: dict[
+        Literal["respiratory_rate", "heart_rate", "systolic_bp", "temperature", "spo2", "glucose"],
+        tuple[float, float],
+    ]
+
+    @model_validator(mode="after")
+    def low_below_high(self) -> "Plausible":
+        for field, (low, high) in self.ranges.items():
+            if not low < high:
+                raise ValueError(f"plausible.ranges.{field}: the low end must be below the high")
+        return self
 
 
 class RulePack(Rule):

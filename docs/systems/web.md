@@ -40,7 +40,7 @@ Accessibility: every input has a visible label (or a hidden one tied to it), eve
 - Used by: triage nurses at the desk, doctors, the hospital's admin; the demo video (recorded before sign-in existed).
 
 ## Safety rules this system enforces
-- The page never decides: colours, target times, the colour list and the queue order come from the API; there is no drag and drop. The colour list is asked again every minute (background polling), so a chart the chief doctor activates reaches every open screen.
+- The page never decides: colours, target times, the colour list and the queue order come from the API; there is no drag and drop. The colour list is asked again every 5 s, like the queue (background polling), so a chart the chief doctor activates reaches every open screen.
 - Nothing is saved without a signed-in nurse: the name on every decision, handover release and called-in record is the account's, and the server checks the role again. A red colour from the complaint alone also needs the nurse's tick before Approve.
 - The page shows each role only its own screens, but the server is what refuses (api.md); a shared tablet signs out after 15 idle minutes, and the API's answers are never cached by the browser.
 - Every number shows its source: each TEWS point, chart sign, flag and target time prints the rule or input field it came from, and each sign from the complaint shows the words behind it.

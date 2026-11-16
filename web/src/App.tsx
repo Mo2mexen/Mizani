@@ -68,18 +68,17 @@ function SignedIn({ account, onSwitchUser, onSignOut }: { account: Account; onSw
   const version = useVersion();
   const isNurse = account.role === "nurse";
 
-  // The colours of the chart in use: asked every 5 s until the API answers (it may still be
-  // starting), then every minute, so a chart the chief doctor activates reaches every screen.
-  const hasColours = colours.length > 0;
+  // The colours of the chart in use, asked every 5 s like the queue (background polling), so a
+  // chart the chief doctor activates reaches every screen at once (and the API may be starting).
   useEffect(() => {
     if (account.role === "admin") return;
     const keepIfSame = (next: Colour[]) =>
       setColours((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
     const load = () => api.colours().then(keepIfSame, () => undefined);
-    if (!hasColours) void load();
-    const id = setInterval(load, hasColours ? 60_000 : 5000);
+    void load();
+    const id = setInterval(load, 5000);
     return () => clearInterval(id);
-  }, [hasColours, account.role]);
+  }, [account.role]);
 
   return (
     <div className="app">
