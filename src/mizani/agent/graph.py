@@ -354,9 +354,14 @@ def build_graph(
             after = _claims(_parsed(given, list))
         except (KeyError, ValueError):
             after = None  # no call, or arguments that are not a list
-        final = before if after is None else after
-        named = {s["id"] for s in final}
-        withdrawn = [s for s in before if s["id"] not in named]
+        if after is None:
+            final, withdrawn = before, []
+        else:
+            # A sign repeated with no quote is taken back: without words it cannot count.
+            quoted = {s["id"] for s in after if s["quote"].strip()}
+            withdrawn = [s for s in before if s["id"] not in quoted]
+            gone = {s["id"] for s in withdrawn}
+            final = [s for s in after if s["id"] not in gone]
         step = _step(
             "model",
             "review",
