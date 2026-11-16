@@ -1,0 +1,29 @@
+# Caddy: HTTPS in front of Mizani's page and API, for tablets and desk PCs on the hospital network.
+# Only the page and the API are behind it; the MCP and FHIR servers stay on the server itself.
+# Settings come from .env through docker-compose.yml (docs/INSTALL.md):
+#   MIZANI_HOSTNAME  the name (or IP address) tablets open, e.g. triage.hospital.local
+#   MIZANI_TLS       "internal" (default): Caddy's own certificate authority signs a certificate,
+#                    which each tablet must trust once; or the hospital's own certificate:
+#                    "/certs/mizani.crt /certs/mizani.key" (files in ./certs)
+{
+	# No remote admin endpoint and no telemetry; the configuration is this file only.
+	admin off
+	# A browser opening an IP address sends no server name; answer with this name's certificate.
+	default_sni {$MIZANI_HOSTNAME:localhost}
+	# The certificate authority's name, as tablets show it when you trust it.
+	pki {
+		ca local {
+			name "Mizani local CA"
+		}
+	}
+}
+
+{$MIZANI_HOSTNAME:localhost} {
+	tls {$MIZANI_TLS:internal}
+	header -Server
+	# No compression: it can hold back the agent's live steps (server-sent events), and the page
+	# is small on a local network.
+	# The app sets the security headers and the cookie's Secure flag (it trusts the
+	# X-Forwarded-Proto header Caddy adds).
+	reverse_proxy app:8090
+}

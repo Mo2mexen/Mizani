@@ -4,7 +4,7 @@ Mizani is a triage co-pilot for a hospital front desk. A nurse enters vitals and
 
 ```
  Browser: nurse · doctor · admin, each signed in ── intake · approval · queue · trace · inbox · users · audit
-        │  HTTP + server-sent events; session cookie, role checked on every request
+        │  HTTPS through Caddy (tablets, desk PCs) + server-sent events; session cookie, role checked on every request
  FastAPI + LangGraph agent  ── pauses at the nurse, resumes after the nurse's approval
    │   accounts and sessions (auth.py, SQLite): scrypt passwords, 15-min idle sign-out
    │   model: any OpenAI-compatible endpoint (default Ollama + Qwen3.5 4B, local)
@@ -59,7 +59,7 @@ Default `qwen3.5:4b-q4_K_M` (fits a 4 GB GPU or a 16 GB Apple Silicon laptop). A
 Synthetic patients only. One local SQLite file holds triages, used tokens, accounts, sessions and the audit log; LangGraph checkpoints and FHIR data stay on the same machine. Nothing is sent to an outside service. `docker compose run --rm backup` copies all of it into a dated folder with a SHA-256 manifest and the audit log's latest hash; a restore checks both first ([systems/backup.md](systems/backup.md)).
 
 ## Running
-`docker compose up` starts the model server (Ollama, pulling the model once and loading it into memory), `mizani-triage`, the API with the agent (`http://127.0.0.1:8090`), wso2's FHIR MCP server and HAPI FHIR; the API waits until HAPI answers, so the first FHIR write after a cold start succeeds. Every long-running service has a Docker health check (our API and MCP server through `/health` addresses that read the database), so `docker compose ps` shows which one is broken. The API also serves the nurse's web page at `http://127.0.0.1:8090` (built from `web/` in the image). `MIZANI_E2E=1 uv run pytest tests/test_stack.py` checks the whole chain from proposal to FHIR record without a model.
+`docker compose up` starts the model server (Ollama, pulling the model once and loading it into memory), `mizani-triage`, the API with the agent (`http://127.0.0.1:8090`), wso2's FHIR MCP server and HAPI FHIR; the API waits until HAPI answers, so the first FHIR write after a cold start succeeds. Every long-running service has a Docker health check (our API and MCP server through `/health` addresses that read the database), so `docker compose ps` shows which one is broken. The API also serves the web page at `http://127.0.0.1:8090` (built from `web/` in the image). Caddy serves the same page over HTTPS (`https://localhost:8443` by default); in a hospital, two lines in `.env` open only that port to the network under the hospital's name, with Caddy's own certificate authority or the hospital's certificate, and nothing else is reachable from another machine ([INSTALL.md](INSTALL.md)). `MIZANI_E2E=1 uv run pytest tests/test_stack.py` checks the whole chain from proposal to FHIR record without a model.
 
 ## Status
 | Part | State |
@@ -75,4 +75,5 @@ Synthetic patients only. One local SQLite file holds triages, used tokens, accou
 | Re-triage watch (timers on the server; the agent's watch raises re-check flags every 30 s; re-triage endpoint re-scores fresh vitals for the nurse to approve) | built, tested, run live |
 | Handover (the model drafts, a nurse releases that exact draft), shadow mode (nurse's own colour, agreement report) | built, tested, run live |
 | Health checks; backup and restore (`docker compose run --rm backup`) | built, tested, run live (a restore onto new, empty volumes included) |
+| HTTPS for tablets (Caddy; its own certificate authority or the hospital's certificate; only HTTPS can be opened to the network) | built, checked live (certificate chain, the network address, the closed ports) |
 | Evaluations: 39 tasks × 5 runs, pass rate, run-to-run variation, latency, tokens, cost, and the failure kept on purpose (a patient's false claim of a sign) ([EVALS.md](EVALS.md)) | run on 13 Nov 2026: Qwen3.5 4B 180/195 runs pass (92%), the same with the second look on; Qwen3 4B Instruct 2507 145/195 (74%) |

@@ -1,10 +1,11 @@
 # Compose (running Mizani with one command)
 
-`docker compose up` starts everything Mizani needs on Windows, Linux or an Apple Silicon Mac, with nothing else installed but Docker: the model server, our MCP server, the API with the agent and the nurse's web page, the borrowed FHIR MCP server and a local FHIR store.
+`docker compose up` starts everything Mizani needs on Windows, Linux or an Apple Silicon Mac, with nothing else installed but Docker: the model server, our MCP server, the API with the agent and the web page, HTTPS in front of the page for tablets, the borrowed FHIR MCP server and a local FHIR store.
 
 ## Where it lives
 - `docker-compose.yml`: the services.
 - `docker/docker-compose.gpu.yml`: optional NVIDIA GPU override.
+- `docker/Caddyfile`: the HTTPS proxy's configuration (service `caddy`).
 - `docker/Dockerfile`: the one image built from this repo, and `docker/Dockerfile.dockerignore`, the list of what is left out of the build. The build context is still the repo root.
 - `.env.example`: settings you can change by copying it to `.env`.
 
@@ -16,8 +17,8 @@
 5. `app` (command `mizani-api`) starts after the model is pulled and `mizani-mcp` and `fhir-mcp` are healthy: the API and the agent at `http://127.0.0.1:8090/api` (api.md; 8090 because 8080 is often taken). It shares the `mizani-data` volume with `mizani-mcp` so it can read the audit log, and keeps agent checkpoints in `/data/checkpoints.db`. It also serves the nurse's web page at `http://127.0.0.1:8090`, built from `web/` in the image's first stage (web.md). Its health check asks `GET /api/health` every 10 s (60 s grace at start).
 6. `hapi-fhir` (HAPI FHIR v8.12.0-2, R4) is the local FHIR store, at `127.0.0.1:18080/fhir` from this machine (18080 because 8080 is often taken). Its H2 database lives in the `hapi-data` volume (mounted at the image user's home, `/home/nonroot`, so the volume gets that user as owner).
 7. `fhir-mcp` (wso2 fhir-mcp-server, built from the pinned 0.10.0 commit) is the borrowed MCP server in front of HAPI, at `http://fhir-mcp:8000/mcp/` and `127.0.0.1:8001`. Auth is off because HAPI is local only. HAPI's image has no shell, so `fhir-mcp` carries the readiness check: it turns healthy once a FHIR search on HAPI answers, which also warms HAPI's database up, so the first patient's FHIR write after a cold start does not time out. Its request timeout is raised from 30 s to 120 s for slow disks.
-
-8. `mizani-mcp`, `app` and `backup` share one image, `mizani:local`, built from `docker/Dockerfile`; `docker compose up --build` rebuilds it for all three. `backup` (profile `tools`) never starts with `docker compose up`. `docker compose run --rm backup` copies both data volumes into `./backups/<UTC time>/`, and `... backup restore <folder>` puts one back with the stack down (backup.md). It runs as root because HAPI's volume belongs to HAPI's user.
+8. `caddy` (image `caddy:2.11.9`) starts once `app` is healthy and serves the page and the API over HTTPS at `https://<MIZANI_HOSTNAME>:<HTTPS_HOST_PORT>` (default `https://localhost:8443`), proxying to `app:8090`. It listens on 127.0.0.1 unless `MIZANI_LISTEN` opens it (`0.0.0.0` for the hospital network). The certificate comes from Caddy's own authority (`MIZANI_TLS=internal`, the default; the authority lives in the `caddy-data` volume, and each device trusts it once) or from the hospital (`./certs` mounted read-only, `MIZANI_TLS=/certs/mizani.crt /certs/mizani.key`). It adds `X-Forwarded-Proto`, which `app` trusts (`FORWARDED_ALLOW_IPS`), so the session cookie is marked Secure. No compression, so the agent's live steps are not held back. Steps for hospital IT: docs/INSTALL.md.
+9. `mizani-mcp`, `app` and `backup` share one image, `mizani:local`, built from `docker/Dockerfile`; `docker compose up --build` rebuilds it for all three. `backup` (profile `tools`) never starts with `docker compose up`. `docker compose run --rm backup` copies both data volumes into `./backups/<UTC time>/`, and `... backup restore <folder>` puts one back with the stack down (backup.md). It runs as root because HAPI's volume belongs to HAPI's user.
 
 The server runs with an 8k context window, flash attention and a q8_0 KV cache, and `OLLAMA_KEEP_ALIVE=-1` keeps the model in memory for as long as the stack runs. Ollama's default unloads a model after 5 idle minutes, and the next patient then waits for it to load again (about two minutes on a laptop with a 4 GB GPU and a hard disk). The context size is set here because the OpenAI-compatible `/v1` API cannot set it per request, and at Ollama's 4k default a prompt with all tool definitions gets cut off without an error.
 
@@ -29,10 +30,15 @@ The server runs with an 8k context window, flash attention and a q8_0 KV cache, 
 | `LLM_API_KEY` | key, empty by default | sent to a model server that checks keys | none |
 | `MIZANI_SECOND_LOOK` | empty by default, `1` to turn on | the agent's second look at its chart signs (agent.md) | one more short model call per patient that has signs |
 | `MIZANI_RULE_PACK` | pack name, default `sats_adult` | the triage chart `mizani-mcp` scores with (rules-engine.md) | an unknown or uncited pack stops `mizani-mcp` at start with the reason in its log, so the page never scores with a broken chart |
-| `MIZANI_ALLOWED_HOSTS` | names, comma-separated; default `127.0.0.1,localhost` | the names the page may be opened with (`app`); `mizani-mcp` has its own fixed list that adds its service name | any other `Host` is refused (DNS-rebinding guard, api.md); a ward server that others open by its address adds it here |
+| `MIZANI_HOSTNAME` | a name or IP address, default `localhost` | the name tablets open over HTTPS (`caddy`'s certificate is for it); it also joins the app's allowed names | none |
+| `MIZANI_LISTEN` | `127.0.0.1` (default) or `0.0.0.0` | where the HTTPS port listens: this machine only, or the network | opening it is the one step that makes Mizani reachable from tablets |
+| `HTTPS_HOST_PORT` | port, default `8443` | the HTTPS port on the host (a hospital server uses 443) | none |
+| `MIZANI_TLS` | `internal` (default) or `/certs/mizani.crt /certs/mizani.key` | Caddy's own certificate authority, or the hospital's certificate in `./certs` | none |
+| `MIZANI_ALLOWED_HOSTS` | names, comma-separated; default `127.0.0.1,localhost` plus `MIZANI_HOSTNAME` | the names the page may be opened with (`app`); `mizani-mcp` has its own fixed list that adds its service name | any other `Host` is refused (DNS-rebinding guard, api.md); set it only to add more names |
 | `ollama-warm` service | none | the model loaded into memory before the first patient | exits when done; skipped when `LLM_BASE_URL` points elsewhere |
 | `ollama` service | HTTP on the compose network | model API at `http://ollama:11434` | stores models in `ollama-models` |
 | `mizani-mcp` service | MCP over streamable HTTP | our tools at `http://mizani-mcp:8000/mcp` (this machine: `127.0.0.1:8000`) | writes the database in `mizani-data` |
+| `caddy` service | HTTPS | the page and the API at `https://<MIZANI_HOSTNAME>:<HTTPS_HOST_PORT>` | keeps its certificate authority in `caddy-data` |
 | `app` service | HTTP | the page and the API at `127.0.0.1:8090` | reads the audit log and keeps checkpoints in `mizani-data` |
 | `hapi-fhir` service | FHIR REST | records at `127.0.0.1:18080/fhir` | stores them in `hapi-data` |
 | `fhir-mcp` service | MCP over streamable HTTP | wso2's tools at `http://fhir-mcp:8000/mcp/` (this machine: `127.0.0.1:8001`) | writes to HAPI |
@@ -43,9 +49,10 @@ The server runs with an 8k context window, flash attention and a q8_0 KV cache, 
 
 ## Safety rules this system enforces
 - Everything runs locally; the model server is not exposed outside the compose network.
+- Only HTTPS can be opened to the network, and only by `MIZANI_LISTEN`; the API's own port, the MCP servers and HAPI stay on 127.0.0.1 whatever `.env` says.
 - `OLLAMA_NO_CLOUD=1` turns off Ollama's cloud models and web search, so no prompt (and no patient text) can leave the machine.
 
-Data survives `docker compose down` and `up`: the waiting room, audit log and checkpoints in `mizani-data`, the FHIR records in `hapi-data`, the model in `ollama-models`. `docker compose down -v` deletes all three. Every published port is bound to 127.0.0.1, and each can be moved with `API_HOST_PORT`, `MCP_HOST_PORT`, `FHIR_MCP_HOST_PORT` or `HAPI_HOST_PORT` in `.env`.
+Data survives `docker compose down` and `up`: the waiting room, accounts, audit log and checkpoints in `mizani-data`, the FHIR records in `hapi-data`, the model in `ollama-models`, the HTTPS certificate authority in `caddy-data`. `docker compose down -v` deletes all four. Every published port is bound to 127.0.0.1 (HTTPS too, until `MIZANI_LISTEN` opens it), and each can be moved with `API_HOST_PORT`, `MCP_HOST_PORT`, `FHIR_MCP_HOST_PORT`, `HAPI_HOST_PORT` or `HTTPS_HOST_PORT` in `.env`.
 
 ## Running and testing it alone
 ```

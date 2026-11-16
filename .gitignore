@@ -27,6 +27,8 @@ build/
 .cache/
 # Backups made with `docker compose run --rm backup` (patient data: never in git)
 backups/
+# The hospital's own HTTPS certificate and key (docs/INSTALL.md): never in git
+certs/
 data/
 *.db
 *.sqlite
