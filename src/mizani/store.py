@@ -21,14 +21,16 @@ def create(
     vitals: Vitals,
     proposal: Proposal,
     retriage_of: str | None = None,
+    chart: str | None = None,
 ) -> None:
-    """A re-triage keeps the patient's original arrival time: the wait doesn't restart."""
+    """A re-triage keeps the patient's original arrival time: the wait doesn't restart. `chart`
+    is the chart that scored it ("sats_adult, built in")."""
     arrived_at = now().isoformat()
     if retriage_of is not None:
         arrived_at = get(con, retriage_of)["arrived_at"]
     con.execute(
         "INSERT INTO triage (id, patient_label, complaint, vitals, proposal, status, arrived_at,"
-        " retriage_of) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
+        " retriage_of, chart) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
         (
             proposal.triage_id,
             patient_label,
@@ -37,6 +39,7 @@ def create(
             proposal.model_dump_json(),
             arrived_at,
             retriage_of,
+            chart,
         ),
     )
 

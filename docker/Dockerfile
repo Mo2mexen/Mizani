@@ -25,6 +25,8 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --locked --no-dev
 COPY --from=web /web/dist ./web/dist
+# The built-in evaluation patients: a chart uploaded without its own is compared on them
+COPY evals/cases ./evals/cases
 
 # Run as an unprivileged user; /data is created here so a new volume inherits its owner.
 RUN useradd --create-home --uid 10001 mizani && mkdir -p /data && chown mizani /data

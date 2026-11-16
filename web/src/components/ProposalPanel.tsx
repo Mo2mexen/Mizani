@@ -209,6 +209,7 @@ function ColourBand({
       <p className="colour-why src">
         <span className="src-tag">rule</span> {proposal.source}
       </p>
+      {proposal.chart && <p className="colour-why src">Chart: {proposal.chart}</p>}
     </div>
   );
 }

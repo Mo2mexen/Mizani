@@ -92,6 +92,8 @@ class Proposal(Sourced):
     tews: Tews
     discriminators: list[Discriminator] = []
     flags: list[Flag] = []
+    # The chart that scored it ("sats_adult, built in", "sats_adult, version 2"); set by the server
+    chart: str | None = None
 
 
 class NurseDecision(Contract):

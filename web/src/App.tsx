@@ -4,6 +4,7 @@ import { AccountMenu } from "./components/AccountMenu";
 import { AdminModel } from "./components/AdminModel";
 import { AdminUsers } from "./components/AdminUsers";
 import { AuditDrawer } from "./components/AuditDrawer";
+import { Charts } from "./components/Charts";
 import { DoctorView } from "./components/DoctorView";
 import { NurseView } from "./components/NurseView";
 import { SignIn } from "./components/SignIn";
@@ -20,7 +21,13 @@ function viewsFor(account: Account): View[] {
       { id: "users", label: "Users" },
       { id: "model", label: "Model" },
     ];
-  if (account.role === "doctor") return [{ id: "waiting", label: "Waiting room" }];
+  if (account.role === "doctor")
+    return account.chief
+      ? [
+          { id: "waiting", label: "Waiting room" },
+          { id: "charts", label: "Charts" },
+        ]
+      : [{ id: "waiting", label: "Waiting room" }];
   return [{ id: "triage", label: "Triage" }];
 }
 
@@ -112,6 +119,7 @@ function SignedIn({ account, onSwitchUser, onSignOut }: { account: Account; onSw
       {view === "waiting" && <DoctorView colours={colours} />}
       {view === "users" && <AdminUsers />}
       {view === "model" && <AdminModel />}
+      {view === "charts" && <Charts />}
       <AuditDrawer isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />
       <footer className="foot">
         Synthetic patients only. Mizani suggests; a signed-in nurse approves every priority. Every number shows the rule

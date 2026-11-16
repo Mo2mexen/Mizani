@@ -109,7 +109,10 @@ def test_an_override_to_a_colour_off_the_chart_is_refused_and_the_run_keeps_wait
         shown = events(api, run, until="proposal")[-1][1]["proposal"]["triage_id"]
         bad = {"action": "override", "colour": "purple", "reason": "x", "triage_id": shown}
         refused = api.post(f"/api/triage/{run}/decision", json=bad)
-        assert refused.status_code == 409 and "not a SATS colour" in refused.json()["detail"]
+        assert (
+            refused.status_code == 409
+            and "not a colour of the chart in use" in refused.json()["detail"]
+        )
 
         good = {**bad, "colour": "red", "reason": "pale"}
         done = api.post(f"/api/triage/{run}/decision", json=good)

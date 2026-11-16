@@ -5,6 +5,11 @@ import type {
   Account,
   AuditRow,
   CalledIn,
+  ChartActivated,
+  ChartDetail,
+  ChartOverview,
+  ChartReport,
+  ChartSummary,
   Colour,
   Committed,
   Decision,
@@ -51,6 +56,30 @@ let people: Account[] = [
   fakeAccount(4, "chief.c", "FAKE Chief C", "doctor", true),
 ];
 let signedIn: Account | null = null;
+let fakeCharts: ChartSummary[] = [
+  {
+    id: 1, pack_id: "fake_chart", version: 1, name: "FAKE chart for the mock", label: "fake_chart, version 1",
+    status: "evaluated", uploaded_by: "FAKE Chief C", uploaded_at: new Date().toISOString(), progress: null,
+    activated_by: null, activated_at: null, previous: null, test_patients: 1, safety_ok: true,
+  },
+];
+const FAKE_REPORT: ChartReport = {
+  chart: "fake_chart, version 1", against: "sats_adult, built in", model: "FAKE model", mode: "pass rate",
+  runs_per_patient: 5, pass_rate: 1, agreement: 0, changes: ["fake-01"],
+  patients: [{ id: "fake-01", runs: 5, passes: 5, colour: "red", in_use_colour: "orange", agree: 0, changes: true, failed_checks: {}, seconds_mean: 12 }],
+  safety: [{ check: "FAKE safety check", ok: true, detail: "FAKE: held" }],
+  safety_ok: true, started: new Date().toISOString(), seconds: 90,
+};
+function chartOverview(): ChartOverview {
+  const on = fakeCharts.find((c) => c.status === "active") ?? null;
+  return {
+    active: { label: on?.label ?? "sats_adult, built in", name: on?.name ?? "FAKE built-in chart", chart: on },
+    previous: on ? "built-in" : null,
+    previous_label: on ? "sats_adult, built in" : null,
+    built_in: "sats_adult, built in",
+    charts: fakeCharts,
+  };
+}
 const FAKE_LOCAL = { base_url: "http://ollama:11434/v1", model: "FAKE qwen3.5:4b-q4_K_M" };
 let modelNow: ModelSetting = {
   location: "this_server",
@@ -158,6 +187,29 @@ export const api = {
     update(id, { chief, chief_by: chief ? whoAmI().full_name : null, chief_at: chief ? now() : null }),
   setActive: async (id: number, active: boolean) => update(id, { active }),
   signOutEverywhere: async () => ({ signed_out: true }),
+  charts: async (): Promise<ChartOverview> => chartOverview(),
+  chart: async (id: number): Promise<ChartDetail> => {
+    const c = fakeCharts.find((x) => x.id === id)!;
+    return { ...c, report: c.safety_ok ? FAKE_REPORT : null };
+  },
+  uploadChart: async (): Promise<ChartDetail> => {
+    const c: ChartSummary = { ...fakeCharts[0], id: fakeCharts.length + 1, version: fakeCharts.length + 1, status: "uploaded", safety_ok: false };
+    c.label = `fake_chart, version ${c.version}`;
+    fakeCharts = [c, ...fakeCharts];
+    return { ...c, report: null };
+  },
+  evaluateChart: async (id: number): Promise<ChartSummary> => {
+    fakeCharts = fakeCharts.map((c) => (c.id === id ? { ...c, status: "evaluated", safety_ok: true, progress: null } : c));
+    return fakeCharts.find((c) => c.id === id)!;
+  },
+  activateChart: async (id: number): Promise<ChartActivated> => {
+    fakeCharts = fakeCharts.map((c) => (c.id === id ? { ...c, status: "active" } : c.status === "active" ? { ...c, status: "retired" } : c));
+    return { in_use: fakeCharts.find((c) => c.id === id)!.label, previous: "built-in", approver: whoAmI().full_name, overview: chartOverview() };
+  },
+  rollbackChart: async (): Promise<ChartActivated> => {
+    fakeCharts = fakeCharts.map((c) => (c.status === "active" ? { ...c, status: "retired" } : c));
+    return { in_use: "sats_adult, built in", previous: "1", approver: whoAmI().full_name, overview: chartOverview() };
+  },
   modelSetting: async (): Promise<ModelSetting> => modelNow,
   testModel: async (choice: ModelChoice): Promise<ModelTest> =>
     choice.location !== "this_server" && !choice.base_url

@@ -16,6 +16,13 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 
 DEFAULT_PACK = "sats_adult"
 PACK_NAME = re.compile(r"[a-z0-9_]{1,64}")  # a file name only: no folders, no "..", no extension
+MAX_UPLOAD = 200_000  # characters; the adult SATS chart is about 11,000
+# The coded vitals and every value the intake can send (schemas.Vitals), each needing points
+CODED = {
+    "avpu": ("alert", "confused", "voice", "pain", "unresponsive"),
+    "mobility": ("walking", "with_help", "stretcher"),
+    "trauma": ("true", "false"),
+}
 
 Source = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
@@ -151,6 +158,43 @@ class RulePack(Rule):
             raise ValueError(f"rules that do not cite one of sources {list(refs)}: {uncited}")
         return self
 
+    @model_validator(mode="after")
+    def the_engine_can_run_it(self) -> "RulePack":
+        """What the engine relies on, checked before a chart scores anyone: unique sign ids,
+        TEWS colours from the highest total down to 0, every plausible value in exactly one band
+        of its row, every coded value scored, and the four investigations the engine raises."""
+        ids = [d.id for d in self.discriminators]
+        if len(ids) != len(set(ids)):
+            raise ValueError(
+                f"chart sign ids repeat: {sorted({i for i in ids if ids.count(i) > 1})}"
+            )
+        mins = [t.min_total for t in self.tews_colour]
+        if not mins or mins != sorted(mins, reverse=True) or mins[-1] != 0:
+            raise ValueError("tews_colour goes from the highest min_total down to 0")
+        for field, row in self.tews.items():
+            if row.values is not None:
+                missing = set(CODED[field]) - set(row.values)
+                if missing:
+                    raise ValueError(f"tews.{field} gives no points for {sorted(missing)}")
+                continue
+            if field not in self.plausible.ranges:
+                raise ValueError(f"plausible.ranges has no range for tews.{field}")
+            low, high = self.plausible.ranges[field]
+            step = 0.1 if field == "temperature" else 1
+            for i in range(int(round((high - low) / step)) + 1):
+                value = round(low + i * step, 1)
+                hits = sum(band.contains(value) for band in row.bands)
+                if hits != 1:
+                    raise ValueError(
+                        f"tews.{field}: the value {value:g} falls in {hits} bands, not exactly one"
+                    )
+        missing = {"check_spo2", "check_glucose", "check_ketones", "ecg"} - set(self.investigations)
+        if missing:
+            raise ValueError(f"investigations missing: {sorted(missing)}")
+        if self.investigations["check_ketones"].glucose_from is None:
+            raise ValueError("investigations.check_ketones needs glucose_from")
+        return self
+
     def rank(self, colour: str) -> int:
         """0 is the most urgent colour."""
         return [c.colour for c in self.colours].index(colour)
@@ -180,4 +224,21 @@ def load_pack(name: str | None = None, folder: Traversable | None = None) -> Rul
     pack = RulePack.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
     if pack.id != name:
         raise ValueError(f"rule pack file {name}.yaml has id {pack.id!r}; they must match")
+    return pack
+
+
+def parse_pack(text: str) -> RulePack:
+    """A chart uploaded by the chief doctor, checked like a built-in one: safe YAML only, every
+    clinical rule citing one of its references, and everything the engine relies on."""
+    if len(text) > MAX_UPLOAD:
+        raise ValueError(f"the chart file is over {MAX_UPLOAD:,} characters")
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"the chart file is not valid YAML: {exc}") from None
+    if not isinstance(data, dict):
+        raise ValueError("the chart file must be a YAML mapping (id, name, sources, colours, ...)")
+    pack = RulePack.model_validate(data)
+    if not PACK_NAME.fullmatch(pack.id):
+        raise ValueError(f"chart id {pack.id!r}: use lower-case letters, digits and _ only")
     return pack
