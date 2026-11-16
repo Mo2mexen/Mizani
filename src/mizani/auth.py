@@ -388,14 +388,13 @@ def _target(con: sqlite3.Connection, account_id: int) -> Account:
     return account
 
 
-def _last_admin(con: sqlite3.Connection, account: Account) -> bool:
-    if account.role != "admin" or not account.active:
-        return False
-    others = con.execute(
-        "SELECT COUNT(*) FROM account WHERE role = 'admin' AND active = 1 AND id != ?",
-        (account.id,),
-    ).fetchone()[0]
-    return others == 0
+# Added to an UPDATE that could take away an admin: it changes nothing when the account is the
+# last active admin. One statement, so two admins acting on each other at once cannot both pass.
+KEEPS_AN_ADMIN = (
+    " AND (role != 'admin' OR active = 0 OR EXISTS (SELECT 1 FROM account AS other"
+    " WHERE other.role = 'admin' AND other.active = 1 AND other.id != account.id))"
+)
+LAST_ADMIN = "This is the last active admin. Make someone else an admin first."
 
 
 def reset_password(con: sqlite3.Connection, actor: str, account_id: int) -> str:
@@ -421,13 +420,13 @@ def set_role(con: sqlite3.Connection, actor: Account, account_id: int, role: str
         return account
     if account.id == actor.id:
         raise AuthError("You cannot change your own role. Ask another admin.", 409)
-    if _last_admin(con, account):
-        raise AuthError("This is the last active admin. Make someone else an admin first.", 409)
-    con.execute(
+    changed = con.execute(
         "UPDATE account SET role = ?, chief_by = CASE WHEN ? = 'doctor' THEN chief_by END,"
-        " chief_at = CASE WHEN ? = 'doctor' THEN chief_at END WHERE id = ?",
+        " chief_at = CASE WHEN ? = 'doctor' THEN chief_at END WHERE id = ?" + KEEPS_AN_ADMIN,
         (role, role, role, account.id),
-    )
+    ).rowcount
+    if not changed:
+        raise AuthError(LAST_ADMIN, 409)
     audit.event(con, "role_changed", actor.full_name,
         {"username": account.username, "from": account.role, "to": role})  # fmt: skip
     return get(con, account.id)
@@ -457,9 +456,12 @@ def set_active(con: sqlite3.Connection, actor: Account, account_id: int, active:
         return account
     if not active and account.id == actor.id:
         raise AuthError("You cannot deactivate your own account.", 409)
-    if not active and _last_admin(con, account):
-        raise AuthError("This is the last active admin. Make someone else an admin first.", 409)
-    con.execute("UPDATE account SET active = ? WHERE id = ?", (int(active), account.id))
+    guard = "" if active else KEEPS_AN_ADMIN
+    changed = con.execute(
+        "UPDATE account SET active = ? WHERE id = ?" + guard, (int(active), account.id)
+    ).rowcount
+    if not changed:
+        raise AuthError(LAST_ADMIN, 409)
     if not active:
         _end_sessions(con, account.id)
     audit.event(con, "account_reactivated" if active else "account_deactivated", actor.full_name,

@@ -11,7 +11,6 @@ records the chart that scored it, and proposals show it.
 import json
 import logging
 import sqlite3
-from datetime import UTC, datetime
 
 import yaml
 from pydantic import ValidationError
@@ -34,7 +33,16 @@ class ChartError(Exception):
 
 
 def now() -> str:
-    return datetime.now(UTC).isoformat()
+    return store.now().isoformat()
+
+
+# What the Charts page lists: everything but the chart file (up to 200,000 characters), and the
+# test patients only for a chart uploaded before their number was stored
+LISTED = (
+    "id, pack_id, version, name, status, uploaded_by, uploaded_at, progress, activated_by,"
+    " activated_at, previous, test_patients, report,"
+    " CASE WHEN test_patients IS NULL THEN cases END AS cases"
+)
 
 
 def built_in() -> RulePack:
@@ -175,11 +183,16 @@ def upload(con: sqlite3.Connection, actor: str, chart_text: str, cases_text: str
     version = con.execute(
         "SELECT COALESCE(MAX(version), 0) + 1 FROM chart WHERE pack_id = ?", (pack.id,)
     ).fetchone()[0]
-    cur = con.execute(
-        "INSERT INTO chart (pack_id, version, name, yaml, cases, test_patients, status,"
-        " uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, 'uploaded', ?, ?)",
-        (pack.id, version, pack.name, chart_text, cases_text, len(cases), actor, now()),
-    )
+    try:
+        cur = con.execute(
+            "INSERT INTO chart (pack_id, version, name, yaml, cases, test_patients, status,"
+            " uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, 'uploaded', ?, ?)",
+            (pack.id, version, pack.name, chart_text, cases_text, len(cases), actor, now()),
+        )
+    except sqlite3.IntegrityError:  # the same chart uploaded twice at the same moment
+        raise ChartError(
+            f"another upload of {pack.id} arrived at the same moment; upload it again"
+        ) from None
     audit.event(
         con,
         "chart_uploaded",
@@ -209,21 +222,21 @@ def _row(row: sqlite3.Row, full: bool = False) -> dict:
 
 
 def get(con: sqlite3.Connection, chart_id: int, full: bool = True) -> dict | None:
-    row = con.execute("SELECT * FROM chart WHERE id = ?", (chart_id,)).fetchone()
+    row = con.execute(f"SELECT {LISTED} FROM chart WHERE id = ?", (chart_id,)).fetchone()
     return _row(row, full) if row else None
 
 
 def overview(con: sqlite3.Connection) -> dict:
     """The Charts page: the chart in use, the one before it, and every upload, newest first."""
     pack, in_use = active(con)
-    row = con.execute("SELECT * FROM chart WHERE status = 'active'").fetchone()
+    row = con.execute(f"SELECT {LISTED} FROM chart WHERE status = 'active'").fetchone()
     previous = row["previous"] if row else None
     return {
         "active": {"label": in_use, "name": pack.name, "chart": _row(row) if row else None},
         "previous": previous,
         "previous_label": _previous_label(con, previous),
         "built_in": label(built_in().id, None),
-        "charts": [_row(r) for r in con.execute("SELECT * FROM chart ORDER BY id DESC")],
+        "charts": [_row(r) for r in con.execute(f"SELECT {LISTED} FROM chart ORDER BY id DESC")],
     }
 
 

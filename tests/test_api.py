@@ -388,6 +388,20 @@ def test_a_recheck_after_the_model_failed_still_says_the_signs_were_not_checked(
     assert "signs_not_checked" in kinds and "retriage" in kinds
 
 
+def test_an_open_stream_sends_nothing_more_once_its_session_has_ended(monkeypatch):
+    real = auth.session_account
+
+    def ended_since_the_stream_opened(con, value, touch=True):
+        return real(con, value, touch) if touch else None  # the stream's own re-check
+
+    with client(reply(ids=["chest_pain"])) as api:
+        run = intake(api)
+        monkeypatch.setattr(auth, "session_account", ended_since_the_stream_opened)
+        assert events(api, run, until="proposal") == []
+        monkeypatch.setattr(auth, "session_account", real)
+        assert events(api, run, until="proposal")[-1][0] == "proposal"
+
+
 def test_a_recheck_on_a_stale_card_of_a_called_in_patient_is_refused_at_once():
     with client(reply(ids=["chest_pain"])) as api:
         triage_id = committed_patient(api, intake(api))

@@ -29,7 +29,7 @@ The server runs with an 8k context window, flash attention and a q8_0 KV cache, 
 | `LLM_BASE_URL` | OpenAI-compatible URL | where the agent sends model calls | when it is not the compose `ollama` service, `ollama-pull` skips the download |
 | `LLM_API_KEY` | key, empty by default | sent to a model server that checks keys | none |
 | `MIZANI_SECOND_LOOK` | empty by default, `1` to turn on | the agent's second look at its chart signs (agent.md) | one more short model call per patient that has signs |
-| `MIZANI_RULE_PACK` | pack name, default `sats_adult` | the triage chart `mizani-mcp` scores with (rules-engine.md) | an unknown or uncited pack stops `mizani-mcp` at start with the reason in its log, so the page never scores with a broken chart |
+| `MIZANI_RULE_PACK` | pack name, default `sats_adult` | the built-in triage chart `mizani-mcp` scores with (rules-engine.md); `app` gets the same value, since it names the chart in use and evaluates uploaded charts against it | an unknown or uncited pack stops `mizani-mcp` at start with the reason in its log, so the page never scores with a broken chart |
 | `MIZANI_HOSTNAME` | a name or IP address, default `localhost` | the name tablets open over HTTPS (`caddy`'s certificate is for it); it also joins the app's allowed names | none |
 | `MIZANI_LISTEN` | `127.0.0.1` (default) or `0.0.0.0` | where the HTTPS port listens: this machine only, or the network | opening it is the one step that makes Mizani reachable from tablets |
 | `HTTPS_HOST_PORT` | port, default `8443` | the HTTPS port on the host (a hospital server uses 443) | none |
