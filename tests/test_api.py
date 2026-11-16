@@ -225,8 +225,8 @@ def test_shadow_mode_records_the_nurses_colour_before_the_decision():
 def test_commit_writes_fhir_when_configured(monkeypatch):
     written = []
 
-    async def fake_write(triage_id, url, server):
-        written.append((triage_id, url))
+    async def fake_write(triage_id, url, server, scale):
+        written.append((triage_id, url, scale))
         return {"Patient": "p1", "Encounter": "e1", "Observation": ["o1"]}
 
     monkeypatch.setenv("MIZANI_FHIR_MCP_URL", "http://fhir-mcp:8000/mcp/")
@@ -235,7 +235,8 @@ def test_commit_writes_fhir_when_configured(monkeypatch):
         run = intake(api)
         triage_id = committed_patient(api, run)
         steps = [d for kind, d, _ in events(api, run, until="committed") if kind == "step"]
-    assert written == [(triage_id, "http://fhir-mcp:8000/mcp/")]
+    pack = load_pack()  # the record names the rule pack that scored it
+    assert written == [(triage_id, "http://fhir-mcp:8000/mcp/", (pack.id, pack.name))]
     assert steps[-1]["name"] == "fhir_create" and steps[-1]["output"]["Encounter"] == "e1"
 
 

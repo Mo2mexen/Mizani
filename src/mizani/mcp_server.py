@@ -246,10 +246,19 @@ def commit_triage(triage_id: str, approval_token: str) -> Committed:
     agent cannot."""
     try:
         approval = verify_approval(approval_token, triage_id)
-        if approval["action"] == "override" and approval["colour"] not in {
-            c.colour for c in PACK.colours
-        }:
+        colours = {c.colour for c in PACK.colours}
+        if approval["action"] == "override" and approval["colour"] not in colours:
             raise ApprovalError(f"override colour '{approval['colour']}' is not a SATS colour")
+        record = store.get(db(), triage_id)
+        if (
+            approval["action"] == "approve"
+            and record
+            and record["proposal"]["colour"] not in colours
+        ):
+            raise ApprovalError(  # proposed under another rule pack, before a restart
+                f"the proposed colour '{record['proposal']['colour']}' is not in the rule pack in "
+                "use: re-measure for a new proposal, or override"
+            )
         return Committed(**store.commit(db(), triage_id, approval))
     except ApprovalError as exc:
         raise ToolError(f"commit refused: {exc}") from None
@@ -408,7 +417,7 @@ async def health(request: Request) -> Response:
     """For Docker's health check: the server answers and the triage database can be read. Plain
     HTTP beside `/mcp`, not an MCP tool, so it is not audited and it calls no rule."""
     try:
-        db().execute("SELECT 1").fetchone()
+        db().execute("SELECT id FROM audit ORDER BY id DESC LIMIT 1").fetchone()  # reads the file
     except Exception as exc:
         return JSONResponse({"status": "error", "database": type(exc).__name__}, status_code=503)
     return JSONResponse({"status": "ok"})
@@ -417,8 +426,21 @@ async def health(request: Request) -> Response:
 DEMO_SECRET = "local-demo-secret-change-me"
 
 
+def pack_fits_the_queue() -> None:
+    """Refuse to start with a rule pack that lacks the colour of a patient still waiting: the
+    queue and the re-check timer could not handle them. (A proposal still pending from the old
+    pack is refused at commit instead; the nurse re-measures or overrides.)"""
+    missing = store.waiting_colours(db()) - {c.colour for c in PACK.colours}
+    if missing:
+        raise SystemExit(
+            f"Rule pack {PACK.id!r} has no colour {sorted(missing)}, which patients in the waiting "
+            "queue have. Call them in under the old pack first, or keep the old pack."
+        )
+
+
 def main() -> None:
     print(f"Rule pack: {PACK.id} ({PACK.name}), {len(PACK.discriminators)} chart signs", flush=True)
+    pack_fits_the_queue()
     if os.environ.get("MIZANI_APPROVAL_SECRET") in (None, "", DEMO_SECRET):
         print(
             "WARNING: MIZANI_APPROVAL_SECRET is unset or the public demo value; anyone who "

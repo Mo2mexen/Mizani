@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from mizani import audit
+from mizani import audit, backup
 from mizani.backup import BackupError, check, create, main, restore
 from mizani.db import close_all, db
 from mizani.schemas import AuditEntry
@@ -127,14 +127,56 @@ def test_nothing_to_back_up_is_an_error_not_an_empty_backup(tmp_path):
 
 def test_the_command_line(stack, monkeypatch, capsys):
     data, hapi, out = stack
+    monkeypatch.setattr(backup, "stack_is_running", lambda: True)
     monkeypatch.setenv("MIZANI_DATA_DIR", str(data))
     monkeypatch.setenv("MIZANI_HAPI_DIR", str(hapi))
     monkeypatch.setenv("MIZANI_BACKUP_DIR", str(out))
     assert main([]) == 0
     printed = capsys.readouterr().out
-    assert "Backup written: backups/" in printed and "Audit head: 3 rows" in printed
+    assert "Backup written: backups/" in printed and "3 audit rows, chain intact" in printed
+    assert "Mizani was running" in printed  # the FHIR copy may not be consistent: it says so
+    manifest = json.loads(next(out.iterdir()).joinpath("manifest.json").read_text("utf-8"))
+    assert manifest["stack_running"] is True
     assert main(["list"]) == 0
     assert capsys.readouterr().out.strip().startswith("20")
     assert main(["restore", "no-such-backup"]) == 1  # a clear error, not a crash
     assert main(["restore", "../../etc"]) == 1  # only a folder inside the backups folder
     assert main(["delete", "x"]) == 2
+
+
+def test_a_restore_that_fails_part_way_leaves_the_live_data_as_it_was(stack, monkeypatch):
+    data, hapi, out = stack
+    folder = create(data, hapi, out, NOW)
+    audit.record(db(), AuditEntry(time=NOW, tool="later", inputs={}, outputs={}, latency_ms=1))
+    close_all()
+    before = (data / "mizani.db").read_bytes(), (hapi / "h2.mv.db").read_bytes()
+
+    def broken_extract(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("tarfile.TarFile.extractall", broken_extract)
+    with pytest.raises(BackupError, match="before changing anything"):
+        restore(folder, data, hapi, is_running=stopped)
+    assert ((data / "mizani.db").read_bytes(), (hapi / "h2.mv.db").read_bytes()) == before
+    assert not (data / ".restoring").exists() and not (hapi / ".restoring").exists()
+
+
+@pytest.mark.parametrize("manifest", ["not json", "{}", '{"files": []}', '{"files": {"x": "y"}}'])
+def test_a_malformed_manifest_is_a_clear_error(stack, tmp_path, manifest):
+    data, hapi, out = stack
+    folder = create(data, hapi, out, NOW)
+    (folder / "manifest.json").write_text(manifest, encoding="utf-8")
+    with pytest.raises(BackupError):
+        check(folder)
+
+
+def test_a_broken_chain_is_reported_as_broken_on_restore(stack, monkeypatch, capsys):
+    data, hapi, out = stack
+    db().execute("UPDATE audit SET body = replace(body, 'tool_1', 'edited') WHERE id = 2")
+    folder = create(data, hapi, out, NOW)
+    for name, value in (("DATA", data), ("HAPI", hapi), ("BACKUP", out)):
+        monkeypatch.setenv(f"MIZANI_{name}_DIR", str(value))
+    monkeypatch.setattr(backup, "stack_is_running", lambda: False)
+    close_all()
+    assert main(["restore", folder.name]) == 0  # the backup matches what was there
+    assert "WARNING: the chain breaks at row 2" in capsys.readouterr().out

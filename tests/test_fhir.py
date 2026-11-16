@@ -97,3 +97,16 @@ async def test_write_triage_creates_patient_then_encounter_then_observations():
 async def test_pending_triages_are_never_written():
     with pytest.raises(ValueError, match="only committed"):
         await write_triage(FakeFhirMcp(), committed(status="pending"))
+
+
+def test_the_record_names_the_rule_pack_that_scored_it():
+    default = encounter(committed(), "Patient/p1")
+    assert default["priority"]["coding"][0]["system"] == "urn:mizani:sats-adult:colour"
+    scale = ("local_variant", "A local variant of the adult chart")
+    e = encounter(committed(), "Patient/p1", scale)
+    assert e["priority"]["coding"][0]["system"] == "urn:mizani:local-variant:colour"
+    assert "A local variant of the adult chart" in e["priority"]["text"]
+    obs = observations(committed(), "Patient/p1", "Encounter/e1", scale)
+    tews = next(o for o in obs if o["code"]["coding"][0]["code"] == "tews")
+    assert tews["code"]["coding"][0]["system"] == "urn:mizani:local-variant"
+    assert "SATS" not in e["priority"]["text"] + tews["code"]["text"]  # no other chart named

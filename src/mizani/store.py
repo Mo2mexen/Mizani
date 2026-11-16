@@ -125,6 +125,16 @@ def _minutes_since(iso: str) -> float:
     return (now() - datetime.fromisoformat(iso)).total_seconds() / 60
 
 
+def waiting_colours(con: sqlite3.Connection) -> set[str]:
+    """Colours of the patients in the waiting queue. A rule pack without one of them could not
+    order, show or re-check those patients."""
+    rows = con.execute(
+        "SELECT DISTINCT colour FROM triage WHERE status = 'committed'"
+        " AND superseded_by IS NULL AND called_in_at IS NULL"
+    )
+    return {row["colour"] for row in rows}
+
+
 def queue(con: sqlite3.Connection, pack: RulePack, triage_id: str | None = None) -> list[dict]:
     """Committed patients still waiting (not yet called in), most urgent colour first, then by
     arrival. Read only: the order comes from the nurses' committed colours, never from the
