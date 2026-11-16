@@ -225,11 +225,14 @@ On Windows PowerShell, set the secret with `$env:MIZANI_APPROVAL_SECRET="dev"` f
 ## Later
 
 - **A ward deployment.** Today one machine runs everything and only that machine can open the page. In a hospital, one server (a PC or small server in the department, with a GPU for a larger model) would run the stack, and nurses would open the page from any browser on the hospital network, at the desk or on a tablet. That needs nurse accounts and a login behind the approval step first, the approval secret set per site, and the server's address added to `MIZANI_ALLOWED_HOSTS`.
-- **More desks and hospitals.** SQLite serves one desk. Several desks or hospitals need a shared database (Postgres) and accounts per facility.
-- **A larger model.** A bigger open-weights model on a GPU server is a configuration change (`LLM_MODEL`, `LLM_BASE_URL`); speed and chart-sign accuracy should improve, and EVALS.md would be re-run for it.
+- **Hospital groups.** One hospital runs Mizani on its own server with SQLite. A group of hospitals would need a shared database (PostgreSQL) with a facility per hospital, and could be offered as a hosted edition.
+- **Reading an existing patient** from the hospital's record system before intake (the borrowed FHIR server already has a search tool), with authentication on that connection.
+- **A larger model.** A bigger open-weights model on a GPU server is a configuration change; speed and chart-sign accuracy should improve, and EVALS.md would be re-run for it. Swahili needs this, plus Swahili tasks in the evaluation.
+- **Reading complaints better over time.** A nurse reports "Mizani misread this" on a card; people review the reports, each real misreading becomes an evaluation task with made-up details, and a fix (a clearer sign definition, a prompt sentence or a bigger model) is kept only if the evaluation improves. Reports are never fed into the prompt.
+- **A clinical pilot** in shadow mode (nurses triage first, Mizani's colour stays hidden, agreement and under-triage are measured) before any supervised use.
 - **More rule packs.** Paediatric SATS, the WHO/ICRC/MSF triage tool and Manchester, each as a YAML file.
 - **Arabic interface.** Complaints can already be typed in Arabic; the page itself is English. Both nurses we interviewed asked for an Arabic screen.
-- **And:** voice input for complaints, WhatsApp check-in before arrival, Bluetooth pulse oximeters, daily counts to DHIS2, a training mode for new nurses built on shadow mode.
+- **And:** voice input for complaints, WhatsApp check-in before arrival, Bluetooth pulse oximeters, daily counts to DHIS2, a training mode for new nurses built on shadow mode, department routing.
 
 ## Third-party components
 
