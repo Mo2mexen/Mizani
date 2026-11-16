@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS account (
     locked_until TEXT,
     created_at TEXT NOT NULL,
     created_by TEXT,
-    last_login_at TEXT
+    last_login_at TEXT,
+    password_by TEXT                  -- who set the current password; NULL: its owner
 );
 CREATE TABLE IF NOT EXISTS session (
     id_hash TEXT PRIMARY KEY,         -- SHA-256 of the cookie's value, never the value itself
@@ -112,6 +113,7 @@ ADDED_COLUMNS = [
     ("triage", "called_in_at"),
     ("triage", "called_in_by"),
     ("triage", "chart"),
+    ("account", "password_by"),
 ]
 
 

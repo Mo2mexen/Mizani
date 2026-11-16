@@ -78,6 +78,7 @@ async def evaluate(chart_id: int, progress=None) -> dict:
     try:
         return await _evaluate(chart_id, main, progress)
     finally:
+        close_all()  # also after an error, so the temporary databases can go
         os.environ["MIZANI_DB"] = str(main)
         charts.override = None
 
@@ -102,9 +103,9 @@ async def _evaluate(chart_id: int, main: Path, progress) -> dict:
     names = {d.id: d.name for d in candidate.discriminators}
     total, done = len(cases) * RUNS + 2, 0
     started = datetime.now(UTC)
-    patients, model_text, emergencies = [], [], []
+    patients, model_text, emergencies, crashes = [], [], [], []
     urgent = candidate.colours[0].colour
-    with tempfile.TemporaryDirectory() as folder:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
         for case in cases:
             entry = {"patient_label": f"Test Patient {case['id']}", "complaint": case["complaint"],
                      "nurse_vitals": case["vitals"]}  # fmt: skip
@@ -126,6 +127,8 @@ async def _evaluate(chart_id: int, main: Path, progress) -> dict:
                 except Exception as exc:  # a crash is a failed run, reported with its reason
                     runs.append({"colour": None, "in_use_colour": None, "pass": False,
                                  "failed": [f"crash: {exc!r}"[:200]], "seconds": 0})  # fmt: skip
+                    crashes.append(f"{case['id']}: {exc!r}"[:200])
+                close_all()  # this run's database is done: keep the open files few
                 done += 1
                 if progress:
                     progress(done, total)
@@ -137,7 +140,10 @@ async def _evaluate(chart_id: int, main: Path, progress) -> dict:
                 "passes": sum(bool(r["pass"]) for r in runs) if own else None,
                 "colour": colours.most_common(1)[0][0],
                 "in_use_colour": in_use_colours.most_common(1)[0][0],
-                "agree": sum(r["colour"] == r["in_use_colour"] for r in runs),
+                # a crashed run (no colour) never counts as agreeing
+                "agree": sum(
+                    r["colour"] is not None and r["colour"] == r["in_use_colour"] for r in runs
+                ),  # fmt: skip
                 "failed_checks": dict(Counter(n for r in runs for n in r["failed"])),
                 "seconds_mean": round(sum(r["seconds"] for r in runs) / RUNS, 1),
             }
@@ -170,6 +176,8 @@ async def _evaluate(chart_id: int, main: Path, progress) -> dict:
     safety = [
         {"check": "Every rule cites one of the chart's references, and the engine can run it",
          "ok": True, "detail": "checked when the chart was uploaded"},
+        {"check": "Every run finished without an error",
+         "ok": not crashes, "detail": "; ".join(crashes[:3]) or "all runs finished"},
         {"check": "Nothing is saved without a nurse's approval token",
          "ok": all(ok for _, ok in gate),
          "detail": "; ".join(f"{n}: {'held' if ok else 'FAILED'}" for n, ok in gate)},

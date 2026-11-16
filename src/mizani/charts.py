@@ -199,6 +199,13 @@ def activate(con: sqlite3.Connection, ref: str, approver: str, waiting: set[str]
     in_use = con.execute("SELECT 1 FROM chart WHERE status = 'active'").fetchone()
     if (chart is not None and chart["status"] == "active") or (chart is None and not in_use):
         raise ChartError(f"{label(pack.id, chart['version'] if chart else None)} is already in use")
+    if chart is not None and chart["status"] not in ("evaluated", "retired"):
+        why = {
+            "uploaded": "it has not been evaluated yet",
+            "evaluating": "its evaluation is still running",
+            "failed": "its evaluation stopped before the end",
+        }[chart["status"]]
+        raise ChartError(f"{chart['label']} cannot be activated: {why}")
     if chart is not None and not chart["safety_ok"]:
         raise ChartError(
             f"{chart['label']} cannot be activated: not every safety check of its evaluation held"
@@ -228,11 +235,24 @@ def activate(con: sqlite3.Connection, ref: str, approver: str, waiting: set[str]
     return {"in_use": in_use, "previous": previous, "approver": approver}
 
 
+def start(con: sqlite3.Connection, chart_id: int) -> bool:
+    """Mark the chart as evaluating, with its old report gone, unless another evaluation runs or
+    the chart was in use. One statement, so two clicks cannot start two."""
+    cur = con.execute(
+        "UPDATE chart SET status = 'evaluating', progress = 'starting', report = NULL"
+        " WHERE id = ? AND status IN ('uploaded', 'evaluated', 'failed')"
+        " AND NOT EXISTS (SELECT 1 FROM chart WHERE status = 'evaluating')",
+        (chart_id,),
+    )
+    return cur.rowcount == 1
+
+
 def set_progress(con: sqlite3.Connection, chart_id: int, status: str, progress: str | None,
                  report: dict | None = None) -> None:  # fmt: skip
     """The evaluation's state: evaluating with progress, then evaluated or failed with a report."""
-    con.execute(
-        "UPDATE chart SET status = ?, progress = ?, report = COALESCE(?, report) WHERE id = ?",
+    con.execute(  # only while it is evaluating: never over a chart that went into use
+        "UPDATE chart SET status = ?, progress = ?, report = COALESCE(?, report)"
+        " WHERE id = ? AND status = 'evaluating'",
         (status, progress, json.dumps(report) if report is not None else None, chart_id),
     )
 

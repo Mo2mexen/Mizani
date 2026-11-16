@@ -325,18 +325,32 @@ def handovers(con: sqlite3.Connection, triage_id: str) -> list[dict]:
 def released_handovers(con: sqlite3.Connection, pack: RulePack) -> list[dict]:
     """The doctors' inbox: the latest handover a nurse released for each patient still waiting,
     newest first, with the patient's place in the queue. A patient called in leaves it."""
-    waiting = {entry["triage_id"]: entry for entry in queue(con, pack)}
+    # A committed re-triage replaces the patient's entry under a new id; a handover released
+    # before it is still this patient's. Map every earlier id of each waiting patient to them.
+    current = {}
+    for entry in queue(con, pack):
+        earlier = entry["triage_id"]
+        while earlier and earlier not in current:
+            current[earlier] = entry
+            row = con.execute("SELECT retriage_of FROM triage WHERE id = ?", (earlier,)).fetchone()
+            earlier = row["retriage_of"] if row else None
+    if not current:
+        return []
+    marks = ", ".join("?" * len(current))  # only the waiting patients' handovers are read
     rows = con.execute(
         "SELECT triage_id, text, released_by, released_at FROM handover"
-        " WHERE released_at IS NOT NULL ORDER BY released_at DESC, id DESC"
+        f" WHERE released_at IS NOT NULL AND triage_id IN ({marks})"
+        " ORDER BY released_at DESC, id DESC",
+        list(current),
     ).fetchall()
-    keep = ("patient_label", "colour", "waited_minutes", "target_minutes", "recheck_due")
+    keep = ("triage_id", "patient_label", "colour", "waited_minutes", "target_minutes",
+            "recheck_due")  # fmt: skip
     inbox, seen = [], set()
     for row in rows:
-        entry = waiting.get(row["triage_id"])
-        if entry is None or row["triage_id"] in seen:
+        entry = current[row["triage_id"]]
+        if entry["triage_id"] in seen:
             continue
-        seen.add(row["triage_id"])
+        seen.add(entry["triage_id"])
         inbox.append({**dict(row), **{k: entry[k] for k in keep}})
     return inbox
 

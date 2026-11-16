@@ -199,6 +199,47 @@ def test_the_first_start_prints_a_new_admin_password_until_one_is_chosen():
     assert "admin" in box and "abcd-efgh-jkmn" in box and box.startswith("+")
 
 
+def test_guessing_the_current_password_on_a_signed_in_tablet_locks_the_account():
+    account, _ = new_account(password="a fine long password")
+    session = auth.open_session(db(), account)
+    for _ in range(auth.MAX_MISSES - 1):
+        with pytest.raises(auth.AuthError, match="current password is not right"):
+            auth.change_password(db(), account, "guess", "a new long password", session)
+    with pytest.raises(auth.AuthError, match="locked for 15 minutes and signed out") as locked:
+        auth.change_password(db(), account, "guess", "a new long password", session)
+    assert locked.value.status == 429 and auth.session_account(db(), session) is None
+    with pytest.raises(auth.AuthError, match="locked"):
+        auth.sign_in(db(), "amina", "a fine long password")
+    assert len(events("password_change_refused")) == auth.MAX_MISSES
+
+
+def test_the_first_start_leaves_alone_what_was_set_up_by_hand(capsys):
+    first = auth.first_start(db())
+    assert admin.main(["reset-password", "admin"]) == 0  # IT gave it a password by hand
+    by_hand = capsys.readouterr().out.split("One-time password: ")[1].split()[0]
+    assert auth.first_start(db()) is None  # a restart keeps it
+    assert auth.sign_in(db(), "admin", by_hand)[1].username == "admin"
+    with pytest.raises(auth.AuthError):
+        auth.sign_in(db(), "admin", first)
+
+
+def test_the_first_start_never_brings_back_a_deactivated_or_bypassed_admin():
+    auth.first_start(db())
+    db().execute("UPDATE account SET active = 0 WHERE username = 'admin'")
+    assert auth.first_start(db()) is None
+    assert auth.find(db(), "admin").active is False
+    db().execute("UPDATE account SET active = 1 WHERE username = 'admin'")
+    assert auth.first_start(db())  # still only its own one-time password: renewed
+    admin.main(["create-admin", "it.lead", "IT Lead"])  # another admin set up by hand
+    assert auth.first_start(db()) is None
+
+
+def test_an_admin_the_old_first_start_made_still_gets_its_password():
+    auth.first_start(db())
+    db().execute("UPDATE account SET password_by = NULL WHERE username = 'admin'")  # before 1.0.0
+    assert auth.first_start(db())
+
+
 def test_mizani_admin_creates_an_admin_and_resets_a_password(capsys):
     assert admin.main(["create-admin", "it.lead", "IT Lead"]) == 0
     otp = capsys.readouterr().out.split("One-time password: ")[1].split()[0]

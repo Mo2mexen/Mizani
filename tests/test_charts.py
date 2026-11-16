@@ -4,6 +4,7 @@ the chart on every proposal and record, and going back."""
 from importlib.resources import files
 
 import pytest
+import yaml
 from langgraph.checkpoint.memory import InMemorySaver
 from mcp.client import Client
 from test_agent_graph import NORMAL, FakeModel, person, reply
@@ -42,6 +43,12 @@ def fresh_db(tmp_path, monkeypatch):
     monkeypatch.setenv("MIZANI_DB", str(tmp_path / "mizani.db"))
     monkeypatch.setenv("MIZANI_APPROVAL_SECRET", "test-secret")
     charts._cache.clear()
+
+
+def evaluated(chart_id: int) -> None:
+    """Mark a chart evaluated with every safety check held, the way its evaluation does."""
+    assert charts.start(db(), chart_id)
+    charts.set_progress(db(), chart_id, "evaluated", None, {"safety_ok": True})
 
 
 def bad(text: str) -> str:
@@ -112,6 +119,68 @@ async def test_the_evaluation_reports_pass_rate_changes_and_safety(monkeypatch):
     assert charts.active(db())[1] == "sats_adult, built in"
 
 
+def edited(change) -> str:
+    """The test chart with one change made to it as data."""
+    data = yaml.safe_load(KENYA)
+    change(data)
+    return yaml.safe_dump(data)
+
+
+def test_the_engine_checks_refuse_what_would_crash_scoring_or_tie_up_the_server():
+    measured = edited(lambda d: d["tews"]["heart_rate"].update(bands=None, values={"80": 0}))
+    assert "give its points as bands" in bad(measured)  # not a KeyError
+    coded = edited(lambda d: d["tews"]["avpu"].update(values=None, bands=[{"lt": 1, "points": 0}]))
+    assert "give its points as values" in bad(coded)
+    assert "must be a range of at most" in bad(
+        KENYA.replace("heart_rate: [20, 250]", "heart_rate: [0, 1000000000]")
+    )
+    gap = KENYA.replace(
+        "{gte: 35, lte: 38.4, points: 0}",
+        "{gte: 35, lte: 37.5, points: 0}\n      - {gte: 37.6, lte: 38.4, points: 0}",
+    )
+    assert "no band takes 37.5 or the values just above it" in bad(gap)
+    overlap = KENYA.replace("{gte: 35, lte: 38.4, points: 0}", "{gte: 35, lte: 38.5, points: 0}")
+    assert "two bands both take" in bad(overlap)
+
+
+def test_activation_waits_for_the_evaluation_and_progress_never_touches_a_chart_in_use():
+    chart = charts.upload(db(), "Dr Chief", KENYA, CASES)
+    assert charts.start(db(), chart["id"]) and not charts.start(db(), chart["id"])  # one at a time
+    with pytest.raises(charts.ChartError, match="its evaluation is still running"):
+        charts.activate(db(), str(chart["id"]), "Dr Chief", set())
+    charts.set_progress(db(), chart["id"], "evaluated", None, {"safety_ok": True})
+    charts.activate(db(), str(chart["id"]), "Dr Chief", set())
+    charts.set_progress(db(), chart["id"], "evaluating", "3 of 12 runs")  # a stray update
+    assert charts.get(db(), chart["id"])["status"] == "active"
+    other = charts.upload(db(), "Dr Chief", KENYA, CASES)
+    evaluated(other["id"])
+    assert charts.start(db(), other["id"])  # a run again forgets the old report at once
+    assert charts.get(db(), other["id"])["report"] is None
+    charts.set_progress(db(), other["id"], "evaluated", None, {"safety_ok": False})
+    with pytest.raises(charts.ChartError, match="not every safety check"):
+        charts.activate(db(), str(other["id"]), "Dr Chief", set())
+
+
+async def test_a_crashed_run_never_counts_as_agreement_and_blocks_activation(monkeypatch):
+    chart = charts.upload(db(), "Dr Chief", KENYA, CASES)
+    replies = iter([*(reply(ids=["chest_pain"]) for _ in range(chart_eval.RUNS)), reply()])
+    monkeypatch.setattr(chart_eval, "chat_model", lambda choice=None: FakeModel(messages=replies))
+    real, calls = chart_eval.colour_under, []
+
+    def crash_twice(*args):
+        calls.append(1)
+        if len(calls) <= 2:
+            raise RuntimeError("a band the engine could not use")
+        return real(*args)
+
+    monkeypatch.setattr(chart_eval, "colour_under", crash_twice)
+    report = await chart_eval.evaluate(chart["id"])
+    (patient,) = report["patients"]
+    assert patient["agree"] == 0 and not report["safety_ok"]
+    finished = next(s for s in report["safety"] if s["check"].startswith("Every run finished"))
+    assert finished["ok"] is False and "a band the engine could not use" in finished["detail"]
+
+
 async def chief_token(ref: str, who="Chief C", role="doctor", chief=True) -> str:
     return approval.issue_approval(f"chart:{ref}", person(who, role, chief), purpose="chart")
 
@@ -125,8 +194,8 @@ async def test_only_the_chief_doctor_activates_a_chart_that_passed_its_evaluatio
             return await client.call_tool("activate_chart", {"chart": ref, "approval_token": token})
 
         not_evaluated = await activate(await chief_token(ref))
-        assert "not every safety check" in not_evaluated.content[0].text
-        charts.set_progress(db(), chart["id"], "evaluated", None, {"safety_ok": True})
+        assert "has not been evaluated yet" in not_evaluated.content[0].text
+        evaluated(chart["id"])
         doctor = await activate(await chief_token(ref, "Doctor D", chief=False))
         assert "only the chief doctor may activate a triage chart" in doctor.content[0].text
         done = await activate(await chief_token(ref))
@@ -148,7 +217,7 @@ async def test_a_chart_without_a_waiting_patients_colour_is_refused():
         "",
     )
     chart = charts.upload(db(), "Dr Chief", no_green, None)
-    charts.set_progress(db(), chart["id"], "evaluated", None, {"safety_ok": True})
+    evaluated(chart["id"])
     async with Client(mcp) as client:
         args = dict(
             patient_label="Test Patient 01", complaint="cough", vitals=NORMAL, discriminators=[]
@@ -167,7 +236,7 @@ async def test_a_chart_without_a_waiting_patients_colour_is_refused():
 
 async def test_the_chief_activates_and_goes_back_through_the_api(monkeypatch):
     chart = charts.upload(db(), "Dr Chief", KENYA, CASES)
-    charts.set_progress(db(), chart["id"], "evaluated", None, {"safety_ok": True})
+    evaluated(chart["id"])
     app = create_app(
         FakeModel(messages=iter([reply(ids=["chest_pain"])] * 2)), mcp, InMemorySaver()
     )
