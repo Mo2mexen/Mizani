@@ -9,6 +9,7 @@ What changed in each version of Mizani. The version is in `pyproject.toml`; the 
 - Charts and Admin › Model use the full width like the other screens; the three model choices sit side by side on a desk.
 - The chart upload boxes keep their background when pointed at or dragged over; the border turns black and runs around the edge.
 - The browser tab reads "Mizani · Triage co-pilot".
+- While the agent works, the steps panel shows the step running now, with a seconds count: the model reading the complaint, then each check, then the colour.
 
 ## 1.0.2 (17 November 2026)
 

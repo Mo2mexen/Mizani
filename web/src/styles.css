@@ -201,6 +201,8 @@ input[type="checkbox"] { width: 1.1rem; height: 1.1rem; margin: 0; accent-color:
 .trace-io dt { color: var(--ink-soft); }
 .trace-io dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .trace-wait { color: var(--ink-soft); animation: pulse 1.4s ease-in-out infinite; }
+.trace-step.is-running .trace-row { cursor: default; }
+.trace-step.is-running .trace-wait { margin: 0.15rem 0 0; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
 /* Proposal */

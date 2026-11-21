@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const OPEN_KEY = "mizani.trace.open"; // the nurse's choice, kept in this browser only
 
@@ -50,6 +50,54 @@ function Step({ step, isMasked }: { step: TraceStep; isMasked: boolean }) {
         <dt>out</dt>
         <dd dir="auto">{isMasked ? MASKED : isOpen ? short(step.output, 4000) : line.output}</dd>
       </dl>
+    </li>
+  );
+}
+
+type Running = { kind: TraceStep["kind"]; name: string; doing: string };
+
+const READING: Running = { kind: "model", name: "extract", doing: "the model is reading the complaint" };
+const REREADING: Running = { kind: "model", name: "extract", doing: "the model is reading again, with the reason" };
+// What runs now, from the step that finished last (the graph's order: agent/graph.py).
+const AFTER: Record<string, Running> = {
+  extract: { kind: "tool_call", name: "validate_vitals", doing: "checking the vitals" },
+  fallback: { kind: "tool_call", name: "validate_vitals", doing: "checking the nurse's vitals" },
+  validate_vitals: { kind: "tool_call", name: "compute_tews", doing: "scoring the vitals (TEWS)" },
+  compute_tews: { kind: "tool_call", name: "match_discriminators", doing: "checking each sign and its quote" },
+  match_discriminators: { kind: "tool_call", name: "propose_priority", doing: "setting the colour" },
+  review: { kind: "tool_call", name: "match_discriminators", doing: "checking the signs again" },
+};
+
+/** The step running now. A refused call, or a model answer without both tool calls, goes back to the model. */
+function runningAfter(last: TraceStep | undefined): Running {
+  if (!last) return READING;
+  const output = last.output as { error?: string; tool_calls?: { name: string }[] } | null;
+  if (last.kind === "tool_call" && output?.error) return REREADING;
+  if (last.name === "extract" && !output?.error) {
+    const called = new Set((output?.tool_calls ?? []).map((c) => c.name));
+    if (!called.has("validate_vitals") || !called.has("match_discriminators")) return REREADING;
+  }
+  return AFTER[last.name] ?? { kind: "tool_call", name: "", doing: "working" };
+}
+
+/** The live row while the agent works: what runs now and for how long. Its key changes with every finished step, so the count restarts. */
+function RunningStep({ last }: { last: TraceStep | undefined }) {
+  const [started] = useState(() => Date.now());
+  const [now, setNow] = useState(started);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const step = runningAfter(last);
+  return (
+    <li className={`trace-step kind-${step.kind} is-running`}>
+      <div className="trace-row">
+        <span className="trace-time">now</span>
+        <span className="trace-kind">{KIND_LABEL[step.kind]}</span>
+        <span className="trace-name">{step.name}</span>
+        <span className="trace-meta">{Math.floor((now - started) / 1000)} s</span>
+      </div>
+      <p className="trace-wait">{step.doing}…</p>
     </li>
   );
 }
@@ -109,7 +157,7 @@ export function TracePanel({ run, isMasked }: Props) {
           {run.steps.map((s, i) => (
             <Step key={`${s.time}-${s.name}-${i}`} step={s} isMasked={isMasked && s.kind !== "waiting_for_nurse"} />
           ))}
-          {isWorking && <li className="trace-wait">the agent is working…</li>}
+          {isWorking && <RunningStep key={run.steps.length} last={run.steps[run.steps.length - 1]} />}
         </ol>
       )}
       </div>
